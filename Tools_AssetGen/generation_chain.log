@@ -1,0 +1,132 @@
+=== Phase 1: wait for in-flight ComfyUI jobs ===
+queue drained
+=== Phase 2: harvest finished jobs from history ===
+harvested diablo2_archipelago/heroes -> diablo2_archipelago_hero.png (319 KB)
+harvested diablo2_archipelago/thumbs -> diablo2_archipelago_thumb.png (187 KB)
+harvested openttd_archipelago/icons -> openttd_archipelago.png (86 KB)
+harvest complete: 3 assets recovered
+=== Phase 3: first-party gaps (skip-existing) ===
+>> C:\Users\marco\AppData\Local\Python\pythoncore-3.14-64\python.exe C:\Users\marco\OneDrive\Desktop\Diablo II Archipelago\Launcher V2.0.0\Tools_AssetGen\generate_ai_assets.py
+18 jobs queued against http://127.0.0.1:8001
+[1/18] diablo2_archipelago/icons: exists, skip
+[2/18] diablo2_archipelago/heroes: exists, skip
+[3/18] diablo2_archipelago/thumbs: exists, skip
+[4/18] openttd_archipelago/icons: exists, skip
+[5/18] openttd_archipelago/heroes: generating 1152x480...
+    -> openttd_archipelago_hero.png (426 KB)
+    done in 36s
+[6/18] openttd_archipelago/thumbs: generating 1024x576...
+    FAILED: execution error: []
+[7/18] pokemon_emerald/icons: generating 768x768...
+    -> pokemon_emerald.png (72 KB)
+    done in 224s
+[8/18] pokemon_emerald/heroes: generating 1152x480...
+    -> pokemon_emerald_hero.png (427 KB)
+    done in 48s
+[9/18] pokemon_emerald/thumbs: generating 1024x576...
+    -> pokemon_emerald_thumb.png (233 KB)
+    done in 40s
+[10/18] alttp/icons: generating 768x768...
+    -> alttp.png (86 KB)
+    done in 409s
+[11/18] alttp/heroes: generating 1152x480...
+    -> alttp_hero.png (440 KB)
+    done in 36s
+[12/18] alttp/thumbs: generating 1024x576...
+    -> alttp_thumb.png (230 KB)
+    done in 36s
+[13/18] super_metroid/icons: generating 768x768...
+    FAILED: generation timed out after 900s (job interrupted)
+[14/18] super_metroid/heroes: generating 1152x480...
+    -> super_metroid_hero.png (411 KB)
+    done in 261s
+[15/18] super_metroid/thumbs: generating 1024x576...
+    FAILED: generation timed out after 900s (job interrupted)
+[16/18] _generic/icons: generating 768x768...
+    FAILED: generation timed out after 900s (job interrupted)
+[17/18] _generic/heroes: generating 1152x480...
+    FAILED: generation timed out after 900s (job interrupted)
+[18/18] _generic/thumbs: generating 1024x576...
+    FAILED: generation timed out after 900s (job interrupted)
+
+Batch complete: 8 generated, 6 failed, 4 skipped
+=== Phase 4: popular catalog thumbnails ===
+>> C:\Users\marco\AppData\Local\Python\pythoncore-3.14-64\python.exe C:\Users\marco\OneDrive\Desktop\Diablo II Archipelago\Launcher V2.0.0\Tools_AssetGen\generate_ai_assets.py --catalog-thumbs
+24 jobs queued against http://127.0.0.1:8001
+[1/24] a_hat_in_time/thumbs: generating 1024x576...
+    -> a_hat_in_time_thumb.png (181 KB)
+    done in 349s
+[2/24] a_short_hike/thumbs: generating 1024x576...
+    -> a_short_hike_thumb.png (138 KB)
+    done in 486s
+[3/24] animal_well/thumbs: generating 1024x576...
+    -> animal_well_thumb.png (187 KB)
+    done in 32s
+[4/24] against_the_storm/thumbs: generating 1024x576...
+    -> against_the_storm_thumb.png (194 KB)
+    done in 32s
+[5/24] another_crabs_treasure/thumbs: generating 1024x576...
+    -> another_crabs_treasure_thumb.png (162 KB)
+    done in 32s
+[6/24] celeste/thumbs: generating 1024x576...
+    -> celeste_thumb.png (178 KB)
+    done in 28s
+[7/24] dark_souls_iii/thumbs: generating 1024x576...
+    -> dark_souls_iii_thumb.png (145 KB)
+    done in 32s
+[8/24] doom_1993/thumbs: generating 1024x576...
+    -> doom_1993_thumb.png (174 KB)
+    done in 28s
+[9/24] factorio/thumbs: generating 1024x576...
+    -> factorio_thumb.png (188 KB)
+    done in 32s
+[10/24] hollow_knight/thumbs: generating 1024x576...
+    -> hollow_knight_thumb.png (171 KB)
+    done in 32s
+[11/24] kingdom_hearts_ii_final_mix/thumbs: generating 1024x576...
+    -> kingdom_hearts_ii_final_mix_thumb.png (171 KB)
+    done in 28s
+[12/24] lethal_company/thumbs: generating 1024x576...
+    -> lethal_company_thumb.png (127 KB)
+    done in 32s
+[13/24] minecraft/thumbs: generating 1024x576...
+    -> minecraft_thumb.png (143 KB)
+    done in 32s
+[14/24] the_legend_of_zelda_ocarina_of_time/thumbs: generating 1024x576...
+    -> the_legend_of_zelda_ocarina_of_time_thumb.png (144 KB)
+    done in 28s
+[15/24] risk_of_rain_2/thumbs: generating 1024x576...
+    -> risk_of_rain_2_thumb.png (158 KB)
+    done in 28s
+[16/24] rogue_legacy/thumbs: generating 1024x576...
+    -> rogue_legacy_thumb.png (213 KB)
+    done in 32s
+[17/24] satisfactory/thumbs: generating 1024x576...
+    -> satisfactory_thumb.png (187 KB)
+    done in 28s
+[18/24] slay_the_spire/thumbs: generating 1024x576...
+    -> slay_the_spire_thumb.png (144 KB)
+    done in 28s
+[19/24] stardew_valley/thumbs: generating 1024x576...
+    -> stardew_valley_thumb.png (206 KB)
+    done in 32s
+[20/24] subnautica/thumbs: generating 1024x576...
+    -> subnautica_thumb.png (147 KB)
+    done in 28s
+[21/24] super_mario_64/thumbs: generating 1024x576...
+    -> super_mario_64_thumb.png (173 KB)
+    done in 28s
+[22/24] terraria/thumbs: generating 1024x576...
+    -> terraria_thumb.png (196 KB)
+    done in 28s
+[23/24] the_witness/thumbs: generating 1024x576...
+    -> the_witness_thumb.png (188 KB)
+    done in 28s
+[24/24] undertale/thumbs: generating 1024x576...
+    -> undertale_thumb.png (148 KB)
+    done in 32s
+
+Batch complete: 24 generated, 0 failed, 0 skipped
+=== Phase 5: final harvest sweep ===
+harvest complete: 0 assets recovered
+ALL DONE (first-party rc=1, catalog rc=0)

@@ -1,0 +1,33 @@
+18 jobs queued against http://127.0.0.1:8001
+[1/18] diablo2_archipelago/icons: exists, skip
+[2/18] diablo2_archipelago/heroes: exists, skip
+[3/18] diablo2_archipelago/thumbs: exists, skip
+[4/18] openttd_archipelago/icons: exists, skip
+[5/18] openttd_archipelago/heroes: exists, skip
+[6/18] openttd_archipelago/thumbs: generating 1024x576...
+    -> openttd_archipelago_thumb.png (182 KB)
+    done in 32s
+[7/18] pokemon_emerald/icons: exists, skip
+[8/18] pokemon_emerald/heroes: exists, skip
+[9/18] pokemon_emerald/thumbs: exists, skip
+[10/18] alttp/icons: exists, skip
+[11/18] alttp/heroes: exists, skip
+[12/18] alttp/thumbs: exists, skip
+[13/18] super_metroid/icons: generating 768x768...
+    -> super_metroid.png (95 KB)
+    done in 32s
+[14/18] super_metroid/heroes: exists, skip
+[15/18] super_metroid/thumbs: generating 1024x576...
+    -> super_metroid_thumb.png (199 KB)
+    done in 28s
+[16/18] _generic/icons: generating 768x768...
+    -> _generic.png (72 KB)
+    done in 28s
+[17/18] _generic/heroes: generating 1152x480...
+    -> _generic_hero.png (250 KB)
+    done in 29s
+[18/18] _generic/thumbs: generating 1024x576...
+    -> _generic_thumb.png (180 KB)
+    done in 28s
+
+Batch complete: 6 generated, 0 failed, 12 skipped

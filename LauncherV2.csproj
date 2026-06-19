@@ -1,0 +1,87 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+
+    <!-- ── Identity / AV metadata ─────────────────────────────────────────── -->
+    <!-- Proper PE metadata reduces AV heuristic score significantly.         -->
+    <!-- Code signing (EV certificate) is the only reliable long-term fix.   -->
+    <AssemblyName>Multiworld Launcher</AssemblyName>
+    <RootNamespace>LauncherV2</RootNamespace>
+    <Version>2.0.0</Version>
+    <FileVersion>2.0.0.0</FileVersion>
+    <AssemblyVersion>2.0.0.0</AssemblyVersion>
+    <Company>Solida Games</Company>
+    <Product>Multiworld Launcher</Product>
+    <Copyright>Copyright © 2026 Solida Games</Copyright>
+    <Description>Multi-game Archipelago randomiser launcher with integrated AP bridge</Description>
+    <NeutralLanguage>en-US</NeutralLanguage>
+
+    <!-- ── Publish: single-file self-contained win-x64 ───────────────────── -->
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+
+    <!-- AV-critical: disabling compression means no encrypted/packed exe    -->
+    <!-- blob that scanners can't inspect. Slightly larger on disk, but       -->
+    <!-- dramatically fewer false-positive flags.                              -->
+    <EnableCompressionInSingleFile>false</EnableCompressionInSingleFile>
+    <PublishTrimmed>false</PublishTrimmed>
+
+    <!-- ReadyToRun = native pre-JIT for faster startup, not packed          -->
+    <PublishReadyToRun>true</PublishReadyToRun>
+  </PropertyGroup>
+
+  <!-- ── NuGet: one managed dependency, the rest BCL ─────────────────────── -->
+  <!-- AP + injection code is all .NET 8 BCL (WebSockets, Text.Json,         -->
+  <!-- P/Invoke). The single exception is MoonSharp (below): a PURE-MANAGED   -->
+  <!-- Lua interpreter — no native/packed blob, so it does not add the kind   -->
+  <!-- of AV-heuristic surface the packed-exe notes above warn about. It runs -->
+  <!-- the SNES AP logic modules (alttp/super_metroid) launcher-side for the  -->
+  <!-- snes9x NWA backend, which has no in-emulator script. One logic source  -->
+  <!-- shared with the BizHawk bridge instead of a duplicated C# port.        -->
+
+  <!-- ── Static assets copied to output directory ─────────────────────── -->
+  <ItemGroup>
+    <!-- Bundled catalog fallback — used when the hosted catalog.json is    -->
+    <!-- unreachable (no internet, GitHub down, catalog repo not yet        -->
+    <!-- created). LoadCatalogAsync falls back to this file automatically.  -->
+    <Content Include="CatalogRepo\catalog.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="CatalogRepo\thumbnails\**\*" CopyToOutputDirectory="PreserveNewest" />
+
+    <!-- AP Discord community games list (401-line games.txt format).       -->
+    <!-- Merged into the catalog at runtime as the "Community" source.      -->
+    <Content Include="CatalogRepo\community_games.txt" CopyToOutputDirectory="PreserveNewest" />
+
+    <!-- Official game list (archipelago.gg's own site list). DEFINES which   -->
+    <!-- catalog entries are flagged "Official" in Browse. Read at runtime by -->
+    <!-- GameCatalog.ApplyOfficialList.                                       -->
+    <Content Include="CatalogRepo\official_games.txt" CopyToOutputDirectory="PreserveNewest" />
+
+    <!-- Game icon PNGs.  Missing icons are handled gracefully (no crash).  -->
+    <!-- Place 256×256 PNGs here: Assets/diablo2_archipelago.png, etc.      -->
+    <Content Include="Assets\**\*" Condition="Exists('Assets')" CopyToOutputDirectory="PreserveNewest" />
+
+    <!-- AP Lua scripts for emulator games (BizHawk bridge scripts).        -->
+    <Content Include="Plugins\Scripts\**\*" Condition="Exists('Plugins\Scripts')" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!-- Warn on Release builds if required asset directories are missing.    -->
+  <Target Name="ValidateAssetDirectories" BeforeTargets="Build" Condition="'$(Configuration)' == 'Release'">
+    <Warning Text="Assets directory is missing — launcher will ship without icons or thumbnails." Condition="!Exists('Assets')" />
+    <Warning Text="Plugins\Scripts directory is missing — emulator Lua scripts will not be included." Condition="!Exists('Plugins\Scripts')" />
+  </Target>
+
+  <ItemGroup>
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="MoonSharp" Version="2.0.0" />
+  </ItemGroup>
+
+</Project>

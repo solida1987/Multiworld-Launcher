@@ -1,0 +1,81 @@
+Adventure
+APQuest
+Aquaria
+Blasphemous
+Bomb Rush Cyberfunk
+Bumper Stickers
+Castlevania - Circle of the Moon
+Castlevania 64
+Celeste (Open World)
+Celeste 64
+ChecksFinder
+Choo-Choo Charles
+Civilization VI
+Dark Souls III
+DLCQuest
+Donkey Kong Country 3
+DOOM 1993
+DOOM II
+EarthBound
+Factorio
+Faxanadu
+Final Fantasy
+Final Fantasy Mystic Quest
+A Hat in Time
+Heretic
+Hollow Knight
+Hylics 2
+Inscryption
+Jak and Daxter: The Precursor Legacy
+Kingdom Hearts
+Kingdom Hearts 2
+Kirby's Dream Land 3
+Landstalker - The Treasures of King Nole
+The Legend of Zelda
+Lingo
+A Link to the Past
+Links Awakening DX
+Lufia II Ancient Cave
+Mario & Luigi Superstar Saga
+Mega Man 2
+Mega Man 3
+MegaMan Battle Network 3
+Meritous
+The Messenger
+Muse Dash
+Noita
+Ocarina of Time
+Old School Runescape
+Overcooked! 2
+Paint
+Pokemon Emerald
+Pokemon Red and Blue
+Raft
+Risk of Rain 2
+Satisfactory
+Saving Princess
+Secret of Evermore
+shapez
+Shivers
+A Short Hike
+SMZ3
+Sonic Adventure 2 Battle
+Starcraft 2
+Stardew Valley
+Subnautica
+Super Mario 64
+Super Mario Land 2
+Super Mario World
+Super Metroid
+Terraria
+Timespinner
+TUNIC
+Undertale
+VVVVVV
+Wargroove
+The Wind Waker
+The Witness
+Yacht Dice
+Yoshi's Island
+Yu-Gi-Oh! 2006
+Zillion

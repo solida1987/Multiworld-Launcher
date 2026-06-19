@@ -1,0 +1,1104 @@
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Net.Http;
+using System.Text;
+using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Media;
+using LauncherV2.Core;
+
+namespace LauncherV2.Plugins.Heretic;
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// HereticPlugin — install / update / launch for "Heretic" — Raven Software's 1994
+// dark-fantasy first-person shooter, played through APDOOM, a fork of Crispy Doom
+// with a BUILT-IN Archipelago client. This is a NATIVE "ConnectsItself"
+// integration (NOT a BizHawk / Lua emulator game): the engine speaks to the AP
+// server itself, exactly like DOOM (1993), Ship of Harkinian and the OpenTTD
+// Archipelago fork. It is intentionally modelled on Plugins/Doom/Doom1993Plugin.cs
+// — its closest sibling, because Heretic AP ships in the SAME APDOOM build.
+//
+// REALITY CHECK (2026-06-14) — facts verified this session against the AP-main
+// source (worlds/heretic/__init__.py + worlds/heretic/docs/setup_en.md, read
+// directly) and doomwiki.org
+// ─────────────────────────────────────────────────────────────────────────────
+// Heretic AP support is part of APDOOM (Daivuk / the ArchipelagoDoom org), the
+// same fork that powers DOOM 1993 and DOOM II. The official Heretic setup guide
+// states verbatim: "Archipelago Crispy DOOM (Same download for DOOM 1993, DOOM II
+// and Heretic)". So this plugin resolves the SAME GitHub builds as the DOOM
+// plugin, using the same primary/fallback strategy:
+//
+//   * PRIMARY: ArchipelagoDoom/APDoom — the active org. Latest release
+//     v2.0.0-beta3 (2026-04-16); changelog explicitly lists "Doom (1993), Doom II,
+//     and Heretic" and notes "The beta APWorlds are treated as separate games."
+//     EVERY release on that repo is a prerelease, so /releases/latest 404s — we
+//     enumerate /releases (newest first) and take the first non-draft entry that
+//     carries a Windows zip. Asset casing varies across releases, so the resolver
+//     matches by PATTERN, not a fixed string.
+//
+//   * FALLBACK: Daivuk/apdoom — the original repo, and the exact link the
+//     official Heretic setup guide points at (.../Daivuk/apdoom/releases). Latest
+//     non-prerelease tag "1.2.0" (2025-03-25), Windows asset "APDOOM-1_2_0-
+//     Win32.zip" (32-bit). Used ONLY when the primary API is unreachable — a
+//     known-good direct URL so install still works offline-of-the-primary.
+//
+// HOW IT CONNECTS (VERIFIED against worlds/heretic/docs/setup_en.md, read this
+// session):
+//   The game is launched with COMMAND-LINE arguments. CRUCIAL DIFFERENCE from the
+//   DOOM plugin: Heretic uses a DEDICATED exe ("crispy-apheretic"), NOT a "-game"
+//   switch. The DOOM engine is "crispy-apdoom -game doom"; the Heretic engine is
+//   simply:
+//       crispy-apheretic -apserver <server:port> -applayer <slot>
+//       [-password <pw>] [-skill <1-5>] [-apdeathlinkoff]
+//   (verified, setup_en.md lines 32-44 — there is NO "-game heretic" argument;
+//   the exe name itself selects Heretic.) Windows builds ALSO ship a GUI front-end
+//   "apdoom-launcher.exe" where the player picks "Heretic" from a dropdown and
+//   fills the same connection fields. AP allows one connection per slot, so — like
+//   DOOM/SoH/OpenTTD — the launcher must NOT hold its own ApClient on the same
+//   slot while the game runs: ConnectsItself = true.
+//
+// GAME DATA — BRING-YOUR-OWN-WAD (§11):
+//   APDOOM ships NO commercial game data. The player supplies their own
+//   HERETIC.WAD (Raven's IWAD). Verified setup (setup_en.md lines 14-16): copy
+//   HERETIC.WAD from the Steam install's /base/ folder into the extracted APDOOM
+//   folder. This plugin lets the user pick their WAD, validates it by CONTENT (the
+//   IWAD magic — first 4 bytes "IWAD" — plus a plausible size), copies it into the
+//   launcher's own ROM library (Games/ROMs/heretic/, original NEVER modified,
+//   §11), and stages a copy named HERETIC.WAD next to the exe so APDOOM finds it.
+//   When launching the CLI exe directly we also pass "-iwad <stagedWad>"
+//   defensively.
+//   Known IWAD sizes (doomwiki.org, verified this session): registered HERETIC.WAD
+//   v1.3 = 14,189,976 B (≈13.5 MB, 2,633 lumps); shareware HERETIC1.WAD v1.2 =
+//   5,120,920 B (≈4.9 MB, episode 1 only). We accept a loose 4–16 MB window so
+//   both the shareware and the registered/Shadow-of-the-Serpent-Riders dumps pass
+//   — APDOOM itself is the authoritative validator at load. We DO reject a PWAD
+//   (mod patch) here, since the base game needs an IWAD.
+//
+// THE AP WORLD:
+//   game string "Heretic" — VERIFIED directly: worlds/heretic/__init__.py defines
+//   `class HereticWorld(World): game = "Heretic"` (and HereticLocation/HereticItem
+//   both set game = "Heretic"). required_client_version = (0,5,0), commented
+//   "1.2.0-prerelease or higher". The org's beta build ships Heretic's apworld as
+//   a SEPARATE beta game ("The beta APWorlds are treated as separate games"); the
+//   stable "Heretic" world also ships with Archipelago itself. This plugin fetches
+//   whichever heretic apworld the resolved release carries, next to the install,
+//   so the user can drop it into Archipelago's custom_worlds — best effort.
+//
+// DEFENSIVE / UNVERIFIED DETAILS (flagged, "verify at build time", DOOM-style):
+//   * EXE NAME inside the zip was not inspected offline. ResolveGameExe() prefers
+//     "crispy-apheretic.exe", then any "*heretic*" engine exe, with the GUI
+//     "apdoom-launcher.exe" / any "*launcher*.exe" as the last resort. The CLI
+//     args are passed when the resolved exe is the CLI engine; if only the GUI
+//     launcher is found we still pass them best-effort (it may ignore them — the
+//     player then uses the GUI dropdown + fields, and the slot save remembers
+//     them).
+//   * APWORLD ASSET NAME on the org release page could not be enumerated offline
+//     (GitHub renders the asset list with JS). PickWindowsAndApworld therefore
+//     matches any "*heretic*.apworld" broadly. The stable world ships with AP
+//     anyway, so this is a convenience download.
+//   * This plugin keeps its two launcher-side settings (WAD path + fullscreen) in
+//     its OWN JSON sidecar (Games/ROMs/heretic/heretic_launcher.json) rather than
+//     in Core/SettingsStore — it is added as a single self-contained file and
+//     deliberately does not modify shared launcher types. Documented here for
+//     honesty (the DOOM plugin does exactly the same).
+// ═══════════════════════════════════════════════════════════════════════════════
+
+public sealed class HereticPlugin : IGamePlugin
+{
+    // ── Constants ────────────────────────────────────────────────────────────
+
+    // PRIMARY upstream — the active org. All releases are prereleases, so we
+    // enumerate /releases (NOT /releases/latest, which 404s for prerelease-only
+    // repos) and take the newest with a Windows zip.
+    private const string GITHUB_OWNER = "ArchipelagoDoom";
+    private const string GITHUB_REPO  = "APDoom";
+    private const string RepoUrl      = $"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}";
+    private const string GH_RELEASES_URL =
+        $"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases";
+
+    // FALLBACK upstream — the original repo (the link the official Heretic setup
+    // guide points at). "1.2.0" is the latest non-prerelease there; asset name and
+    // direct URL verified 2026-06-14.
+    private const string FALLBACK_OWNER   = "Daivuk";
+    private const string FALLBACK_REPO    = "apdoom";
+    private const string FallbackRepoUrl  = $"https://github.com/{FALLBACK_OWNER}/{FALLBACK_REPO}";
+    private const string FallbackVersion  = "1.2.0";
+    private const string FallbackZipName  = "APDOOM-1_2_0-Win32.zip";
+    private static readonly string FallbackZipUrl =
+        $"{FallbackRepoUrl}/releases/download/{FallbackVersion}/{FallbackZipName}";
+
+    private static readonly HttpClient _http = new()
+    {
+        Timeout = TimeSpan.FromMinutes(30),
+        DefaultRequestHeaders = { { "User-Agent", "Archipelago-Launcher/2.0" } }
+    };
+
+    /// Installed-version stamp, written after a successful install.
+    private const string VersionFileName = "apheretic_version.dat";
+
+    /// Canonical filename APDOOM expects for the IWAD next to the exe.
+    private const string StagedWadName = "HERETIC.WAD";
+
+    // ── IGamePlugin — Identity ────────────────────────────────────────────────
+
+    public string GameId      => "heretic";
+    public string DisplayName => "Heretic";
+    public string Subtitle    => "Native PC · built-in Archipelago";
+
+    /// EXACT AP game string — verified against worlds/heretic/__init__.py
+    /// (HereticWorld.game = "Heretic"; HereticLocation/HereticItem.game = "Heretic").
+    public string ApWorldName => "Heretic";
+
+    public string IconPath =>
+        Path.Combine(AppContext.BaseDirectory, "Assets", "heretic.png");
+
+    public string ThemeAccentColor => "#9A7A2A";   // Heretic gold/green
+    public string[] GameBadges     => new[] { "Requires HERETIC.WAD" };
+
+    public string Description =>
+        "Heretic is Raven Software's 1994 dark-fantasy first-person shooter, built " +
+        "on the DOOM engine. This is the APDOOM build — a fork of Crispy Doom with a " +
+        "built-in Archipelago client (the same download that powers DOOM 1993 and " +
+        "DOOM II). Weapons, keys, level access, the Tome of Power, artifacts and more " +
+        "are shuffled into the multiworld, and the engine connects to the Archipelago " +
+        "server itself — no emulator, no Lua bridge. APDOOM ships no game data: you " +
+        "must supply your own HERETIC.WAD (from your Steam, GOG, or original copy of " +
+        "Heretic). The launcher copies your WAD next to the game and connects you on " +
+        "launch.";
+
+    public string? VideoPreviewUrl => null;
+    public string[] ScreenshotUrls => Array.Empty<string>();
+
+    // ── Version state ─────────────────────────────────────────────────────────
+    public string? InstalledVersion { get; private set; }
+    public string? AvailableVersion { get; private set; }
+    public bool    IsInstalled      => ResolveGameExe() != null;
+    public bool    IsRunning        { get; private set; }
+
+    // ── Paths ─────────────────────────────────────────────────────────────────
+
+    /// Root folder where APDOOM is installed for Heretic. Kept SEPARATE from the
+    /// DOOM plugin's install so the two never collide, even though they may share
+    /// the same upstream zip.
+    public string GameDirectory { get; set; }
+        = Path.Combine(AppContext.BaseDirectory, "Games", "Heretic");
+
+    /// Preferred CLI exe (verified name). Resolution falls back to a fuzzy match.
+    private string PreferredExePath => Path.Combine(GameDirectory, "crispy-apheretic.exe");
+
+    /// Where the release's heretic apworld is saved for the user to copy into
+    /// Archipelago's custom_worlds folder.
+    private string ApWorldLocalPath
+    {
+        get
+        {
+            string? name = _apWorldFileName;
+            return Path.Combine(GameDirectory,
+                string.IsNullOrEmpty(name) ? "heretic.apworld" : name);
+        }
+    }
+
+    private string VersionFilePath => Path.Combine(GameDirectory, VersionFileName);
+
+    /// The launcher's own ROM-library copy of the user's HERETIC.WAD (§11).
+    private string RomLibraryDirectory
+        => Path.Combine(AppContext.BaseDirectory, "Games", "ROMs", GameId);
+
+    /// Where the IWAD must live next to the exe for APDOOM to find it.
+    private string StagedWadPath => Path.Combine(GameDirectory, StagedWadName);
+
+    /// This plugin's OWN settings sidecar (see header — kept out of the shared
+    /// SettingsStore so the plugin is one self-contained file).
+    private string SettingsSidecarPath
+        => Path.Combine(RomLibraryDirectory, "heretic_launcher.json");
+
+    // ── Internal state ────────────────────────────────────────────────────────
+
+    private Process? _gameProcess;
+
+    /// Filename of the apworld asset seen on the resolved release (so the saved
+    /// copy keeps the upstream name). null until a release is resolved.
+    private string? _apWorldFileName;
+
+    // ── AP bridge events ──────────────────────────────────────────────────────
+    // APDOOM's native AP client reports checks/items/goal to the AP server
+    // itself — the launcher relays nothing. These exist for interface
+    // compatibility (ConnectsItself = true).
+#pragma warning disable CS0067
+    public event Action<long[]>? LocationsChecked;
+    public event Action?         GoalCompleted;
+#pragma warning restore CS0067
+
+    public event Action<int>? GameExited;
+
+    // ── Lifecycle — CheckForUpdate ────────────────────────────────────────────
+
+    public async Task CheckForUpdateAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            InstalledVersion = File.Exists(VersionFilePath) && IsInstalled
+                ? (await File.ReadAllTextAsync(VersionFilePath, ct)).Trim()
+                : null;
+        }
+        catch
+        {
+            InstalledVersion = null;
+        }
+
+        try
+        {
+            var (version, _, _, _) = await ResolveLatestReleaseAsync(ct);
+            AvailableVersion = version;
+        }
+        catch
+        {
+            AvailableVersion = null; // contract: never throw on network failure
+        }
+    }
+
+    // ── Lifecycle — InstallOrUpdate ───────────────────────────────────────────
+
+    public async Task InstallOrUpdateAsync(
+        IProgress<(int Pct, string Msg)> progress,
+        CancellationToken ct = default)
+    {
+        // 1. Resolve the latest release (pinned fallback when offline).
+        progress.Report((2, "Checking latest APDOOM release..."));
+        var (version, zipUrl, apworldUrl, apworldName) = await ResolveLatestReleaseAsync(ct);
+        AvailableVersion = version;
+        _apWorldFileName = apworldName;
+
+        // 2. Already current? (idempotent fast path)
+        if (IsInstalled
+            && File.Exists(VersionFilePath)
+            && (await File.ReadAllTextAsync(VersionFilePath, ct)).Trim() == version)
+        {
+            InstalledVersion = version;
+            progress.Report((100, $"APDOOM (Heretic) {version} is up to date."));
+            return;
+        }
+
+        if (zipUrl == null)
+            throw new InvalidOperationException(
+                "Could not find a Windows download for APDOOM on the GitHub release " +
+                "page. Check your internet connection, or download the build " +
+                "manually from " + RepoUrl + "/releases.");
+
+        // 3. Download + extract the build.
+        await DownloadAndExtractGameAsync(zipUrl, version, progress, ct);
+
+        // 4. Fetch the apworld next to the install (best effort).
+        if (apworldUrl != null)
+        {
+            try
+            {
+                progress.Report((85, "Downloading the Heretic apworld..."));
+                byte[] apworld = await _http.GetByteArrayAsync(apworldUrl, ct);
+                await File.WriteAllBytesAsync(ApWorldLocalPath, apworld, ct);
+                progress.Report((92, $"{Path.GetFileName(ApWorldLocalPath)} saved — copy it into Archipelago's custom_worlds folder if you generate with it."));
+            }
+            catch (OperationCanceledException) { throw; }
+            catch
+            {
+                progress.Report((92, "Could not download the apworld — get it from the GitHub release page (the stable world also ships with Archipelago)."));
+            }
+        }
+
+        // 5. Stage the user's WAD next to the exe if they already picked one.
+        StageWadForGame();
+
+        // 6. Stamp the installed version.
+        await File.WriteAllTextAsync(VersionFilePath, version, ct);
+        InstalledVersion = version;
+
+        progress.Report((100,
+            $"APDOOM (Heretic) {version} ready. Pick your HERETIC.WAD in Settings if " +
+            "you have not already, then press Play."));
+    }
+
+    // ── Lifecycle — Verify ────────────────────────────────────────────────────
+
+    public async Task<bool> VerifyInstallAsync(CancellationToken ct = default)
+    {
+        await Task.CompletedTask;
+        return IsInstalled;
+    }
+
+    // ── Lifecycle — Launch ────────────────────────────────────────────────────
+
+    public Task LaunchAsync(ApSession session, CancellationToken ct = default)
+    {
+        string exe = ResolveGameExe()
+            ?? throw new FileNotFoundException(
+                "APDOOM is not installed. Click Install Game first.",
+                PreferredExePath);
+
+        // Make sure the IWAD is staged next to the exe (APDOOM needs HERETIC.WAD).
+        StageWadForGame();
+
+        // VERIFIED connection path: pass the documented AP command-line args.
+        // The CLI engine consumes them directly; the GUI launcher may ignore
+        // them (the player then uses its fields). Never blocks the launch.
+        string args = BuildLaunchArguments(session, exe);
+        StartGameProcess(exe, args);
+        return Task.CompletedTask;
+    }
+
+    /// APDOOM is a complete game — plain (non-AP) play is supported.
+    public bool SupportsStandalone => true;
+
+    /// APDOOM's native in-game AP client owns the slot connection (see header).
+    /// The launcher must not connect its own ApClient to the same slot while the
+    /// game runs.
+    public bool ConnectsItself => true;
+
+    public Task LaunchStandaloneAsync(CancellationToken ct = default)
+    {
+        string exe = ResolveGameExe()
+            ?? throw new FileNotFoundException(
+                "APDOOM is not installed. Click Install Game first.",
+                PreferredExePath);
+
+        StageWadForGame();
+
+        // No AP args — plain Heretic. Still pass -iwad when launching the CLI
+        // engine directly so it finds the staged WAD without a chooser.
+        string args = IsCliEngine(exe) && File.Exists(StagedWadPath)
+            ? $"-iwad \"{StagedWadPath}\""
+            : "";
+        StartGameProcess(exe, args);
+        return Task.CompletedTask;
+    }
+
+    public Task StopAsync()
+    {
+        try { _gameProcess?.Kill(entireProcessTree: true); } catch { }
+        IsRunning = false;
+        // AP credentials were passed on the command line (not written to a file),
+        // so there is no plaintext password to scrub from disk — but clear our
+        // cached last-args defensively all the same.
+        _lastLaunchArgs = null;
+        return Task.CompletedTask;
+    }
+
+    // ── AP bridge — inert (see header) ────────────────────────────────────────
+
+    public Task ReceiveItemsAsync(ApNetworkItem[] items, int index, CancellationToken ct = default)
+    {
+        // APDOOM's native client receives items from the AP server directly;
+        // there is nothing to forward.
+        return Task.CompletedTask;
+    }
+
+    public void OnApStateChanged(ApConnectionState state)
+    {
+        // APDOOM renders its own AP status in-game; no launcher HUD channel.
+    }
+
+    // ── Settings UI ───────────────────────────────────────────────────────────
+
+    public UIElement? CreateSettingsPanel()
+    {
+        var muted   = new SolidColorBrush(Color.FromRgb(0x72, 0x7A, 0x99));
+        var fg      = new SolidColorBrush(Color.FromRgb(0xCC, 0xD0, 0xE0));
+        var success = new SolidColorBrush(Color.FromRgb(0x4C, 0xAF, 0x50));
+        var panel   = new StackPanel { Margin = new Thickness(0, 0, 0, 20) };
+
+        // ── Section: Install directory ────────────────────────────────────
+        panel.Children.Add(new TextBlock
+        {
+            Text = "INSTALL DIRECTORY", FontSize = 10, FontWeight = FontWeights.SemiBold,
+            Foreground = muted, Margin = new Thickness(0, 0, 0, 8),
+        });
+
+        var dirRow = new DockPanel { Margin = new Thickness(0, 0, 0, 4) };
+        var dirBox = new TextBox
+        {
+            Text = GameDirectory, IsReadOnly = true, FontSize = 12,
+            Margin = new Thickness(0, 0, 8, 0),
+            Background  = new SolidColorBrush(Color.FromRgb(0x0C, 0x10, 0x20)),
+            Foreground  = fg,
+            BorderBrush = new SolidColorBrush(Color.FromRgb(0x1E, 0x22, 0x33)),
+        };
+        var dirBtn = new Button
+        {
+            Content = "Browse...", Width = 90, Padding = new Thickness(0, 6, 0, 6),
+            Background  = new SolidColorBrush(Color.FromRgb(0x1A, 0x1E, 0x30)),
+            Foreground  = fg,
+            BorderBrush = new SolidColorBrush(Color.FromRgb(0x2A, 0x30, 0x50)),
+        };
+        dirBtn.Click += (_, _) =>
+        {
+            var dlg = new Microsoft.Win32.OpenFolderDialog
+            {
+                Title            = "Select APDOOM install folder",
+                InitialDirectory = Directory.Exists(GameDirectory) ? GameDirectory
+                                   : AppContext.BaseDirectory,
+            };
+            if (dlg.ShowDialog() == true)
+            {
+                GameDirectory = dlg.FolderName;
+                dirBox.Text   = dlg.FolderName;
+            }
+        };
+        DockPanel.SetDock(dirBtn, Dock.Right);
+        dirRow.Children.Add(dirBtn);
+        dirRow.Children.Add(dirBox);
+        panel.Children.Add(dirRow);
+
+        panel.Children.Add(new TextBlock
+        {
+            Text       = IsInstalled ? "✓ APDOOM (Heretic) is installed"
+                                     : "Not installed (click Install in the Play tab)",
+            FontSize   = 11, Foreground = IsInstalled ? success : muted,
+            Margin     = new Thickness(0, 6, 0, 12),
+        });
+
+        // ── Section: HERETIC.WAD ──────────────────────────────────────────
+        panel.Children.Add(new TextBlock
+        {
+            Text = "HERETIC.WAD", FontSize = 10, FontWeight = FontWeights.SemiBold,
+            Foreground = muted, Margin = new Thickness(0, 8, 0, 8),
+        });
+
+        var wadRow = new DockPanel { Margin = new Thickness(0, 0, 0, 4) };
+        var wadBox = new TextBox
+        {
+            Text = LoadWadPath() ?? "", IsReadOnly = true, FontSize = 12,
+            Margin = new Thickness(0, 0, 8, 0),
+            Background  = new SolidColorBrush(Color.FromRgb(0x0C, 0x10, 0x20)),
+            Foreground  = fg,
+            BorderBrush = new SolidColorBrush(Color.FromRgb(0x1E, 0x22, 0x33)),
+        };
+        var wadBtn = new Button
+        {
+            Content = "Select WAD...", Width = 110, Padding = new Thickness(0, 6, 0, 6),
+            Background  = new SolidColorBrush(Color.FromRgb(0x1A, 0x1E, 0x30)),
+            Foreground  = fg,
+            BorderBrush = new SolidColorBrush(Color.FromRgb(0x2A, 0x30, 0x50)),
+        };
+        wadBtn.Click += (_, _) =>
+        {
+            if (PromptForWadFile())
+                wadBox.Text = LoadWadPath() ?? "";
+        };
+        DockPanel.SetDock(wadBtn, Dock.Right);
+        wadRow.Children.Add(wadBtn);
+        wadRow.Children.Add(wadBox);
+        panel.Children.Add(wadRow);
+
+        panel.Children.Add(new TextBlock
+        {
+            Text = "APDOOM needs your own HERETIC.WAD (the IWAD from your Steam, GOG, or " +
+                   "original copy of Heretic). On Steam you can find it in the game's " +
+                   "/base/ folder via Manage → Browse Local Files. The launcher copies it " +
+                   "into its own folder and stages a copy named HERETIC.WAD next to the " +
+                   "game — your original file is never modified. The shareware HERETIC1.WAD " +
+                   "also works for episode 1.",
+            FontSize = 11, Foreground = muted, TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 6, 0, 12),
+        });
+
+        if (IsInstalled && File.Exists(ApWorldLocalPath))
+        {
+            panel.Children.Add(new TextBlock
+            {
+                Text = $"{Path.GetFileName(ApWorldLocalPath)} is saved in the install folder — " +
+                       @"copy it into your Archipelago custom_worlds folder (default: " +
+                       @"C:\ProgramData\Archipelago\custom_worlds) if you generate with this build.",
+                FontSize = 11, Foreground = muted, TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 0, 0, 12),
+            });
+        }
+
+        // ── Launch options ────────────────────────────────────────────────
+        panel.Children.Add(new TextBlock
+        {
+            Text = "LAUNCH OPTIONS", FontSize = 10, FontWeight = FontWeights.SemiBold,
+            Foreground = muted, Margin = new Thickness(0, 8, 0, 8),
+        });
+        var chkFullscreen = new CheckBox
+        {
+            Content    = "Fullscreen",
+            IsChecked  = LoadFullscreen(),
+            Foreground = fg,
+            Margin     = new Thickness(0, 0, 0, 4),
+            ToolTip    = "Start APDOOM fullscreen (passed as -fullscreen when the " +
+                         "command-line engine is launched).",
+        };
+        chkFullscreen.Checked   += (_, _) => SaveFullscreen(true);
+        chkFullscreen.Unchecked += (_, _) => SaveFullscreen(false);
+        panel.Children.Add(chkFullscreen);
+        panel.Children.Add(new TextBlock
+        {
+            Text = "Applied at launch. APDOOM's own video menu and Alt+Enter still work " +
+                   "in-game as usual. (If the Windows build opens its GUI launcher " +
+                   "instead, pick Heretic there and set fullscreen in-game.)",
+            FontSize = 10, Foreground = muted, TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 0, 0, 12),
+        });
+
+        // ── Links ─────────────────────────────────────────────────────────
+        panel.Children.Add(new TextBlock
+        {
+            Text = "LINKS", FontSize = 10, FontWeight = FontWeights.SemiBold,
+            Foreground = muted, Margin = new Thickness(0, 8, 0, 8),
+        });
+        foreach (var (label, url) in new[]
+        {
+            ("APDOOM (GitHub) ↗",          RepoUrl),
+            ("APDOOM legacy (GitHub) ↗",   FallbackRepoUrl),
+            ("Heretic Setup Guide ↗",      "https://archipelago.gg/tutorial/Heretic/setup_en"),
+            ("Archipelago Official ↗",     "https://archipelago.gg"),
+        })
+        {
+            var btn = new Button
+            {
+                Content = label, HorizontalAlignment = HorizontalAlignment.Left,
+                Padding = new Thickness(0, 2, 0, 2), Background = Brushes.Transparent,
+                BorderThickness = new Thickness(0), FontSize = 12, Margin = new Thickness(0, 0, 0, 4),
+                Foreground = new SolidColorBrush(Color.FromRgb(0x60, 0x9A, 0xFF)),
+                Cursor = System.Windows.Input.Cursors.Hand,
+            };
+            string u = url;
+            btn.Click += (_, _) => { try { System.Diagnostics.Process.Start(
+                new System.Diagnostics.ProcessStartInfo(u) { UseShellExecute = true }); } catch { } };
+            panel.Children.Add(btn);
+        }
+        return panel;
+    }
+
+    // ── News feed ─────────────────────────────────────────────────────────────
+
+    public async Task<NewsItem[]> GetNewsAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            string json = await _http.GetStringAsync(GH_RELEASES_URL, ct);
+            using var doc  = JsonDocument.Parse(json);
+            var items = new List<NewsItem>();
+            foreach (var el in doc.RootElement.EnumerateArray())
+            {
+                DateTimeOffset date = DateTimeOffset.MinValue;
+                if (el.TryGetProperty("published_at", out var d) && d.ValueKind == JsonValueKind.String)
+                    DateTimeOffset.TryParse(d.GetString(), out date);
+
+                items.Add(new NewsItem(
+                    Title:   el.TryGetProperty("name",     out var n) ? n.GetString() ?? "" : "",
+                    Body:    el.TryGetProperty("body",     out var b) ? b.GetString() ?? "" : "",
+                    Version: el.TryGetProperty("tag_name", out var t) ? NormalizeTag(t.GetString()) ?? "" : "",
+                    Date:    date,
+                    Url:     el.TryGetProperty("html_url", out var u) ? u.GetString() : null
+                ));
+                if (items.Count >= 10) break;
+            }
+            return items.ToArray();
+        }
+        catch { return Array.Empty<NewsItem>(); }
+    }
+
+    // ── Private helpers — release resolution ──────────────────────────────────
+
+    /// "v2.0.0-beta3" / "1.2.0" → trimmed, leading 'v' stripped only when it
+    /// decorates a digit. Returns null for null/blank tags. APDOOM tags are not
+    /// plain semver (prerelease suffixes), so keep the raw tag otherwise.
+    private static string? NormalizeTag(string? tag)
+    {
+        if (string.IsNullOrWhiteSpace(tag)) return null;
+        tag = tag.Trim();
+        return tag.StartsWith('v') && tag.Length > 1 && char.IsDigit(tag[1])
+            ? tag[1..]
+            : tag;
+    }
+
+    /// Resolve the newest release on the PRIMARY repo (prereleases included —
+    /// every APDOOM release is a prerelease, so /releases/latest 404s). Returns
+    /// version + Windows zip asset URL + apworld asset URL + apworld filename.
+    /// Falls back to the pinned Daivuk 1.2.0 direct URLs when the primary API is
+    /// unreachable.
+    private async Task<(string Version, string? ZipUrl, string? ApWorldUrl, string? ApWorldName)>
+        ResolveLatestReleaseAsync(CancellationToken ct)
+    {
+        try
+        {
+            // Enumerate /releases (GitHub returns newest first) and take the
+            // first entry that is not a draft. Prereleases are accepted.
+            string json = await _http.GetStringAsync(GH_RELEASES_URL, ct);
+            using var doc = JsonDocument.Parse(json);
+
+            if (doc.RootElement.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var rel in doc.RootElement.EnumerateArray())
+                {
+                    if (rel.TryGetProperty("draft", out var dr) &&
+                        dr.ValueKind == JsonValueKind.True)
+                        continue;
+
+                    string? version = rel.TryGetProperty("tag_name", out var t)
+                        ? NormalizeTag(t.GetString())
+                        : null;
+                    if (version == null) continue;
+
+                    if (rel.TryGetProperty("assets", out var assets) &&
+                        assets.ValueKind == JsonValueKind.Array)
+                    {
+                        var (zip, apworld, apworldName) = PickWindowsAndApworld(assets);
+                        // Accept this release once we have a Windows zip; if a
+                        // release somehow lacks one, fall through to the next.
+                        if (zip != null)
+                            return (version, zip, apworld, apworldName);
+                    }
+                }
+            }
+        }
+        catch (OperationCanceledException) { throw; }
+        catch { /* primary API unreachable / rate-limited → pinned fallback */ }
+
+        // Offline-of-primary fallback: Daivuk 1.2.0, known asset URL. No apworld
+        // direct URL is pinned (AP-main ships the stable world anyway).
+        return (FallbackVersion, FallbackZipUrl, null, null);
+    }
+
+    /// From a release's assets array, pick the Windows .zip (by win/win64/x64
+    /// pattern, excluding linux/mac/source) and the heretic apworld. Asset names
+    /// vary in casing across releases, so match broadly.
+    private static (string? Zip, string? ApWorld, string? ApWorldName)
+        PickWindowsAndApworld(JsonElement assets)
+    {
+        string? zip = null, apworld = null, apworldName = null;
+        string? anyZip = null;
+
+        foreach (var a in assets.EnumerateArray())
+        {
+            string? name = a.TryGetProperty("name", out var n) ? n.GetString() : null;
+            string? url  = a.TryGetProperty("browser_download_url", out var u) ? u.GetString() : null;
+            if (name == null || url == null) continue;
+
+            string lower = name.ToLowerInvariant();
+
+            // heretic apworld (ignore doom_1993 / doom_ii worlds in the same zip).
+            if (lower.EndsWith(".apworld") && lower.Contains("heretic"))
+            {
+                apworld     = url;
+                apworldName = name;
+            }
+            else if (lower.EndsWith(".zip") &&
+                     !lower.Contains("source") &&
+                     !lower.Contains("ap_gen") &&   // generator tool, not the game
+                     !lower.Contains("linux") &&
+                     !lower.Contains("ubuntu") &&
+                     !lower.Contains("mac") &&
+                     !lower.Contains("darwin"))
+            {
+                anyZip ??= url;   // remember any plausible game zip
+                if (zip == null &&
+                    (lower.Contains("win") || lower.Contains("x64") || lower.Contains("x86_64")))
+                    zip = url;
+            }
+        }
+
+        // If no asset matched the Windows heuristics but a single non-Linux game
+        // zip exists, use it (defensive).
+        zip ??= anyZip;
+        return (zip, apworld, apworldName);
+    }
+
+    // ── Private helpers — exe resolution ──────────────────────────────────────
+
+    /// Resolve the installed exe: prefer the CLI engine "crispy-apheretic.exe",
+    /// then any "*heretic*" engine exe, with the GUI "apdoom-launcher.exe" /
+    /// "*launcher*.exe" last. Defensive — the exact zip contents were not
+    /// inspected offline.
+    private string? ResolveGameExe()
+    {
+        if (File.Exists(PreferredExePath)) return PreferredExePath;
+        if (!Directory.Exists(GameDirectory)) return null;
+        try
+        {
+            string? launcher = null;
+            string? engine   = null;
+            foreach (string exe in Directory.EnumerateFiles(GameDirectory, "*.exe", SearchOption.AllDirectories))
+            {
+                string name = Path.GetFileNameWithoutExtension(exe).ToLowerInvariant();
+                // Skip helper/uninstaller exes outright.
+                if (name.Contains("unins") || name.Contains("setup")) continue;
+
+                if (name.Contains("crispy") && name.Contains("heretic"))
+                    return exe;                       // best match — the CLI engine
+                if (name.Contains("launch"))
+                    launcher ??= exe;                 // GUI front-end (apdoom-launcher)
+                else if (name.Contains("heretic"))
+                    engine ??= exe;                   // some other heretic-named exe
+            }
+            // Prefer a Heretic engine if present; otherwise fall back to the GUI
+            // launcher (the player picks Heretic from its dropdown).
+            return engine ?? launcher;
+        }
+        catch { /* directory vanished mid-scan */ }
+        return null;
+    }
+
+    /// True when the resolved exe is the command-line engine (crispy-apheretic /
+    /// any heretic-named non-launcher exe), which consumes the AP / -iwad
+    /// arguments. The GUI launcher gets them best-effort.
+    private static bool IsCliEngine(string exePath)
+    {
+        string name = Path.GetFileNameWithoutExtension(exePath).ToLowerInvariant();
+        return name.Contains("crispy") || (name.Contains("heretic") && !name.Contains("launch"));
+    }
+
+    // ── Private helpers — launch ──────────────────────────────────────────────
+
+    private string? _lastLaunchArgs;
+
+    /// Build the verified AP launch command line for Heretic:
+    ///   -apserver <host:port> -applayer <slot> [-password <pw>]
+    ///   [-iwad <stagedWad>] [-skill <n>] [-fullscreen]
+    /// (worlds/heretic/docs/setup_en.md.) NOTE: unlike DOOM there is NO
+    /// "-game heretic" — the crispy-apheretic exe itself selects Heretic.
+    /// Slot/password are quoted to survive spaces.
+    private string BuildLaunchArguments(ApSession session, string exePath)
+    {
+        var (host, port) = ParseServerHostPort(session.ServerUri);
+        var sb = new StringBuilder();
+
+        sb.Append("-apserver ").Append(Quote($"{host}:{port}"));
+        sb.Append(" -applayer ").Append(Quote(session.SlotName));
+        if (!string.IsNullOrEmpty(session.Password))
+            sb.Append(" -password ").Append(Quote(session.Password));
+
+        // Point the CLI engine at the staged IWAD so it never shows a chooser.
+        if (IsCliEngine(exePath) && File.Exists(StagedWadPath))
+            sb.Append(" -iwad ").Append(Quote(StagedWadPath));
+
+        if (IsCliEngine(exePath) && LoadFullscreen())
+            sb.Append(" -fullscreen");
+
+        return sb.ToString();
+    }
+
+    /// Quote an argument for a Windows command line (wrap in double quotes and
+    /// escape embedded quotes). Plain tokens are returned unquoted.
+    private static string Quote(string value)
+    {
+        if (string.IsNullOrEmpty(value)) return "\"\"";
+        bool needs = value.IndexOfAny(new[] { ' ', '\t', '"' }) >= 0;
+        if (!needs) return value;
+        return "\"" + value.Replace("\"", "\\\"") + "\"";
+    }
+
+    /// Accepts "archipelago.gg:38281", "ws://host:port", "wss://host:port", a
+    /// bare hostname, and IPv6 literals (bracketed "[::1]:38281" or bare "::1").
+    /// Default AP port is 38281.
+    private static (string Host, int Port) ParseServerHostPort(string serverUri)
+    {
+        string s = serverUri.Trim();
+        foreach (string prefix in new[] { "wss://", "ws://", "archipelago://" })
+        {
+            if (s.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                s = s[prefix.Length..];
+                break;
+            }
+        }
+
+        int slash = s.IndexOf('/');
+        if (slash >= 0) s = s[..slash];
+
+        string host = s;
+        int    port = 38281;
+
+        int colonCount = 0;
+        foreach (char c in s) if (c == ':') colonCount++;
+
+        if (s.StartsWith('['))
+        {
+            int close = s.IndexOf(']');
+            if (close > 0)
+            {
+                host = s[1..close];
+                string rest = s[(close + 1)..];
+                if (rest.StartsWith(':') &&
+                    int.TryParse(rest[1..], out int p6) && p6 > 0 && p6 <= 65535)
+                    port = p6;
+            }
+        }
+        else if (colonCount > 1)
+        {
+            host = s; // bare IPv6 literal — no port can be carried this way
+        }
+        else
+        {
+            int colon = s.LastIndexOf(':');
+            if (colon > 0 && int.TryParse(s[(colon + 1)..], out int p) && p > 0 && p <= 65535)
+            {
+                host = s[..colon];
+                port = p;
+            }
+        }
+
+        if (host.Length == 0) host = "archipelago.gg";
+        return (host, port);
+    }
+
+    private void StartGameProcess(string exePath, string arguments)
+    {
+        _lastLaunchArgs = arguments;
+
+        var psi = new ProcessStartInfo
+        {
+            FileName         = exePath,
+            WorkingDirectory = GameDirectory,
+            UseShellExecute  = false,
+        };
+        if (!string.IsNullOrEmpty(arguments))
+            psi.Arguments = arguments;
+
+        var proc = Process.Start(psi)
+            ?? throw new InvalidOperationException("Failed to start APDOOM (Heretic).");
+
+        _gameProcess = proc;
+        IsRunning    = true;
+        proc.EnableRaisingEvents = true;
+        proc.Exited += (_, _) =>
+        {
+            IsRunning      = false;
+            _lastLaunchArgs = null;
+            GameExited?.Invoke(proc.ExitCode);
+        };
+    }
+
+    // ── Private helpers — WAD (bring-your-own) ────────────────────────────────
+
+    /// Open the WAD picker, validate by CONTENT (IWAD magic + plausible size),
+    /// copy into the launcher's own ROM library (§11 — original never touched),
+    /// persist the COPY's path, and stage it as HERETIC.WAD next to the exe if the
+    /// game is installed. Returns true when a WAD was imported.
+    private bool PromptForWadFile()
+    {
+        var dlg = new Microsoft.Win32.OpenFileDialog
+        {
+            Title  = "Select your HERETIC.WAD",
+            Filter = "Heretic IWAD (*.wad)|*.wad|All files (*.*)|*.*",
+        };
+        if (dlg.ShowDialog() != true) return false;
+
+        string? bad = ValidateHereticWad(dlg.FileName);
+        if (bad != null)
+        {
+            MessageBox.Show(bad, "Not a valid Heretic IWAD",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+            return false;
+        }
+
+        try
+        {
+            Directory.CreateDirectory(RomLibraryDirectory);
+            string dst = Path.Combine(RomLibraryDirectory, Path.GetFileName(dlg.FileName));
+            File.Copy(dlg.FileName, dst, overwrite: true);
+            SaveWadPath(dst);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                $"Could not copy the WAD into the launcher library:\n{ex.Message}\n\n" +
+                "Nothing was changed — your original file is untouched.",
+                "WAD import failed", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return false;
+        }
+
+        StageWadForGame();
+        return true;
+    }
+
+    /// Content check for a Heretic IWAD: the first 4 bytes must be the ASCII magic
+    /// "IWAD" (a "PWAD" mod patch is rejected — the base game needs an IWAD), and
+    /// the size must be in a loose 4–16 MB window. Known IWADs (doomwiki.org):
+    /// shareware HERETIC1.WAD 5,120,920 B; registered HERETIC.WAD 14,189,976 B.
+    /// APDOOM itself is the authoritative validator at load — we only catch
+    /// obvious mistakes. Returns null when acceptable, else a short human-readable
+    /// reason.
+    private static string? ValidateHereticWad(string path)
+    {
+        try
+        {
+            long len = new FileInfo(path).Length;
+            const long min = 4L  * 1024 * 1024;
+            const long max = 16L * 1024 * 1024;
+            if (len < min)
+                return "That file is too small to be a Heretic IWAD. Pick your " +
+                       "HERETIC.WAD (about 5 MB shareware, or ~14 MB for the full game).";
+            if (len > max)
+                return "That file is too large to be a Heretic IWAD. Pick your " +
+                       "HERETIC.WAD, not a mod megawad.";
+
+            using var fs = File.OpenRead(path);
+            Span<byte> magic = stackalloc byte[4];
+            if (fs.Read(magic) < 4)
+                return "Could not read that file. Pick a different WAD and try again.";
+
+            // "IWAD" = 0x49 0x57 0x41 0x44.
+            bool isIwad = magic[0] == (byte)'I' && magic[1] == (byte)'W' &&
+                          magic[2] == (byte)'A' && magic[3] == (byte)'D';
+            bool isPwad = magic[0] == (byte)'P' && magic[1] == (byte)'W' &&
+                          magic[2] == (byte)'A' && magic[3] == (byte)'D';
+
+            if (isPwad)
+                return "That is a PWAD (a mod/patch WAD). APDOOM needs the base game " +
+                       "HERETIC.WAD, which is an IWAD.";
+            if (!isIwad)
+                return "That file is not a Heretic WAD (its header is not \"IWAD\"). " +
+                       "Pick your HERETIC.WAD.";
+        }
+        catch
+        {
+            return "Could not read that file. Pick a different WAD and try again.";
+        }
+        return null;
+    }
+
+    /// Copy the user's library WAD to HERETIC.WAD next to the exe so APDOOM finds
+    /// it. Best effort — never throws into a launch/install.
+    private void StageWadForGame()
+    {
+        try
+        {
+            string? lib = LoadWadPath();
+            if (string.IsNullOrEmpty(lib) || !File.Exists(lib)) return;
+            if (!Directory.Exists(GameDirectory)) return;
+
+            // Only re-copy when missing or changed (cheap length compare).
+            if (File.Exists(StagedWadPath))
+            {
+                try
+                {
+                    if (new FileInfo(StagedWadPath).Length == new FileInfo(lib).Length)
+                        return;
+                }
+                catch { /* fall through and re-copy */ }
+            }
+            File.Copy(lib, StagedWadPath, overwrite: true);
+        }
+        catch { /* staging is a convenience — APDOOM/GUI can also locate a WAD */ }
+    }
+
+    // ── Private helpers — self-contained settings sidecar ─────────────────────
+    // This plugin keeps its two launcher-side settings (WAD path + fullscreen)
+    // in its OWN JSON file so it stays a single self-contained source file and
+    // does not modify Core/SettingsStore. BOM-less UTF-8, read-modify-write.
+
+    private sealed class HereticSettings
+    {
+        public string? WadPath    { get; set; }
+        public bool    Fullscreen { get; set; }
+    }
+
+    private HereticSettings LoadSettings()
+    {
+        try
+        {
+            if (File.Exists(SettingsSidecarPath))
+            {
+                string txt = File.ReadAllText(SettingsSidecarPath);
+                if (!string.IsNullOrWhiteSpace(txt))
+                    return JsonSerializer.Deserialize<HereticSettings>(txt) ?? new();
+            }
+        }
+        catch { /* corrupt → defaults */ }
+        return new();
+    }
+
+    private void SaveSettings(HereticSettings s)
+    {
+        try
+        {
+            Directory.CreateDirectory(RomLibraryDirectory);
+            File.WriteAllText(SettingsSidecarPath,
+                JsonSerializer.Serialize(s, new JsonSerializerOptions { WriteIndented = true }),
+                new UTF8Encoding(false));
+        }
+        catch { /* non-fatal — settings just won't persist this time */ }
+    }
+
+    private string? LoadWadPath()        => LoadSettings().WadPath;
+    private void    SaveWadPath(string p){ var s = LoadSettings(); s.WadPath = p;    SaveSettings(s); }
+    private bool    LoadFullscreen()     => LoadSettings().Fullscreen;
+    private void    SaveFullscreen(bool v){ var s = LoadSettings(); s.Fullscreen = v; SaveSettings(s); }
+
+    // ── Private helpers — download/extract ────────────────────────────────────
+
+    private async Task DownloadAndExtractGameAsync(
+        string zipUrl,
+        string version,
+        IProgress<(int Pct, string Msg)> progress,
+        CancellationToken ct)
+    {
+        string tempZip = Path.Combine(Path.GetTempPath(),
+            $"apheretic-{version}-{Guid.NewGuid():N}.zip");
+        try
+        {
+            progress.Report((5, $"Downloading APDOOM {version}..."));
+            using var response = await _http.GetAsync(
+                zipUrl, HttpCompletionOption.ResponseHeadersRead, ct);
+            response.EnsureSuccessStatusCode();
+
+            long total      = response.Content.Headers.ContentLength ?? -1;
+            long downloaded = 0;
+
+            await using (var src = await response.Content.ReadAsStreamAsync(ct))
+            await using (var dst = File.Create(tempZip))
+            {
+                var buf = new byte[81920];
+                int bytesRead;
+                while ((bytesRead = await src.ReadAsync(buf, ct)) > 0)
+                {
+                    await dst.WriteAsync(buf.AsMemory(0, bytesRead), ct);
+                    downloaded += bytesRead;
+                    if (total > 0)
+                    {
+                        int pct = (int)(5 + 60 * downloaded / total);
+                        progress.Report((pct, $"Downloading APDOOM... {downloaded / 1_000_000}MB"));
+                    }
+                }
+                await dst.FlushAsync(ct);
+            }
+
+            progress.Report((70, "Extracting..."));
+            Directory.CreateDirectory(GameDirectory);
+            System.IO.Compression.ZipFile.ExtractToDirectory(tempZip, GameDirectory, overwriteFiles: true);
+
+            // Release zips often contain a single top-level sub-folder — flatten
+            // it so the exe lands directly in GameDirectory. (ResolveGameExe
+            // scans subdirectories too, so only flatten when the extract is a
+            // lone wrapper folder with nothing at the root.)
+            if (Directory.GetFiles(GameDirectory).Length == 0)
+            {
+                string[] subdirs = Directory.GetDirectories(GameDirectory);
+                if (subdirs.Length == 1)
+                {
+                    string sub = subdirs[0];
+                    foreach (string fileSrc in Directory.EnumerateFiles(sub, "*", SearchOption.AllDirectories))
+                    {
+                        string rel     = Path.GetRelativePath(sub, fileSrc);
+                        string fileDst = Path.Combine(GameDirectory, rel);
+                        Directory.CreateDirectory(Path.GetDirectoryName(fileDst)!);
+                        File.Move(fileSrc, fileDst, overwrite: true);
+                    }
+                    Directory.Delete(sub, recursive: true);
+                }
+            }
+
+            progress.Report((80, "Game files extracted."));
+        }
+        finally
+        {
+            try { if (File.Exists(tempZip)) File.Delete(tempZip); } catch { }
+        }
+    }
+}
