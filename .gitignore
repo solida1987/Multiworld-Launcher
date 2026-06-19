@@ -1,0 +1,27 @@
+# Build output
+bin/
+obj/
+publish_out/
+
+# IDE
+.vs/
+*.user
+*.suo
+
+# Runtime-generated (created next to the exe, never in source)
+launcher_settings.json
+Data/
+crash.log
+
+# Distributable package — goes to GitHub Releases, not the repo
+launcher_package.zip
+
+# Self-test output (generated next to exe at runtime)
+self_test.log
+
+# AI-generation scripts (not for public repo)
+Tools_AssetGen/
+mk64src/
+
+# Python cache
+__pycache__/
