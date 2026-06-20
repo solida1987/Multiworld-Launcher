@@ -97,8 +97,7 @@ public sealed class PanelDePonPlugin : IGamePlugin
     public string? InstalledVersion { get; private set; }
     public string? AvailableVersion { get; private set; }
 
-    // ROM availability is the user's responsibility — always report installed.
-    public bool IsInstalled => true;
+    public bool IsInstalled => InstalledVersion != null;
     public bool IsRunning   { get; private set; }
 
     public bool ConnectsItself     => false;
