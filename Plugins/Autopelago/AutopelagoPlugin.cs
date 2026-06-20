@@ -171,6 +171,7 @@ public sealed class AutopelagoPlugin : IGamePlugin
 
     /// Always true — the web app at autopelago.app requires no local install.
     public bool IsInstalled => true;
+    public bool IsWebBased => true;
 
     /// Always false — no process to track (the game runs in the browser).
     public bool IsRunning => false;

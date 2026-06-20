@@ -91,6 +91,7 @@ public sealed class MetroCUBEvaniaPlugin : IGamePlugin
     // Permissive — PICO-8 game; hard to detect without a specific installer.
     // If the user has set a directory, we consider it "installed".
     public bool IsInstalled => true;
+    public bool IsWebBased => true;
 
     public bool IsRunning { get; private set; }
 

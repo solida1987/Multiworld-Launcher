@@ -83,6 +83,7 @@ public sealed class StickRangerPlugin : IGamePlugin
 
     // Always "installed" — it is a browser game, nothing to install locally.
     public bool IsInstalled  => true;
+    public bool IsWebBased => true;
     public bool IsRunning    { get; private set; }
 
     public bool ConnectsItself     => true;

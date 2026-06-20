@@ -89,6 +89,7 @@ public sealed class YachtDicePlugin : IGamePlugin
 
     /// Always true — no local installation is needed for a web-based game.
     public bool IsInstalled => true;
+    public bool IsWebBased => true;
 
     /// Never running as a launcher-tracked local process.
     public bool IsRunning => false;

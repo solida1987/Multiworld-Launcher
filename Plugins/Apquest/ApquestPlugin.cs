@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Diagnostics;
 using System.IO;
 using System.Threading;
@@ -89,6 +89,7 @@ public sealed class ApquestPlugin : IGamePlugin
 
     /// Always true -- no local installation is needed for a web-based game.
     public bool IsInstalled => true;
+    public bool IsWebBased => true;
 
     /// Never running as a launcher-tracked local process.
     public bool IsRunning => false;
@@ -218,8 +219,8 @@ public sealed class ApquestPlugin : IGamePlugin
 
         foreach (var (label, url) in new[]
         {
-            ("APQuest on archipelago.gg ↗", AP_GAME_PAGE),
-            ("Archipelago Official ↗",      AP_SITE),
+            ("APQuest on archipelago.gg ?", AP_GAME_PAGE),
+            ("Archipelago Official ?",      AP_SITE),
         })
         {
             var btn = new System.Windows.Controls.Button

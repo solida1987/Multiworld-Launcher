@@ -79,6 +79,7 @@ public sealed class CandyBox2Plugin : IGamePlugin
     // Web game — "installed" means the user has acknowledged setup; always true
     // here since there is no local directory to verify.
     public bool IsInstalled => true;
+    public bool IsWebBased => true;
     public bool IsRunning   { get; private set; }
 
     public bool ConnectsItself     => true;

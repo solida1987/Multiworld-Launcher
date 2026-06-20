@@ -84,6 +84,7 @@ public sealed class ArchipeladokuPlugin : IGamePlugin
 
     // Always "installed" — it is a web game with no local files.
     public bool IsInstalled => true;
+    public bool IsWebBased => true;
     public bool IsRunning { get; private set; }
 
     public bool ConnectsItself     => true;

@@ -83,6 +83,7 @@ public sealed class WateryWordsPlugin : IGamePlugin
 
     /// Always true — the game is a web page, so no install step is needed.
     public bool IsInstalled => true;
+    public bool IsWebBased => true;
 
     /// Never running as a local process — the browser tab is untracked.
     public bool IsRunning => false;

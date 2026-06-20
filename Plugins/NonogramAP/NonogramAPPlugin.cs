@@ -89,6 +89,7 @@ public sealed class NonogramAPPlugin : IGamePlugin
 
     /// Always ready — the web version needs no installation.
     public bool IsInstalled => true;
+    public bool IsWebBased => true;
 
     public bool IsRunning { get; private set; }
 

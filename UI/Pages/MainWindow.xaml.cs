@@ -268,10 +268,10 @@ public partial class MainWindow : Window
 
         SetStatus("Checking for updates...");
 
-        // On first run, only auto-add games that are already installed on this machine.
-        // This keeps the library empty for fresh standalone installs, while games that
-        // are present (e.g. D2 LoD in the D2 repo) appear automatically.
-        foreach (var p in GameRegistry.All.Where(p => p.IsInstalled))
+        // On first run, auto-add only games that are locally installed and not web-based.
+        // Web/browser games (IsWebBased=true) must be added manually via Browse so a
+        // fresh install does not start with a cluttered library.
+        foreach (var p in GameRegistry.All.Where(p => p.IsInstalled && !p.IsWebBased))
             LibraryStore.Add(p.GameId);
 
         // Build sidebar respecting library order (favorites first)

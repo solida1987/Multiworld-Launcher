@@ -72,6 +72,7 @@ public sealed class SimonTathamPuzzlesPlugin : IGamePlugin
 
     // Web game — always considered installed (no local directory).
     public bool IsInstalled => true;
+    public bool IsWebBased => true;
     public bool IsRunning   { get; private set; }
 
     public bool ConnectsItself     => true;

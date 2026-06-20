@@ -88,6 +88,7 @@ public sealed class BKPicrossPlugin : IGamePlugin
 
     /// Always treated as installed (no auto-install; user manages the download).
     public bool IsInstalled => true;
+    public bool IsWebBased => true;
 
     public bool IsRunning { get; private set; }
 
