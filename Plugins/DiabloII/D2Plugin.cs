@@ -134,9 +134,19 @@ public sealed class D2Plugin : IGamePlugin
 
     private static readonly HttpClient _http = new()
     {
-        DefaultRequestHeaders = { },
         Timeout = TimeSpan.FromMinutes(30),
     };
+
+    // Cached latest-release JSON — reused across CheckForUpdate / Install / Verify
+    // so one session never fires the GitHub API more than once per plugin lifecycle.
+    private string? _cachedReleaseJson;
+
+    static D2Plugin()
+    {
+        // GitHub API requires a User-Agent header; requests without one are rejected
+        // or aggressively rate-limited (HTTP 429).
+        _http.DefaultRequestHeaders.UserAgent.TryParseAdd("Archipelago-Launcher/2.0");
+    }
 
     private const string GITHUB_OWNER    = "solida1987";
     private const string GITHUB_REPO     = "Diablo-II-Archipelago";
@@ -189,25 +199,37 @@ public sealed class D2Plugin : IGamePlugin
 
     // ── Version check ─────────────────────────────────────────────────────────
 
+    /// Fetch latest-release JSON, caching it for the session to avoid repeated
+    /// GitHub API calls (rate limit: 60 unauthenticated requests/hour).
+    private async Task<string?> FetchReleaseJsonAsync(CancellationToken ct)
+    {
+        if (_cachedReleaseJson != null) return _cachedReleaseJson;
+        try
+        {
+            _cachedReleaseJson = await _http.GetStringAsync(GH_RELEASES_URL, ct);
+            return _cachedReleaseJson;
+        }
+        catch { return null; }
+    }
+
     public async Task CheckForUpdateAsync(CancellationToken ct = default)
     {
         try
         {
-            // Installed version from version.dat
             string versionDat = Path.Combine(GameDirectory, "Archipelago", "version.dat");
             InstalledVersion = File.Exists(versionDat)
                 ? File.ReadAllText(versionDat).Trim()
                 : null;
 
-            // Latest version from GitHub releases API
-            string json = await _http.GetStringAsync(GH_RELEASES_URL, ct);
+            string? json = await FetchReleaseJsonAsync(ct);
+            if (json == null) { AvailableVersion = null; return; }
             using var doc = JsonDocument.Parse(json);
             if (doc.RootElement.TryGetProperty("tag_name", out var tag))
                 AvailableVersion = tag.GetString();
         }
         catch
         {
-            AvailableVersion = null; // network failure — non-fatal
+            AvailableVersion = null;
         }
     }
 
@@ -222,15 +244,9 @@ public sealed class D2Plugin : IGamePlugin
     {
         progress.Report((0, "Fetching release info..."));
 
-        string json;
-        try
-        {
-            json = await _http.GetStringAsync(GH_RELEASES_URL, ct);
-        }
-        catch (Exception ex)
-        {
-            throw new InvalidOperationException("Could not reach GitHub: " + ex.Message, ex);
-        }
+        string json = await FetchReleaseJsonAsync(ct)
+            ?? throw new InvalidOperationException(
+                "Could not reach GitHub: check your internet connection and try again.");
 
         using var releaseDoc = JsonDocument.Parse(json);
         var root = releaseDoc.RootElement;
@@ -515,7 +531,7 @@ public sealed class D2Plugin : IGamePlugin
             // Fetch from GitHub if no local copy
             try
             {
-                string rel = await _http.GetStringAsync(GH_RELEASES_URL, ct);
+                string rel = await FetchReleaseJsonAsync(ct) ?? "";
                 using var doc = JsonDocument.Parse(rel);
                 string? mUrl = null;
                 if (doc.RootElement.TryGetProperty("assets", out var assets))

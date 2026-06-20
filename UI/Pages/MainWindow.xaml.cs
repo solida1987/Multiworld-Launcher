@@ -293,11 +293,14 @@ public partial class MainWindow : Window
                 SelectGame(firstPlugin);
         }
 
-        // Background: check for updates on all plugins — in PARALLEL with a
-        // 15 s per-check bound (P3-23). The old sequential loop ran on the D2
-        // client's 30-MINUTE HttpClient timeout, so one slow GitHub response
-        // stalled the whole startup sequence (and "Ready.") behind it.
-        var updateChecks = GameRegistry.All.Select(async plugin =>
+        // Background: check for updates only on library plugins — not all 382.
+        // Running all plugins in parallel would fire hundreds of GitHub API calls
+        // at once and immediately exhaust the unauthenticated rate limit (60/hour).
+        // Library plugins are the only ones the user cares about right now.
+        var libraryIds  = new HashSet<string>(LibraryStore.GetSortedGameIds(), StringComparer.OrdinalIgnoreCase);
+        var updateChecks = GameRegistry.All
+            .Where(p => libraryIds.Contains(p.GameId))
+            .Select(async plugin =>
         {
             try
             {
