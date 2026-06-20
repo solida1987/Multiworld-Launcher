@@ -459,14 +459,6 @@ public partial class App : Application
         GameRegistry.Register(new Plugins.Peak.PeakPlugin());
         GameRegistry.Register(new Plugins.OblivionRemastered.OblivionRemasteredPlugin());
 
-        // ── Self-test smoke command ──────────────────────────────────────────
-        // Usage: MultiworldLauncher.exe --self-test
-        // Writes self_test.log, exits 0 (pass) or 1 (fail). No UI is shown.
-        if (Array.IndexOf(e.Args, "--self-test") >= 0)
-        {
-            SelfTest.Run();
-            return;   // unreachable — SelfTest.Run calls Environment.Exit
-        }
 
 
 
