@@ -137,9 +137,10 @@ public sealed class D2Plugin : IGamePlugin
         Timeout = TimeSpan.FromMinutes(30),
     };
 
-    // Cached latest-release JSON — reused across CheckForUpdate / Install / Verify
-    // so one session never fires the GitHub API more than once per plugin lifecycle.
-    private string? _cachedReleaseJson;
+    // Cached latest tag (e.g. "Beta-1.9.13") — resolved once per session via the
+    // releases/latest redirect, which is served by GitHub's CDN and is not counted
+    // against the REST API rate limit (60 req/hour unauthenticated).
+    private string? _cachedLatestTag;
 
     static D2Plugin()
     {
@@ -150,8 +151,17 @@ public sealed class D2Plugin : IGamePlugin
 
     private const string GITHUB_OWNER    = "solida1987";
     private const string GITHUB_REPO     = "Diablo-II-Archipelago";
-    private const string GH_RELEASES_URL =
-        "https://api.github.com/repos/solida1987/Diablo-II-Archipelago/releases/latest";
+
+    // We resolve the latest tag via the releases/latest REDIRECT (302 → tag URL)
+    // instead of the GitHub REST API. This avoids the 60 req/hour unauthenticated
+    // rate limit entirely — redirect responses are served by GitHub's CDN and are
+    // not counted against the API quota.
+    private const string GH_LATEST_PAGE  =
+        "https://github.com/solida1987/Diablo-II-Archipelago/releases/latest";
+    private const string GH_DOWNLOAD_BASE =
+        "https://github.com/solida1987/Diablo-II-Archipelago/releases/download";
+    private const string GH_RELEASES_API =
+        "https://api.github.com/repos/solida1987/Diablo-II-Archipelago/releases";
 
     // ── File skip lists (mirrors V1 GameDownloader.cs — must stay in sync) ────
     //
@@ -199,18 +209,39 @@ public sealed class D2Plugin : IGamePlugin
 
     // ── Version check ─────────────────────────────────────────────────────────
 
-    /// Fetch latest-release JSON, caching it for the session to avoid repeated
-    /// GitHub API calls (rate limit: 60 unauthenticated requests/hour).
-    private async Task<string?> FetchReleaseJsonAsync(CancellationToken ct)
+    /// Resolve the latest release tag via the releases/latest redirect.
+    /// Does NOT use the GitHub REST API — immune to the 60 req/hour rate limit.
+    private async Task<string?> FetchLatestTagAsync(CancellationToken ct)
     {
-        if (_cachedReleaseJson != null) return _cachedReleaseJson;
+        if (_cachedLatestTag != null) return _cachedLatestTag;
         try
         {
-            _cachedReleaseJson = await _http.GetStringAsync(GH_RELEASES_URL, ct);
-            return _cachedReleaseJson;
+            // GitHub redirects /releases/latest → /releases/tag/<tag> (HTTP 302).
+            // AllowAutoRedirect=false lets us read the Location header directly.
+            using var req = new HttpRequestMessage(HttpMethod.Head, GH_LATEST_PAGE);
+            using var handler = new HttpClientHandler { AllowAutoRedirect = false };
+            using var client  = new HttpClient(handler, disposeHandler: true);
+            client.DefaultRequestHeaders.UserAgent.TryParseAdd("Archipelago-Launcher/2.0");
+            client.Timeout = TimeSpan.FromSeconds(15);
+            using var resp = await client.SendAsync(req, ct);
+
+            string? location = resp.Headers.Location?.ToString();
+            if (string.IsNullOrEmpty(location)) return null;
+
+            // Extract tag from ".../releases/tag/<tag>"
+            const string marker = "/releases/tag/";
+            int idx = location.IndexOf(marker, StringComparison.Ordinal);
+            if (idx < 0) return null;
+
+            _cachedLatestTag = location[(idx + marker.Length)..].TrimEnd('/');
+            return _cachedLatestTag;
         }
         catch { return null; }
     }
+
+    /// Build a direct CDN download URL for a known asset filename.
+    private static string DownloadUrl(string tag, string filename)
+        => $"{GH_DOWNLOAD_BASE}/{tag}/{filename}";
 
     public async Task CheckForUpdateAsync(CancellationToken ct = default)
     {
@@ -221,11 +252,7 @@ public sealed class D2Plugin : IGamePlugin
                 ? File.ReadAllText(versionDat).Trim()
                 : null;
 
-            string? json = await FetchReleaseJsonAsync(ct);
-            if (json == null) { AvailableVersion = null; return; }
-            using var doc = JsonDocument.Parse(json);
-            if (doc.RootElement.TryGetProperty("tag_name", out var tag))
-                AvailableVersion = tag.GetString();
+            AvailableVersion = await FetchLatestTagAsync(ct);
         }
         catch
         {
@@ -244,53 +271,24 @@ public sealed class D2Plugin : IGamePlugin
     {
         progress.Report((0, "Fetching release info..."));
 
-        string json = await FetchReleaseJsonAsync(ct)
+        string? tag = await FetchLatestTagAsync(ct)
             ?? throw new InvalidOperationException(
                 "Could not reach GitHub: check your internet connection and try again.");
 
-        using var releaseDoc = JsonDocument.Parse(json);
-        var root = releaseDoc.RootElement;
+        // Build direct CDN download URLs — no REST API call needed.
+        string packageUrl  = DownloadUrl(tag, "game_package.zip");
+        string manifestUrl = DownloadUrl(tag, "game_manifest.json");
+        string apworldUrl  = DownloadUrl(tag, "diablo2_archipelago.apworld");
 
-        // Resolve the actual tag name
-        string? actualTag = null;
-        if (root.TryGetProperty("tag_name", out var tagEl))
-            actualTag = tagEl.GetString();
-
-        // Find assets: game_package.zip, game_manifest.json, .apworld
-        string? packageUrl  = null;
-        string? manifestUrl = null;
-        string? apworldUrl  = null;
-
-        if (root.TryGetProperty("assets", out var assets))
+        if (!IsInstalled)
         {
-            foreach (var el in assets.EnumerateArray())
-            {
-                string name = el.GetProperty("name").GetString() ?? "";
-                string url  = el.GetProperty("browser_download_url").GetString() ?? "";
-                if (name.Contains("game_package") || name.Contains("installer_package"))
-                    packageUrl = url;
-                else if (name == "game_manifest.json")
-                    manifestUrl = url;
-                else if (name.EndsWith(".apworld"))
-                    apworldUrl = url;
-            }
-        }
-
-        if (packageUrl != null && !IsInstalled)
-        {
-            // Fresh install path: download + extract full ZIP
-            await InstallFromZipAsync(packageUrl, apworldUrl, actualTag, progress, ct);
-        }
-        else if (manifestUrl != null)
-        {
-            // Update path: manifest-based file-by-file sync
-            await InstallFromManifestAsync(manifestUrl, apworldUrl, actualTag, progress, ct);
+            // Fresh install: full ZIP download + extract.
+            await InstallFromZipAsync(packageUrl, apworldUrl, tag, progress, ct);
         }
         else
         {
-            throw new InvalidOperationException(
-                "No game package or manifest found in latest GitHub release. " +
-                "Check your internet connection and try again.");
+            // Update: manifest-based incremental file sync.
+            await InstallFromManifestAsync(manifestUrl, apworldUrl, tag, progress, ct);
         }
     }
 
@@ -528,18 +526,13 @@ public sealed class D2Plugin : IGamePlugin
 
         if (manifestJson == null)
         {
-            // Fetch from GitHub if no local copy
+            // Fetch from GitHub if no local copy — uses CDN redirect, no API quota.
             try
             {
-                string rel = await FetchReleaseJsonAsync(ct) ?? "";
-                using var doc = JsonDocument.Parse(rel);
-                string? mUrl = null;
-                if (doc.RootElement.TryGetProperty("assets", out var assets))
-                    foreach (var el in assets.EnumerateArray())
-                        if ((el.GetProperty("name").GetString() ?? "") == "game_manifest.json")
-                        { mUrl = el.GetProperty("browser_download_url").GetString(); break; }
-                if (mUrl != null)
+                string? tag = await FetchLatestTagAsync(ct);
+                if (tag != null)
                 {
+                    string mUrl = DownloadUrl(tag, "game_manifest.json");
                     manifestJson = await _http.GetStringAsync(mUrl, ct);
                     try { await File.WriteAllTextAsync(manifestPath, manifestJson, ct); } catch { }
                 }
