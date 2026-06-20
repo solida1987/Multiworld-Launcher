@@ -2912,12 +2912,27 @@ public partial class MainWindow : Window
                             string text        = await File.ReadAllTextAsync(communityPath);
                             var communityResult = GameCatalog.ParseCommunityGamesText(text);
 
-                            // Merge: community entries not already present (by ApWorldName/Title)
-                            var existing = new HashSet<string>(
-                                merged.Select(e => string.IsNullOrEmpty(e.ApWorldName) ? e.DisplayName : e.ApWorldName),
-                                StringComparer.OrdinalIgnoreCase);
+                            // Merge: community entries not already present.
+                            // Dedup on DisplayName, ApWorldName, AND a normalized slug of each
+                            // (lowercase + alphanumeric-only) so that punctuation/accent
+                            // differences ("Diablo II Archipelago" vs "Diablo II: Lord of
+                            // Destruction", "Pokémon" vs "Pokemon") don't produce duplicates.
+                            static string Slug(string s) => System.Text.RegularExpressions.Regex
+                                .Replace(s.ToLowerInvariant().Normalize(
+                                    System.Text.NormalizationForm.FormD), @"[^a-z0-9]", "");
+
+                            var existingNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                            var existingSlugs = new HashSet<string>(StringComparer.Ordinal);
+                            foreach (var e in merged)
+                            {
+                                if (!string.IsNullOrEmpty(e.ApWorldName)) { existingNames.Add(e.ApWorldName); existingSlugs.Add(Slug(e.ApWorldName)); }
+                                if (!string.IsNullOrEmpty(e.DisplayName))  { existingNames.Add(e.DisplayName);  existingSlugs.Add(Slug(e.DisplayName)); }
+                            }
                             var newEntries = communityResult.Games
-                                .Where(e => !existing.Contains(string.IsNullOrEmpty(e.ApWorldName) ? e.DisplayName : e.ApWorldName))
+                                .Where(e => !existingNames.Contains(e.ApWorldName ?? "")
+                                         && !existingNames.Contains(e.DisplayName ?? "")
+                                         && !existingSlugs.Contains(Slug(e.ApWorldName ?? ""))
+                                         && !existingSlugs.Contains(Slug(e.DisplayName ?? "")))
                                 .ToList();
                             if (newEntries.Count > 0)
                                 merged = merged.Concat(newEntries)
