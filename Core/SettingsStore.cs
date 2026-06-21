@@ -24,9 +24,11 @@ public sealed record RecentConnection
 
 public sealed class LauncherSettings
 {
-    /// Absolute path to the Diablo II Archipelago install directory.
+    /// Absolute path to the user's OWN original Classic Diablo II + LoD install.
+    /// Used only as the source to copy the Blizzard MPQ data files from; the mod
+    /// itself installs into Games/diablo2_archipelago. Empty until located.
     [JsonPropertyName("diablo2_path")]
-    public string DiabloIIPath { get; set; } = DefaultD2Path();
+    public string DiabloIIPath { get; set; } = string.Empty;
 
     /// Last-used AP server URI (shared default across all games).
     [JsonPropertyName("default_ap_server")]

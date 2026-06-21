@@ -6579,38 +6579,49 @@ public partial class MainWindow : Window
             return false;
         }
 
-        // D2Plugin: fresh install requires the user to point at their existing
-        // Diablo II installation. The mod places its files on top of the original
-        // game — the original MPQ data files are never downloaded (copyright).
+        // D2Plugin: the mod installs into its OWN folder (Games/diablo2_archipelago)
+        // — never the user's Diablo II. We only need to know where the player's own
+        // Classic Diablo II lives so we can COPY the original Blizzard data files
+        // (MPQs) from it; the original is never modified. Auto-detect first, and
+        // only prompt the user if that fails.
         if (plugin is Plugins.DiabloII.D2Plugin d2pre
             && !d2pre.IsInstalled
-            && !d2pre.HasOriginalGameFiles())
+            && !d2pre.IsOriginalD2Configured)
         {
-            bool pick = ConfirmDialog.Show(this,
-                "Select your Diablo II installation",
-                "Diablo II Archipelago is installed on top of your own copy of " +
-                "Diablo II: Lord of Destruction. Select the folder where Diablo II " +
-                "is already installed (mod files will be added there).",
-                "Select folder…", "Cancel");
-            if (!pick) return false;
-
-            var dlg = new Microsoft.Win32.OpenFolderDialog
+            string? detected = d2pre.AutoDetectOriginalD2();
+            if (detected != null)
             {
-                Title            = "Select your Diablo II: Lord of Destruction installation folder",
-                InitialDirectory = @"C:\Program Files (x86)",
-            };
-            if (dlg.ShowDialog(this) != true) return false;
-
-            string? err = d2pre.ValidateExistingInstall(dlg.FolderName);
-            if (err != null)
+                d2pre.OriginalD2Directory = detected;
+            }
+            else
             {
-                ConfirmDialog.ShowInfo(this, "Folder not recognized", err);
-                return false;
+                bool pick = ConfirmDialog.Show(this,
+                    "Locate your original Diablo II",
+                    "Diablo II Archipelago is built from your own copy of Diablo II: " +
+                    "Lord of Destruction. Select the folder where Classic Diablo II is " +
+                    "installed — the launcher copies the needed game files from there " +
+                    "into its own folder and never modifies your original install.",
+                    "Select folder…", "Cancel");
+                if (!pick) return false;
+
+                var dlg = new Microsoft.Win32.OpenFolderDialog
+                {
+                    Title            = "Select your Classic Diablo II: Lord of Destruction folder",
+                    InitialDirectory = @"C:\Program Files (x86)",
+                };
+                if (dlg.ShowDialog(this) != true) return false;
+
+                string? err = d2pre.ValidateExistingInstall(dlg.FolderName);
+                if (err != null)
+                {
+                    ConfirmDialog.ShowInfo(this, "Folder not recognized", err);
+                    return false;
+                }
+                d2pre.OriginalD2Directory = dlg.FolderName;
             }
 
-            d2pre.GameDirectory = dlg.FolderName;
             var ls = SettingsStore.Load();
-            ls.DiabloIIPath = dlg.FolderName;
+            ls.DiabloIIPath = d2pre.OriginalD2Directory;
             SettingsStore.Save(ls);
         }
 
@@ -6896,39 +6907,52 @@ public partial class MainWindow : Window
             if (!installed || !_selectedPlugin.IsInstalled) return;
         }
 
-        // D2: verify the original Diablo II data files are present before launch.
-        // The mod files are installed but the MPQs must come from the user's own copy.
+        // D2: the install dir must contain the copied original MPQs before launch.
+        // If they're missing (copy failed, or the original D2 source moved), make
+        // sure we know where the player's own Diablo II is, then re-run the install
+        // so the copy step runs again. The original install is never modified.
         if (_selectedPlugin is Plugins.DiabloII.D2Plugin d2launch
             && !d2launch.HasOriginalGameFiles())
         {
-            bool pick = ConfirmDialog.Show(this,
-                "Diablo II game files missing",
-                "The original Diablo II data files (MPQs) are not in the installation " +
-                "folder. Select the folder where Diablo II: Lord of Destruction is installed " +
-                "and the mod files will be placed there.",
-                "Select folder…", "Cancel");
-            if (!pick) return;
-
-            var dlg2 = new Microsoft.Win32.OpenFolderDialog
+            if (!d2launch.IsOriginalD2Configured)
             {
-                Title            = "Select your Diablo II: Lord of Destruction installation folder",
-                InitialDirectory = @"C:\Program Files (x86)",
-            };
-            if (dlg2.ShowDialog(this) != true) return;
+                string? detected2 = d2launch.AutoDetectOriginalD2();
+                if (detected2 != null)
+                {
+                    d2launch.OriginalD2Directory = detected2;
+                }
+                else
+                {
+                    bool pick = ConfirmDialog.Show(this,
+                        "Locate your original Diablo II",
+                        "The launcher needs your Classic Diablo II: Lord of Destruction " +
+                        "folder to copy the original game files from. Your original " +
+                        "install is never modified.",
+                        "Select folder…", "Cancel");
+                    if (!pick) return;
 
-            string? err2 = d2launch.ValidateExistingInstall(dlg2.FolderName);
-            if (err2 != null)
-            {
-                ConfirmDialog.ShowInfo(this, "Folder not recognized", err2);
-                return;
+                    var dlg2 = new Microsoft.Win32.OpenFolderDialog
+                    {
+                        Title            = "Select your Classic Diablo II: Lord of Destruction folder",
+                        InitialDirectory = @"C:\Program Files (x86)",
+                    };
+                    if (dlg2.ShowDialog(this) != true) return;
+
+                    string? err2 = d2launch.ValidateExistingInstall(dlg2.FolderName);
+                    if (err2 != null)
+                    {
+                        ConfirmDialog.ShowInfo(this, "Folder not recognized", err2);
+                        return;
+                    }
+                    d2launch.OriginalD2Directory = dlg2.FolderName;
+                }
+
+                var ls2 = SettingsStore.Load();
+                ls2.DiabloIIPath = d2launch.OriginalD2Directory;
+                SettingsStore.Save(ls2);
             }
 
-            d2launch.GameDirectory = dlg2.FolderName;
-            var ls2 = SettingsStore.Load();
-            ls2.DiabloIIPath = dlg2.FolderName;
-            SettingsStore.Save(ls2);
-
-            // Re-run install so mod files land in the newly selected folder.
+            // Re-run install so the original files get copied into the mod folder.
             bool reinstalled = await RunInstallAsync(d2launch);
             if (!reinstalled || !d2launch.IsInstalled) return;
         }

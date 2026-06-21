@@ -58,7 +58,11 @@ public partial class App : Application
 
         GameRegistry.Register(new D2Plugin
         {
-            GameDirectory = settings.DiabloIIPath
+            // The mod installs into Games/diablo2_archipelago next to the launcher
+            // — never the user's own Diablo II. DiabloIIPath now records where the
+            // player's ORIGINAL Diablo II lives, used only to copy the MPQ data in.
+            GameDirectory       = SettingsStore.DefaultGamePath("diablo2_archipelago"),
+            OriginalD2Directory = settings.DiabloIIPath,
         });
 
         GameRegistry.Register(new OpenTTDPlugin

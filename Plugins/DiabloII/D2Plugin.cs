@@ -82,6 +82,18 @@ public sealed class D2Plugin : IGamePlugin
         }
     }
 
+    /// The user's OWN original Diablo II: LoD installation — used ONLY as the
+    /// source to COPY the copyrighted Blizzard data files (the MPQs) from.
+    /// It is never modified or installed into. The mod itself lives in
+    /// GameDirectory (Games/diablo2_archipelago), kept fully separate so the
+    /// player's original game is left untouched.
+    public string OriginalD2Directory { get; set; } = string.Empty;
+
+    /// True when OriginalD2Directory points at a valid Classic D2 + LoD folder.
+    public bool IsOriginalD2Configured =>
+        !string.IsNullOrEmpty(OriginalD2Directory) &&
+        ValidateExistingInstall(OriginalD2Directory) == null;
+
     // ── Internal state ────────────────────────────────────────────────────────
 
     private Process?                _gameProcess;
@@ -210,16 +222,93 @@ public sealed class D2Plugin : IGamePlugin
         return false;
     }
 
-    /// Validate that a folder looks like a Diablo II installation.
-    /// Returns null when valid, or a human-readable reason when not.
+    /// Validate that a folder is the user's ORIGINAL Classic Diablo II + LoD
+    /// install (the copy source). Returns null when valid, else a reason.
+    /// Rejects Diablo II: Resurrected (binary-incompatible) and an existing AP
+    /// install, and requires every Blizzard data file the mod needs.
     public string? ValidateExistingInstall(string folder)
     {
-        foreach (string f in new[] { "d2data.mpq", "d2char.mpq" })
-            if (File.Exists(Path.Combine(folder, f))) return null;
-        return "That folder doesn't appear to contain Diablo II game data " +
-               "(expected d2data.mpq / d2char.mpq). " +
-               "Select the folder where Diablo II: Lord of Destruction is installed — " +
-               "typically C:\\Program Files (x86)\\Diablo II or similar.";
+        if (string.IsNullOrEmpty(folder) || !Directory.Exists(folder))
+            return "That folder does not exist.";
+
+        if (File.Exists(Path.Combine(folder, "D2R.exe")) ||
+            Directory.Exists(Path.Combine(folder, "ClassicMode")))
+            return "That is Diablo II: Resurrected. Archipelago needs the CLASSIC " +
+                   "Diablo II + Lord of Destruction install instead.";
+
+        if (File.Exists(Path.Combine(folder, "D2Archipelago.dll")))
+            return "That folder is an existing Archipelago install, not your original " +
+                   "Diablo II. Point to the folder where you originally installed " +
+                   "Classic Diablo II + LoD (the one containing d2data.mpq).";
+
+        var missing = ORIGINAL_D2_FILES
+            .Where(f => !File.Exists(Path.Combine(folder, f)))
+            .ToList();
+        if (missing.Count > 0)
+            return "That folder is missing required Diablo II files (" +
+                   string.Join(", ", missing) + "). Select your Classic Diablo II + " +
+                   "Lord of Destruction install folder (typically " +
+                   "C:\\Program Files (x86)\\Diablo II).";
+
+        return null;
+    }
+
+    /// Copy the original Blizzard data files (the copyrighted MPQs etc.) from the
+    /// user's own Diablo II install (OriginalD2Directory) into the mod install
+    /// dir (GameDirectory). These are NEVER downloaded from GitHub. Returns the
+    /// list of files that could not be copied (empty = all present).
+    private List<string> CopyOriginalD2Files()
+    {
+        var missing = new List<string>();
+        if (string.IsNullOrEmpty(OriginalD2Directory) || !Directory.Exists(OriginalD2Directory))
+        {
+            missing.AddRange(ORIGINAL_D2_FILES);
+            return missing;
+        }
+        Directory.CreateDirectory(GameDirectory);
+        foreach (string file in ORIGINAL_D2_FILES)
+        {
+            string src = Path.Combine(OriginalD2Directory, file);
+            string dst = Path.Combine(GameDirectory, file);
+            if (!File.Exists(src)) { missing.Add(file); continue; }
+            try { File.Copy(src, dst, overwrite: true); }
+            catch { missing.Add(file); }
+        }
+        return missing;
+    }
+
+    /// Best-effort auto-detection of the user's Classic Diablo II install via the
+    /// registry (Blizzard / GOG / Uninstall keys) and common paths. Returns the
+    /// first folder that passes ValidateExistingInstall, or null if none found.
+    public string? AutoDetectOriginalD2()
+    {
+        var candidates = new List<string>();
+        void TryReg(RegistryKey root, string sub, string val)
+        {
+            try
+            {
+                using var key = root.OpenSubKey(sub);
+                if (key?.GetValue(val) is string p && !string.IsNullOrWhiteSpace(p))
+                    candidates.Add(p.TrimEnd('\\', '/'));
+            }
+            catch { }
+        }
+        TryReg(Registry.CurrentUser,  @"Software\Blizzard Entertainment\Diablo II", "InstallPath");
+        TryReg(Registry.LocalMachine, @"SOFTWARE\Blizzard Entertainment\Diablo II", "InstallPath");
+        TryReg(Registry.LocalMachine, @"SOFTWARE\WOW6432Node\Blizzard Entertainment\Diablo II", "InstallPath");
+        TryReg(Registry.LocalMachine, @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Diablo II", "InstallLocation");
+        TryReg(Registry.LocalMachine, @"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Diablo II", "InstallLocation");
+        TryReg(Registry.LocalMachine, @"SOFTWARE\GOG.com\Games\1435828550", "path");
+        TryReg(Registry.LocalMachine, @"SOFTWARE\WOW6432Node\GOG.com\Games\1435828550", "path");
+        candidates.Add(@"C:\Program Files (x86)\Diablo II");
+        candidates.Add(@"C:\Program Files\Diablo II");
+        candidates.Add(@"C:\GOG Games\Diablo II");
+        candidates.Add(@"C:\Games\Diablo II");
+        candidates.Add(@"D:\Diablo II");
+
+        foreach (string c in candidates)
+            if (ValidateExistingInstall(c) == null) return c;
+        return null;
     }
 
     // ── Constructor ───────────────────────────────────────────────────────────
@@ -363,6 +452,19 @@ public sealed class D2Plugin : IGamePlugin
             progress.Report((98, "Cleaning data cache..."));
             DeleteBinCache();
             Directory.CreateDirectory(Path.Combine(GameDirectory, "save"));
+
+            // Copy the copyrighted Blizzard data files from the player's own
+            // Diablo II install into the mod folder — these are never downloaded.
+            // The game cannot run without them, so a failure aborts BEFORE
+            // version.dat is written (IsInstalled stays false so a retry works).
+            progress.Report((99, "Copying original Diablo II files..."));
+            var missingOriginals = CopyOriginalD2Files();
+            if (missingOriginals.Count > 0)
+                throw new InvalidOperationException(
+                    "Could not copy these original Diablo II files from your installation: " +
+                    string.Join(", ", missingOriginals) + ".\n\nOpen Settings and point the " +
+                    "launcher at your Classic Diablo II + Lord of Destruction folder " +
+                    "(the one containing d2data.mpq), then install again.");
 
             progress.Report((99, "Writing version..."));
             WriteVersionDat(actualTag);
@@ -526,6 +628,10 @@ public sealed class D2Plugin : IGamePlugin
                 $"{failed} of {toDownload.Count} file(s) failed to download " +
                 $"({downloaded} succeeded). The install may be incomplete — " +
                 "check your connection and try again.");
+
+        // Heal: ensure the original Blizzard data files are present (an update to
+        // an existing install should already have them; best-effort re-copy here).
+        CopyOriginalD2Files();
 
         WriteVersionDat(manifestVersion);
 
@@ -1087,12 +1193,14 @@ public sealed class D2Plugin : IGamePlugin
         // ── Section: Install directory ─────────────────────────────────────
         panel.Children.Add(new TextBlock
         {
-            Text = "INSTALL DIRECTORY", FontSize = 10, FontWeight = FontWeights.SemiBold,
+            Text = "ORIGINAL DIABLO II (your own copy)", FontSize = 10, FontWeight = FontWeights.SemiBold,
             Foreground = muted, Margin = new Thickness(0, 0, 0, 8),
         });
         panel.Children.Add(new TextBlock
         {
-            Text         = "The folder where Diablo II: Lord of Destruction is installed.",
+            Text         = "The folder where your own Classic Diablo II: Lord of Destruction is " +
+                           "installed. The launcher copies the original game files from here into " +
+                           "its own install folder — your copy is never modified.",
             FontSize     = 11, Foreground = muted,
             TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 8),
         });
@@ -1100,7 +1208,7 @@ public sealed class D2Plugin : IGamePlugin
         var dirRow   = new DockPanel { Margin = new Thickness(0, 0, 0, 16) };
         var dirBox   = new TextBox
         {
-            Text        = GameDirectory,
+            Text        = OriginalD2Directory,
             IsReadOnly  = true,
             FontSize    = 12,
             Margin      = new Thickness(0, 0, 8, 0),
@@ -1118,19 +1226,25 @@ public sealed class D2Plugin : IGamePlugin
         };
         dirBtn.Click += (_, _) =>
         {
-            // Real folder picker (P3-16) — .NET 8 WPF ships OpenFolderDialog,
-            // replacing the old "OpenFileDialog with FileName='Select Folder'"
-            // hack (which confused users into typing a file name).
+            // Picks the user's OWN Classic Diablo II folder (the copy source) —
+            // never the mod install dir. Validated before it is accepted.
             var dlg = new Microsoft.Win32.OpenFolderDialog
             {
-                Title            = "Select the Diablo II: Lord of Destruction install folder",
-                InitialDirectory = Directory.Exists(GameDirectory) ? GameDirectory
-                                   : AppContext.BaseDirectory,
+                Title            = "Select your Classic Diablo II: Lord of Destruction folder",
+                InitialDirectory = Directory.Exists(OriginalD2Directory) ? OriginalD2Directory
+                                   : @"C:\Program Files (x86)",
             };
             if (dlg.ShowDialog() == true)
             {
-                GameDirectory = dlg.FolderName;
-                dirBox.Text   = dlg.FolderName;
+                string? err = ValidateExistingInstall(dlg.FolderName);
+                if (err != null)
+                {
+                    System.Windows.MessageBox.Show(err, "Folder not recognized",
+                        System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
+                    return;
+                }
+                OriginalD2Directory = dlg.FolderName;
+                dirBox.Text         = dlg.FolderName;
                 SaveD2Settings();
             }
         };
@@ -1285,7 +1399,7 @@ public sealed class D2Plugin : IGamePlugin
         // Write to the launcher's central settings file so the path persists
         // across restarts (App.xaml.cs reads LauncherSettings.DiabloIIPath on startup).
         var ls = SettingsStore.Load();
-        ls.DiabloIIPath = GameDirectory;
+        ls.DiabloIIPath = OriginalD2Directory;
         SettingsStore.Save(ls);
 
         // Also keep the per-plugin file for backward-compat / third-party tooling.
