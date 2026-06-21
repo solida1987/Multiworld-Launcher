@@ -14,7 +14,9 @@ public sealed class KeepTalkingPlugin : IGamePlugin
 {
     // ── Constants ────────────────────────────────────────────────────────────
 
-    private const int STEAM_APPID = 341800;
+    private const int    STEAM_APPID = 341800;
+    private const string MOD_OWNER   = "GreenPower713";
+    private const string MOD_REPO    = "KTaNE-Archipelago-Expert-Manuals";
 
     // ── Identity ──────────────────────────────────────────────────────────────
 
@@ -37,8 +39,8 @@ public sealed class KeepTalkingPlugin : IGamePlugin
 
     // ── Version state ─────────────────────────────────────────────────────────
 
-    public string? InstalledVersion => null;
-    public string? AvailableVersion => null;
+    public string? InstalledVersion { get; private set; }
+    public string? AvailableVersion { get; private set; }
     public bool    IsInstalled      => !string.IsNullOrEmpty(GameDirectory) && Directory.Exists(GameDirectory);
     public bool    IsRunning        { get; private set; }
 
@@ -64,17 +66,27 @@ public sealed class KeepTalkingPlugin : IGamePlugin
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
-    public Task CheckForUpdateAsync(CancellationToken ct = default)
-        => Task.CompletedTask;
+    public async Task CheckForUpdateAsync(CancellationToken ct = default)
+    {
+        InstalledVersion = IsInstalled ? "installed" : null;
+        try
+        {
+            // CDN HEAD redirect — no REST API quota consumed.
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync(MOD_OWNER, MOD_REPO, ct));
+        }
+        catch { AvailableVersion = null; }
+    }
 
     public Task InstallOrUpdateAsync(
         IProgress<(int Pct, string Msg)> progress,
         CancellationToken ct = default)
     {
+        progress.Report((50, "Opening KTaNE Archipelago Expert Manuals releases page..."));
+        OpenUrl($"https://github.com/{MOD_OWNER}/{MOD_REPO}/releases/latest");
         progress.Report((100,
-            "Keep Talking and Nobody Explodes requires manual mod installation. " +
-            "Install the game via Steam (appid 341800), then follow the " +
-            "Archipelago setup guide for this game."));
+            "Download the latest KTaNE Archipelago Expert Manuals from the releases page " +
+            "and follow the setup guide. The game must be installed via Steam first."));
         return Task.CompletedTask;
     }
 
@@ -181,6 +193,7 @@ public sealed class KeepTalkingPlugin : IGamePlugin
 
         foreach (var (label, url) in new[]
         {
+            ("KTaNE AP Expert Manuals ↗", $"https://github.com/{MOD_OWNER}/{MOD_REPO}/releases/latest"),
             ("Keep Talking on Steam ↗",  $"https://store.steampowered.com/app/{STEAM_APPID}/"),
             ("Archipelago Official ↗",   "https://archipelago.gg"),
         })
@@ -268,5 +281,10 @@ public sealed class KeepTalkingPlugin : IGamePlugin
                 "Could not launch Keep Talking and Nobody Explodes. " +
                 "Make sure the game is installed via Steam.", ex);
         }
+    }
+
+    private static void OpenUrl(string url)
+    {
+        try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); } catch { }
     }
 }

@@ -228,25 +228,10 @@ public sealed class DeltarunePlugin : IGamePlugin
     {
         try
         {
-            string json = await _http.GetStringAsync(ApWorldReleasesApiUrl, ct);
-            using var doc = JsonDocument.Parse(json);
-            if (doc.RootElement.ValueKind != JsonValueKind.Array) return;
-
-            foreach (var el in doc.RootElement.EnumerateArray())
-            {
-                if (!el.TryGetProperty("tag_name", out var tagProp)) continue;
-                string? tag = tagProp.GetString();
-                if (string.IsNullOrWhiteSpace(tag)) continue;
-
-                // Skip pre-releases for the "available" version shown in UI.
-                bool isPrerelease =
-                    el.TryGetProperty("prerelease", out var preProp) &&
-                    preProp.ValueKind == JsonValueKind.True;
-                if (isPrerelease) continue;
-
-                AvailableVersion = tag;
-                return;
-            }
+            // CDN HEAD redirect — no REST API quota consumed. GitHub's
+            // /releases/latest already resolves to the newest non-prerelease.
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync("theemeraldsword85", "DELTARUNEAP", ct));
         }
         catch { /* non-fatal */ }
     }

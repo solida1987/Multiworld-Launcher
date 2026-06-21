@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -208,15 +208,15 @@ public sealed class MindustryPlugin : IGamePlugin
         {
             InstalledVersion = null;
         }
-
-        try
+            try
         {
-            var (ver, _) = await ResolveLatestReleaseAsync(ct);
-            AvailableVersion = ver;
+            // CDN HEAD redirect — no REST API quota consumed.
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync(GH_OWNER, GH_REPO, ct));
         }
         catch
         {
-            AvailableVersion = null;
+            AvailableVersion = null; // contract: never throw on network failure
         }
     }
 

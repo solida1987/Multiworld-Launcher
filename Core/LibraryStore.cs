@@ -62,7 +62,11 @@ public static class LibraryStore
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-            File.WriteAllText(_path, JsonSerializer.Serialize(_entries, _opts));
+            // Atomic write (temp + swap) so a crash mid-write can't truncate the
+            // library file and silently wipe the user's game list / order.
+            string tmp = _path + ".tmp";
+            File.WriteAllText(tmp, JsonSerializer.Serialize(_entries, _opts));
+            File.Move(tmp, _path, overwrite: true);
         }
         catch { /* non-fatal */ }
     }

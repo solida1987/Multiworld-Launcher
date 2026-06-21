@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -97,11 +97,9 @@ public sealed class Hades2Plugin : IGamePlugin
     private const string SetupGuideUrl   = "https://archipelago.gg/games/Hades%20II/info/en";
     private const string ArchipelagoSite = "https://archipelago.gg";
 
-    // UNVERIFIED — Hades 1 also uses 1145360 in HadesPlugin.cs; exactly one of
-    // these must be wrong. Verify the real Hades II AppId on the Steam store
-    // page (https://store.steampowered.com/search/?term=Hades+II) and fix this
-    // constant before shipping. The correct Hades 1 AppId IS 1145360.
-    private const string H2_STEAM_APP_ID = "1145360"; // UNVERIFIED for Hades II
+    // Hades II Steam AppId is 1145350 (store.steampowered.com/app/1145350).
+    // Hades 1 is 1145360 — the two were swapped; corrected here.
+    private const string H2_STEAM_APP_ID = "1145350";
     private static readonly string SteamRunUrl = $"steam://rungameid/{H2_STEAM_APP_ID}";
 
     // UNVERIFIED — both names are tried; the actual folder is whichever Steam chose.
@@ -224,11 +222,11 @@ public sealed class Hades2Plugin : IGamePlugin
         {
             InstalledVersion = null;
         }
-
-        try
+            try
         {
-            var (version, _) = await ResolveLatestModAsync(ct);
-            AvailableVersion = version;
+            // CDN HEAD redirect — no REST API quota consumed.
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync(MOD_OWNER, MOD_REPO, ct));
         }
         catch
         {

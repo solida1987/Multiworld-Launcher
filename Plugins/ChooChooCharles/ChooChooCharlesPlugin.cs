@@ -238,8 +238,9 @@ public sealed class ChooChooCharlesPlugin : IGamePlugin
 
         try
         {
-            var (version, _) = await ResolveLatestReleaseAsync(ct);
-            AvailableVersion = version;
+            // CDN HEAD redirect — no REST API quota consumed.
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync(MOD_OWNER, MOD_REPO, ct));
         }
         catch
         {

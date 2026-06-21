@@ -133,8 +133,9 @@ public sealed class NonogramAPPlugin : IGamePlugin
         InstalledVersion = null;   // web version has no local version stamp
         try
         {
-            var (version, _) = await ResolveLatestReleaseAsync(ct);
-            AvailableVersion = version;
+            // CDN HEAD redirect — no REST API quota consumed.
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync(GH_OWNER, GH_REPO, ct));
         }
         catch
         {

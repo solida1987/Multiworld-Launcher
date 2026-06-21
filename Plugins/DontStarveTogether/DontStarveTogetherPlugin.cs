@@ -258,8 +258,9 @@ public sealed class DontStarveTogetherPlugin : IGamePlugin
 
         try
         {
-            var (version, _) = await ResolveLatestApworldAsync(ct);
-            AvailableVersion = version;
+            // CDN HEAD redirect — no REST API quota consumed.
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync(APWORLD_OWNER, APWORLD_REPO, ct));
         }
         catch
         {

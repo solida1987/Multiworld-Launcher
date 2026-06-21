@@ -171,13 +171,9 @@ public sealed class OpenRCT2Plugin : IGamePlugin
 
         try
         {
-            string json = await _http.GetStringAsync(GH_RELEASES, ct);
-            using var doc = JsonDocument.Parse(json);
-            var arr = doc.RootElement;
-            if (arr.ValueKind == JsonValueKind.Array)
-                foreach (var el in arr.EnumerateArray())
-                    if (el.TryGetProperty("tag_name", out var t))
-                    { AvailableVersion = t.GetString()?.Trim(); break; }
+            // CDN HEAD redirect — no REST API quota consumed.
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync(GH_OWNER, GH_REPO, ct));
         }
         catch { AvailableVersion = null; }
     }

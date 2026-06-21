@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -198,21 +198,14 @@ public sealed class TotalWarWarhammer3Plugin : IGamePlugin
     {
         try
         {
-            InstalledVersion = File.Exists(VersionFilePath) && IsInstalled
-                ? (await File.ReadAllTextAsync(VersionFilePath, ct)).Trim()
-                : null;
+            // CDN HEAD redirect — no REST API quota consumed.
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync("jordansds", "Archipelago_TWW3_Alt", ct));
         }
-        catch { InstalledVersion = null; }
-
-        try
+        catch
         {
-            string json = await _http.GetStringAsync(GH_RELEASES_LATEST, ct);
-            using var doc = JsonDocument.Parse(json);
-            AvailableVersion = doc.RootElement.TryGetProperty("tag_name", out var t)
-                ? NormalizeTag(t.GetString())
-                : null;
-        }
-        catch { AvailableVersion = null; } // contract: never throw on network failure
+            AvailableVersion = null; // contract: never throw on network failure
+        } // contract: never throw on network failure
     }
 
     // ── Lifecycle — InstallOrUpdate ───────────────────────────────────────────

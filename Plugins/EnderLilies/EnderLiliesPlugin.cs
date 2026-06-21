@@ -226,8 +226,9 @@ public sealed class EnderLiliesPlugin : IGamePlugin
 
         try
         {
-            var (ver, _) = await ResolveLatestApRandoAsync(ct);
-            AvailableVersion = ver;
+            // CDN HEAD redirect — no REST API quota consumed.
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync(RANDO_OWNER, RANDO_REPO, ct));
         }
         catch { AvailableVersion = null; }
     }

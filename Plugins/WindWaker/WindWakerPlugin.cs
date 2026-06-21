@@ -258,8 +258,9 @@ public sealed class WindWakerPlugin : IGamePlugin
 
         try
         {
-            var (version, _, _) = await ResolveLatestWwrandoAsync(ct);
-            AvailableVersion = version;
+            // CDN HEAD redirect — no REST API quota consumed.
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync(WWRANDO_OWNER, WWRANDO_REPO, ct));
         }
         catch { AvailableVersion = null; }
     }

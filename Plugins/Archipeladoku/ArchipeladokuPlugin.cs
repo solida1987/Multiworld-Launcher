@@ -111,17 +111,10 @@ public sealed class ArchipeladokuPlugin : IGamePlugin
         // may return an empty array — handle gracefully, no error surfaced.
         try
         {
-            string json = await _http.GetStringAsync(GH_RELEASES, ct);
-            using var doc = JsonDocument.Parse(json);
-            if (doc.RootElement.ValueKind == JsonValueKind.Array)
-            {
-                foreach (var el in doc.RootElement.EnumerateArray())
-                {
-                    if (el.TryGetProperty("tag_name", out var t))
-                    { AvailableVersion = t.GetString()?.Trim(); break; }
-                }
-                // Empty array is normal for this repo — leave AvailableVersion null.
-            }
+            // CDN HEAD redirect — no REST API quota consumed. Empty/absent
+            // releases resolve to "" (this repo ships via Pages) — no badge shown.
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync(GH_OWNER, GH_REPO, ct));
         }
         catch { AvailableVersion = null; }
     }

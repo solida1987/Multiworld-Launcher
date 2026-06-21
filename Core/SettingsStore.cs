@@ -131,14 +131,18 @@ public sealed class LauncherSettings
     }
 
     private static string DefaultD2Path() =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
-            "Diablo II Archipelago");
+        SettingsStore.DefaultGamePath("diablo2_archipelago");
 }
 
 public static class SettingsStore
 {
     private static readonly string _path = Path.Combine(
         AppContext.BaseDirectory, "launcher_settings.json");
+
+    /// Returns the default installation directory for a given game.
+    /// All games default to Games/<gameId>/ next to the launcher executable.
+    public static string DefaultGamePath(string gameId)
+        => Path.Combine(AppContext.BaseDirectory, "Games", gameId);
 
     private static readonly JsonSerializerOptions _opts = new()
     {
@@ -159,7 +163,16 @@ public static class SettingsStore
 
     public static void Save(LauncherSettings settings)
     {
-        try { File.WriteAllText(_path, JsonSerializer.Serialize(settings, _opts)); }
+        try
+        {
+            // Atomic write: serialize to a temp file then swap into place, so a
+            // crash / power loss mid-write can never truncate the live settings
+            // file (Load() would silently fall back to defaults = lost settings).
+            string json = JsonSerializer.Serialize(settings, _opts);
+            string tmp  = _path + ".tmp";
+            File.WriteAllText(tmp, json);
+            File.Move(tmp, _path, overwrite: true);
+        }
         catch { /* non-fatal */ }
     }
 }

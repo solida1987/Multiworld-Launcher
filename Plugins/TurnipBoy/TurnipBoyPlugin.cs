@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -199,18 +199,14 @@ public sealed class TurnipBoyPlugin : IGamePlugin
     {
         try
         {
-            InstalledVersion = FindInstalledPluginDll() != null
-                ? (ReadStampedVersion() ?? "installed")
-                : null;
+            // CDN HEAD redirect — no REST API quota consumed.
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync(MOD_OWNER, MOD_REPO, ct));
         }
-        catch { InstalledVersion = null; }
-
-        try
+        catch
         {
-            var (version, _) = await ResolveLatestReleaseAsync(ct);
-            AvailableVersion = version;
-        }
-        catch { AvailableVersion = null; } // contract: never throw on network failure
+            AvailableVersion = null; // contract: never throw on network failure
+        } // contract: never throw on network failure
     }
 
     // ── Lifecycle — InstallOrUpdate ───────────────────────────────────────────

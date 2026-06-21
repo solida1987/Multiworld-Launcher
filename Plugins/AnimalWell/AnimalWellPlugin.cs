@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -230,13 +230,16 @@ public sealed class AnimalWellPlugin : IGamePlugin
                 : null;
         }
         catch { InstalledVersion = null; }
-
-        try
+            try
         {
-            var (version, _) = await ResolveLatestApWorldAsync(ct);
-            AvailableVersion = version;
+            // CDN HEAD redirect — no REST API quota consumed.
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync(AP_FORK_OWNER, AP_FORK_REPO, ct));
         }
-        catch { AvailableVersion = null; }
+        catch
+        {
+            AvailableVersion = null; // contract: never throw on network failure
+        }
     }
 
     // ── Lifecycle — InstallOrUpdate ───────────────────────────────────────────

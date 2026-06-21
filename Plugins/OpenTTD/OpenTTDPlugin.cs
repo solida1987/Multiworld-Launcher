@@ -204,13 +204,11 @@ public sealed class OpenTTDPlugin : IGamePlugin
         }
 
         // Remote side: latest fork release tag ("v1.4.1" → "1.4.1").
+        // CDN HEAD redirect — no REST API quota consumed.
         try
         {
-            string json = await _http.GetStringAsync(GH_RELEASES_LATEST_URL, ct);
-            using var doc = JsonDocument.Parse(json);
-            AvailableVersion = doc.RootElement.TryGetProperty("tag_name", out var t)
-                ? NormalizeTag(t.GetString())
-                : null;
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync(GITHUB_OWNER, GITHUB_REPO, ct));
         }
         catch
         {

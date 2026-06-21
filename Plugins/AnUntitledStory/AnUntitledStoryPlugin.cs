@@ -198,8 +198,9 @@ public sealed class AnUntitledStoryPlugin : IGamePlugin
 
         try
         {
-            var (tag, _, _, _) = await ResolveLatestReleaseAsync(ct);
-            AvailableVersion = tag;
+            // CDN HEAD redirect — no REST API quota consumed.
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync(GITHUB_OWNER, GITHUB_REPO, ct));
         }
         catch { AvailableVersion = null; }
     }

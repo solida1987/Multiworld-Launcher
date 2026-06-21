@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -224,7 +224,9 @@ public sealed class SlyCooperPlugin : IGamePlugin
         // Poll GitHub for the latest release.
         try
         {
-            AvailableVersion = await FetchLatestVersionAsync(ct);
+            // CDN HEAD redirect — no REST API quota consumed.
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync(GH_OWNER, GH_REPO, ct));
         }
         catch
         {

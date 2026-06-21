@@ -234,27 +234,16 @@ public sealed class LilGatorGamePlugin : IGamePlugin
 
     public async Task CheckForUpdateAsync(CancellationToken ct = default)
     {
+        try { InstalledVersion = FindModDll() != null ? "installed" : null; }
+        catch { InstalledVersion = null; }
+
         try
         {
-            string? latestTag = await FetchLatestTagAsync(ct);
-            AvailableVersion  = latestTag ?? AvailableVersion;
-
-            string? modDll = FindModDll();
-            if (modDll != null)
-            {
-                // No version is embedded in the DLL name; we report "installed" plus
-                // the available tag so the UI can show when an update is available.
-                InstalledVersion = "installed";
-            }
-            else
-            {
-                InstalledVersion = null;
-            }
+            // CDN HEAD redirect — no REST API quota consumed.
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync(GatorRandoOwner, GatorRandoRepo, ct));
         }
-        catch
-        {
-            // Network failure — keep existing cached state.
-        }
+        catch { /* Network failure — keep existing cached state. */ }
     }
 
     // ── Lifecycle — InstallOrUpdate ───────────────────────────────────────────

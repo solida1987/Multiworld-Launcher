@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -216,14 +216,13 @@ public sealed class TyTheTasmanianTigerPlugin : IGamePlugin
         // Poll GitHub for the latest Ty1AP-Client release.
         try
         {
-            string json = await _http.GetStringAsync(ClientReleasesApi, ct);
-            using var doc = JsonDocument.Parse(json);
-            if (doc.RootElement.TryGetProperty("tag_name", out var tag))
-                AvailableVersion = tag.GetString();
+            // CDN HEAD redirect — no REST API quota consumed.
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync("xMcacutt-Archipelago", "Ty1AP-Client", ct));
         }
         catch
         {
-            AvailableVersion = null;
+            AvailableVersion = null; // contract: never throw on network failure
         }
     }
 

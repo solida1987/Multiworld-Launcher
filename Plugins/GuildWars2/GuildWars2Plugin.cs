@@ -12,6 +12,11 @@ namespace LauncherV2.Plugins.GuildWars2;
 
 public sealed class GuildWars2Plugin : IGamePlugin
 {
+    // ── Constants ─────────────────────────────────────────────────────────────
+
+    private const string MOD_OWNER = "Feldar99";
+    private const string MOD_REPO  = "Gw2ArchipelagoClient";
+
     // ── Identity ──────────────────────────────────────────────────────────────
 
     public string GameId           => "guild_wars_2";
@@ -33,8 +38,8 @@ public sealed class GuildWars2Plugin : IGamePlugin
 
     // ── Version state ─────────────────────────────────────────────────────────
 
-    public string? InstalledVersion => null;
-    public string? AvailableVersion => null;
+    public string? InstalledVersion { get; private set; }
+    public string? AvailableVersion { get; private set; }
     public bool    IsInstalled      => !string.IsNullOrEmpty(GameDirectory) && Directory.Exists(GameDirectory);
     public bool    IsRunning        { get; private set; }
 
@@ -61,16 +66,27 @@ public sealed class GuildWars2Plugin : IGamePlugin
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
-    public Task CheckForUpdateAsync(CancellationToken ct = default)
-        => Task.CompletedTask;
+    public async Task CheckForUpdateAsync(CancellationToken ct = default)
+    {
+        InstalledVersion = IsInstalled ? "installed" : null;
+        try
+        {
+            // CDN HEAD redirect — no REST API quota consumed.
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync(MOD_OWNER, MOD_REPO, ct));
+        }
+        catch { AvailableVersion = null; }
+    }
 
     public Task InstallOrUpdateAsync(
         IProgress<(int Pct, string Msg)> progress,
         CancellationToken ct = default)
     {
+        progress.Report((50, "Opening Guild Wars 2 Archipelago client releases page..."));
+        OpenUrl($"https://github.com/{MOD_OWNER}/{MOD_REPO}/releases/latest");
         progress.Report((100,
-            "Guild Wars 2 is distributed via the ArenaNet standalone launcher. " +
-            "Install or update through the official Guild Wars 2 website."));
+            "Download the latest Guild Wars 2 Archipelago client from the releases page " +
+            "and install it following the setup guide."));
         return Task.CompletedTask;
     }
 
@@ -188,6 +204,7 @@ public sealed class GuildWars2Plugin : IGamePlugin
 
         foreach (var (label, url) in new[]
         {
+            ("GW2 AP Client Releases ↗", $"https://github.com/{MOD_OWNER}/{MOD_REPO}/releases/latest"),
             ("Guild Wars 2 Official ↗", "https://www.guildwars2.com"),
             ("Archipelago Official ↗",  "https://archipelago.gg"),
         })
@@ -274,5 +291,10 @@ public sealed class GuildWars2Plugin : IGamePlugin
             throw new InvalidOperationException(
                 "Could not launch Guild Wars 2. Set the game directory in Settings.", ex);
         }
+    }
+
+    private static void OpenUrl(string url)
+    {
+        try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); } catch { }
     }
 }

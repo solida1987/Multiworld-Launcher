@@ -211,8 +211,9 @@ public sealed class FinalFantasyXIITrialModePlugin : IGamePlugin
 
         try
         {
-            var (version, _, _) = await ResolveLatestAssetsAsync(ct);
-            AvailableVersion = version;
+            // CDN HEAD redirect — no REST API quota consumed.
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync(GH_OWNER, GH_REPO, ct));
         }
         catch { AvailableVersion = null; }
     }

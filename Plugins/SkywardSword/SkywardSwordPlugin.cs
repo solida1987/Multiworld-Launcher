@@ -225,15 +225,9 @@ public sealed class SkywardSwordPlugin : IGamePlugin
 
         try
         {
-            string json = await _http.GetStringAsync(SsApworldReleasesUrl, ct);
-            using var doc = JsonDocument.Parse(json);
-            if (doc.RootElement.ValueKind == JsonValueKind.Array)
-            {
-                var first = doc.RootElement.EnumerateArray().FirstOrDefault();
-                if (first.ValueKind == JsonValueKind.Object &&
-                    first.TryGetProperty("tag_name", out var t))
-                    AvailableVersion = NormalizeTag(t.GetString());
-            }
+            // CDN HEAD redirect — no REST API quota consumed.
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync(SsApworldOwner, SsApworldRepo, ct));
         }
         catch { AvailableVersion = null; }
     }

@@ -236,8 +236,9 @@ public sealed class CrossCodePlugin : IGamePlugin
 
         try
         {
-            var (version, _) = await ResolveLatestModReleaseAsync(ct);
-            AvailableVersion = version;
+            // CDN HEAD redirect — no REST API quota consumed.
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync(MOD_OWNER, MOD_REPO, ct));
         }
         catch
         {

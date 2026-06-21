@@ -112,19 +112,9 @@ public sealed class WateryWordsPlugin : IGamePlugin
         InstalledVersion = "web";
         try
         {
-            string json = await _http.GetStringAsync(GH_RELEASES, ct);
-            using var doc = JsonDocument.Parse(json);
-            if (doc.RootElement.ValueKind == JsonValueKind.Array)
-            {
-                foreach (var rel in doc.RootElement.EnumerateArray())
-                {
-                    if (rel.TryGetProperty("tag_name", out var t))
-                    {
-                        AvailableVersion = NormalizeTag(t.GetString());
-                        break;
-                    }
-                }
-            }
+            // CDN HEAD redirect — no REST API quota consumed.
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync(GH_OWNER, GH_REPO, ct));
         }
         catch
         {

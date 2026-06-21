@@ -267,11 +267,9 @@ public sealed class BalatroPlugin : IGamePlugin
         // Query GitHub for latest release tag.
         try
         {
-            string json = await _http.GetStringAsync(GH_RELEASES_LATEST_URL, ct);
-            using var doc = JsonDocument.Parse(json);
-            AvailableVersion = doc.RootElement.TryGetProperty("tag_name", out var t)
-                ? t.GetString()?.Trim()
-                : null;
+            // CDN HEAD redirect — no REST API quota consumed.
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync(MOD_OWNER, MOD_REPO, ct));
         }
         catch { AvailableVersion = null; }
     }

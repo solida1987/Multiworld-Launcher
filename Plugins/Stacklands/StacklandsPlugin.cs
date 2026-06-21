@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -134,6 +134,13 @@ public sealed class StacklandsPlugin : IGamePlugin
 
     private const string VersionFileName = "stacklands_ap_mod_version.dat";
 
+    private static string RomLibraryDirectory =>
+        Path.Combine(AppContext.BaseDirectory, "Games", "ROMs", "stacklands");
+    private static string VersionFilePath =>
+        Path.Combine(RomLibraryDirectory, VersionFileName);
+    private static string SettingsSidecarPath =>
+        Path.Combine(RomLibraryDirectory, "stacklands_launcher.json");
+
     // ── IGamePlugin — Identity ────────────────────────────────────────────────
 
     public string GameId      => "stacklands";
@@ -174,13 +181,7 @@ public sealed class StacklandsPlugin : IGamePlugin
     {
         get
         {
-            try
-            {
-                var procs = Process.GetProcessesByName(GameProcessName);
-                bool running = procs.Length > 0;
-                foreach (var p in procs) { try { p.Dispose(); } catch { } }
-                return running;
-            }
+            try { return Process.GetProcessesByName(GameProcessName).Length > 0; }
             catch { return false; }
         }
     }
@@ -189,61 +190,32 @@ public sealed class StacklandsPlugin : IGamePlugin
 
     public string GameDirectory
     {
-        get => ResolveInstallDir() ?? "";
-        set
-        {
-            if (!string.IsNullOrWhiteSpace(value))
-                SaveOverrideInstallDir(value);
-        }
+        get => ResolveInstallDir() ?? string.Empty;
+        set => SaveOverrideInstallDir(value);
     }
-
-    /// Launcher-side bookkeeping folder (NOT inside the user's game install).
-    private string RomLibraryDirectory
-        => Path.Combine(AppContext.BaseDirectory, "Games", "ROMs", GameId);
-
-    private string SettingsSidecarPath
-        => Path.Combine(RomLibraryDirectory, "stacklands_launcher.json");
-
-    private string VersionFilePath
-        => Path.Combine(RomLibraryDirectory, VersionFileName);
 
     // ── Internal state ────────────────────────────────────────────────────────
 
     private Process? _gameProcess;
 
     // ── AP bridge events ──────────────────────────────────────────────────────
-    // The mod's in-game client owns the AP slot — the launcher relays nothing.
-    // These events are defined for interface compatibility (ConnectsItself = true).
+
 #pragma warning disable CS0067
     public event Action<long[]>? LocationsChecked;
     public event Action?         GoalCompleted;
+    public event Action<int>?    GameExited;
 #pragma warning restore CS0067
-
-    public event Action<int>? GameExited;
 
     // ── Lifecycle — CheckForUpdate ────────────────────────────────────────────
 
     public async Task CheckForUpdateAsync(CancellationToken ct = default)
     {
+        InstalledVersion = ReadStampedVersion();
         try
         {
-            string? stamped = ReadStampedVersion();
-            InstalledVersion = IsInstalled
-                ? (stamped ?? "installed")
-                : null;
-        }
-        catch
-        {
-            InstalledVersion = null;
-        }
-
-        try
-        {
-            string json = await _http.GetStringAsync(GH_MOD_LATEST_URL, ct);
-            using var doc = JsonDocument.Parse(json);
-            AvailableVersion = doc.RootElement.TryGetProperty("tag_name", out var t)
-                ? NormalizeTag(t.GetString())
-                : null;
+            // CDN HEAD redirect — no REST API quota consumed.
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync(MOD_OWNER, MOD_REPO, ct));
         }
         catch
         {

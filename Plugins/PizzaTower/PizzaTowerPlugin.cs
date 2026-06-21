@@ -235,27 +235,9 @@ public sealed class PizzaTowerPlugin : IGamePlugin
         // Try anyway — a future release will populate this.
         try
         {
-            string json = await _http.GetStringAsync(GH_RELEASES_URL, ct);
-            using var doc = JsonDocument.Parse(json);
-            if (doc.RootElement.ValueKind == JsonValueKind.Array)
-            {
-                // Pick the first non-prerelease, or first of any kind.
-                JsonElement? pick = null;
-                foreach (var el in doc.RootElement.EnumerateArray())
-                {
-                    bool isPrerelease = el.TryGetProperty("prerelease", out var p) && p.GetBoolean();
-                    if (!isPrerelease)   { pick = el; break; }
-                    pick ??= el;
-                }
-                if (pick.HasValue && pick.Value.TryGetProperty("tag_name", out var t))
-                    AvailableVersion = NormalizeTag(t.GetString());
-                else
-                    AvailableVersion = null;
-            }
-            else
-            {
-                AvailableVersion = null;
-            }
+            // CDN HEAD redirect — no REST API quota consumed.
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync(MOD_OWNER, MOD_REPO, ct));
         }
         catch
         {

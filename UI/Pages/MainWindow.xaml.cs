@@ -268,12 +268,6 @@ public partial class MainWindow : Window
 
         SetStatus("Checking for updates...");
 
-        // On first run, auto-add only games that are locally installed and not web-based.
-        // Web/browser games (IsWebBased=true) must be added manually via Browse so a
-        // fresh install does not start with a cluttered library.
-        foreach (var p in GameRegistry.All.Where(p => p.IsInstalled && !p.IsWebBased))
-            LibraryStore.Add(p.GameId);
-
         // Build sidebar respecting library order (favorites first)
         RebuildGameList();
 
@@ -294,14 +288,19 @@ public partial class MainWindow : Window
         }
 
         // Background: check for updates only on library plugins — not all 382.
-        // Running all plugins in parallel would fire hundreds of GitHub API calls
-        // at once and immediately exhaust the unauthenticated rate limit (60/hour).
-        // Library plugins are the only ones the user cares about right now.
+        // Running all plugins in parallel would fire hundreds of network calls at
+        // once and immediately exhaust the unauthenticated GitHub rate limit
+        // (60/hour). Library plugins are the only ones the user cares about now.
+        // A concurrency gate caps the simultaneous in-flight checks so the launcher
+        // never fires a burst — this protects every backend (GitHub, Thunderstore,
+        // Codeberg, …) regardless of whether a given plugin uses the CDN helper.
         var libraryIds  = new HashSet<string>(LibraryStore.GetSortedGameIds(), StringComparer.OrdinalIgnoreCase);
+        using var updateGate = new SemaphoreSlim(6);
         var updateChecks = GameRegistry.All
             .Where(p => libraryIds.Contains(p.GameId))
             .Select(async plugin =>
         {
+            await updateGate.WaitAsync();
             try
             {
                 using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
@@ -309,6 +308,7 @@ public partial class MainWindow : Window
                 await plugin.CheckForUpdateAsync(cts.Token).WaitAsync(cts.Token);
             }
             catch { /* timeout / offline — the version badge just stays as-is */ }
+            finally { updateGate.Release(); }
 
             // Continuations resume on the UI context (started from OnLoaded).
             if (_selectedPlugin == plugin)
@@ -620,10 +620,26 @@ public partial class MainWindow : Window
     /// True when the plugin has a known available version that differs from
     /// the installed one after normalization.
     private static bool UpdateAvailable(IGamePlugin plugin)
-        => plugin.AvailableVersion != null &&
-           !string.Equals(NormalizeVersion(plugin.InstalledVersion),
-                          NormalizeVersion(plugin.AvailableVersion),
-                          StringComparison.OrdinalIgnoreCase);
+    {
+        // No known available version means we can't claim an update. This also
+        // catches NormalizeTag(null) == "" (network failure / repo has no
+        // releases), which would otherwise render an empty "↑ UPDATE " badge.
+        if (string.IsNullOrEmpty(plugin.AvailableVersion)) return false;
+
+        string installed = NormalizeVersion(plugin.InstalledVersion);
+
+        // "installed" is a sentinel used by manual / ConnectsItself plugins that
+        // open a releases page and cannot report a real version. They can never
+        // know if an update exists, so suppress the (permanently-true) badge
+        // instead of nagging the user on every launch.
+        if (installed.Length == 0 ||
+            string.Equals(installed, "installed", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        return !string.Equals(installed,
+                              NormalizeVersion(plugin.AvailableVersion),
+                              StringComparison.OrdinalIgnoreCase);
+    }
 
     /// "Beta-1.9.13", "Beta 1.9.13", "beta1.9.13", "v1.9.13" → "1.9.13".
     /// Unknown formats pass through trimmed, so two equal odd strings still match.
@@ -2513,9 +2529,14 @@ public partial class MainWindow : Window
         });
         _apClient.SessionConnected += (mySlot, players) =>
         {
+            // Runs on the AP receive thread — capture the raising client so a
+            // concurrent sidebar Disconnect (which nulls/replaces + disposes
+            // _apClient) can't NRE us between these field reads.
+            var ap = _apClient;
+            if (ap == null) return;
             _tracker.OnConnected(mySlot, players);
-            _locationTracker.OnConnected(_apClient.ConnectedChecked,
-                                          _apClient.ConnectedMissing, players);
+            _locationTracker.OnConnected(ap.ConnectedChecked,
+                                          ap.ConnectedMissing, players);
             // Achievement ladder: first-connect + distinct-server tracking.
             AchievementStore.Instance.RecordApConnected(plugin.GameId, server);
             Dispatcher.Invoke(() =>
@@ -2524,7 +2545,7 @@ public partial class MainWindow : Window
                 RefreshProgressionPanel();
                 UpdateGameSuggestionBanner();
             });
-            _ = _apClient.GetDataPackageAsync(new[] { plugin.ApWorldName });
+            _ = ap.GetDataPackageAsync(new[] { plugin.ApWorldName });
         };
         _apClient.DataPackageReceived += (gameKey, data) =>
         {
@@ -2960,6 +2981,22 @@ public partial class MainWindow : Window
                     }
                 }, bgCts.Token);
             }
+        }
+        catch (Exception ex)
+        {
+            // BtnBrowse_Click is async void — an unhandled throw from the catalog
+            // fetch/parse/render would crash the process. Surface it as a card.
+            AppendLog($"[Catalog] Load failed: {ex.Message}");
+            CatalogPanel.Children.Clear();
+            CatalogPanel.Children.Add(new TextBlock
+            {
+                Text          = "Could not load the game catalog.\nCheck your internet connection and try again.",
+                FontSize      = 14,
+                Foreground    = (Brush)FindResource("BrushMuted"),
+                TextAlignment = TextAlignment.Center,
+                TextWrapping  = TextWrapping.Wrap,
+                Margin        = new Thickness(40)
+            });
         }
         finally
         {
@@ -6616,6 +6653,15 @@ public partial class MainWindow : Window
                 plugin.DisplayName, ToastKind.Success);
             success = true;
 
+            // Add to library on first install (not on updates).
+            // Games are ONLY auto-added to the library when the user installs them —
+            // not on startup (startup auto-add was removed to prevent SC2/etc. ghost entries).
+            if (!wasInstalled)
+            {
+                LibraryStore.Add(plugin.GameId);
+                RebuildGameList();
+            }
+
             // Achievement ladder: first-time installs only — an update of an
             // already-installed game is not an install.
             if (!wasInstalled)
@@ -6848,6 +6894,43 @@ public partial class MainWindow : Window
         {
             bool installed = await RunInstallAsync(_selectedPlugin);
             if (!installed || !_selectedPlugin.IsInstalled) return;
+        }
+
+        // D2: verify the original Diablo II data files are present before launch.
+        // The mod files are installed but the MPQs must come from the user's own copy.
+        if (_selectedPlugin is Plugins.DiabloII.D2Plugin d2launch
+            && !d2launch.HasOriginalGameFiles())
+        {
+            bool pick = ConfirmDialog.Show(this,
+                "Diablo II game files missing",
+                "The original Diablo II data files (MPQs) are not in the installation " +
+                "folder. Select the folder where Diablo II: Lord of Destruction is installed " +
+                "and the mod files will be placed there.",
+                "Select folder…", "Cancel");
+            if (!pick) return;
+
+            var dlg2 = new Microsoft.Win32.OpenFolderDialog
+            {
+                Title            = "Select your Diablo II: Lord of Destruction installation folder",
+                InitialDirectory = @"C:\Program Files (x86)",
+            };
+            if (dlg2.ShowDialog(this) != true) return;
+
+            string? err2 = d2launch.ValidateExistingInstall(dlg2.FolderName);
+            if (err2 != null)
+            {
+                ConfirmDialog.ShowInfo(this, "Folder not recognized", err2);
+                return;
+            }
+
+            d2launch.GameDirectory = dlg2.FolderName;
+            var ls2 = SettingsStore.Load();
+            ls2.DiabloIIPath = dlg2.FolderName;
+            SettingsStore.Save(ls2);
+
+            // Re-run install so mod files land in the newly selected folder.
+            bool reinstalled = await RunInstallAsync(d2launch);
+            if (!reinstalled || !d2launch.IsInstalled) return;
         }
 
         // Switch to Play tab so the log is visible
@@ -7765,9 +7848,14 @@ public partial class MainWindow : Window
             });
             _apClient.SessionConnected += (mySlot, players) =>
             {
+                // Runs on the AP receive thread — capture the raising client so a
+                // concurrent sidebar Disconnect (which nulls/replaces + disposes
+                // _apClient) can't NRE us between these field reads.
+                var ap = _apClient;
+                if (ap == null) return;
                 _tracker.OnConnected(mySlot, players);
-                _locationTracker.OnConnected(_apClient.ConnectedChecked,
-                                              _apClient.ConnectedMissing, players);
+                _locationTracker.OnConnected(ap.ConnectedChecked,
+                                              ap.ConnectedMissing, players);
                 // Achievement ladder: first-connect + distinct-server tracking.
                 AchievementStore.Instance.RecordApConnected(
                     plugin.GameId, session.ServerUri);
@@ -7777,7 +7865,7 @@ public partial class MainWindow : Window
                     RefreshProgressionPanel();
                     UpdateGameSuggestionBanner();
                 });
-                _ = _apClient.GetDataPackageAsync(new[] { plugin.ApWorldName });
+                _ = ap.GetDataPackageAsync(new[] { plugin.ApWorldName });
             };
             _apClient.DataPackageReceived += (gameKey, data) =>
             {
@@ -8036,8 +8124,18 @@ public partial class MainWindow : Window
 
     private async void OnGameExited(int exitCode)
     {
-        SetStatus($"Game exited (code {exitCode}).");
-        await CleanupSessionAsync();
+        // async void on a plugin event that fires on an arbitrary thread: an
+        // unhandled throw here would be unobserved and crash the process exactly
+        // when a game closes. Guard the whole teardown.
+        try
+        {
+            SetStatus($"Game exited (code {exitCode}).");
+            await CleanupSessionAsync();
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"[Error] Cleanup after game exit failed: {ex.Message}");
+        }
     }
 
     private async Task CleanupSessionAsync()
