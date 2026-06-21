@@ -198,6 +198,30 @@ public sealed class D2Plugin : IGamePlugin
         "version.dat",
     };
 
+    // ── Original-game detection ───────────────────────────────────────────────
+
+    /// True when the required original D2 data files are present in GameDirectory.
+    /// Used by the UI install flow to know when to show the "select D2 folder" picker.
+    public bool HasOriginalGameFiles()
+    {
+        if (string.IsNullOrEmpty(GameDirectory)) return false;
+        foreach (string f in new[] { "d2data.mpq", "d2char.mpq", "d2exp.mpq" })
+            if (File.Exists(Path.Combine(GameDirectory, f))) return true;
+        return false;
+    }
+
+    /// Validate that a folder looks like a Diablo II installation.
+    /// Returns null when valid, or a human-readable reason when not.
+    public string? ValidateExistingInstall(string folder)
+    {
+        foreach (string f in new[] { "d2data.mpq", "d2char.mpq" })
+            if (File.Exists(Path.Combine(folder, f))) return null;
+        return "That folder doesn't appear to contain Diablo II game data " +
+               "(expected d2data.mpq / d2char.mpq). " +
+               "Select the folder where Diablo II: Lord of Destruction is installed — " +
+               "typically C:\\Program Files (x86)\\Diablo II or similar.";
+    }
+
     // ── Constructor ───────────────────────────────────────────────────────────
 
     public D2Plugin()

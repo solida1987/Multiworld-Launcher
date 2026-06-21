@@ -6542,6 +6542,41 @@ public partial class MainWindow : Window
             return false;
         }
 
+        // D2Plugin: fresh install requires the user to point at their existing
+        // Diablo II installation. The mod places its files on top of the original
+        // game — the original MPQ data files are never downloaded (copyright).
+        if (plugin is Plugins.DiabloII.D2Plugin d2pre
+            && !d2pre.IsInstalled
+            && !d2pre.HasOriginalGameFiles())
+        {
+            bool pick = ConfirmDialog.Show(this,
+                "Select your Diablo II installation",
+                "Diablo II Archipelago is installed on top of your own copy of " +
+                "Diablo II: Lord of Destruction. Select the folder where Diablo II " +
+                "is already installed (mod files will be added there).",
+                "Select folder…", "Cancel");
+            if (!pick) return false;
+
+            var dlg = new Microsoft.Win32.OpenFolderDialog
+            {
+                Title            = "Select your Diablo II: Lord of Destruction installation folder",
+                InitialDirectory = @"C:\Program Files (x86)",
+            };
+            if (dlg.ShowDialog(this) != true) return false;
+
+            string? err = d2pre.ValidateExistingInstall(dlg.FolderName);
+            if (err != null)
+            {
+                ConfirmDialog.ShowInfo(this, "Folder not recognized", err);
+                return false;
+            }
+
+            d2pre.GameDirectory = dlg.FolderName;
+            var ls = SettingsStore.Load();
+            ls.DiabloIIPath = dlg.FolderName;
+            SettingsStore.Save(ls);
+        }
+
         var installCts = new CancellationTokenSource();
         _installCts    = installCts;
 
