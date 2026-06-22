@@ -44,17 +44,15 @@ unverified-placeholder details), not breakage.
 ### Genuine issues / action queue
 1. **D2 — FIXED + published (v2.1.1)** — reworked to separate Games/diablo2_archipelago
    folder + copy user's original MPQs + overlay mod; original never modified.
-2. **DUPLICATE game: SWE1R ≡ SwRacer** — both register the SAME game (Star Wars
-   Episode I: Racer, wcolding apworld+client, Steam 808910) under different GameIds
-   ("star_wars_ep1_racer" vs "star_wars_episode_i_racer"). One must be removed
-   (delete plugin + App.xaml.cs registration + catalog entry + build-verify).
-   (Also flagged in [[project-pending-tasks]].)
+2. **DUPLICATE game: SWE1R ≡ SwRacer — ✅ FIXED + published (v2.1.2)** — removed
+   SWE1R (`star_wars_ep1_racer`): deleted plugin file + App.xaml.cs registration +
+   catalog.json entry (JSON re-validated, 393 games remain). Kept SwRacer
+   (`star_wars_episode_i_racer`, "Racing"). Build 0/0.
 
-### Cosmetic only (not bugs)
-- **Hades2** — appid is ALREADY correct (H2_STEAM_APP_ID="1145350"); the header
-  comment + 2 settings-UI strings still say "(UNVERIFIED)" about the appid, which is
-  now misleading since it was verified/corrected. Optional: strip the stale UNVERIFIED
-  labels. Functionally fine.
+### Cosmetic — ✅ FIXED (v2.1.2)
+- **Hades2** — appid was already correct (H2_STEAM_APP_ID="1145350"); stripped the
+  stale "(UNVERIFIED)" appid labels from the header comment + 2 settings-UI strings.
+  Folder/exe/game-string best-effort fallbacks left intact.
 
 ### Web-verify queue (UNVERIFIED placeholders flagged in-code; recipe shape is correct)
 - ClairObscur (appid/exe/folder/game-string), DoronkoWanko (placeholder mod repo),
