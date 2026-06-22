@@ -311,7 +311,6 @@ public partial class App : Application
         GameRegistry.Register(new Plugins.FinalFantasyXIITrialMode.FinalFantasyXIITrialModePlugin());
         GameRegistry.Register(new Plugins.Emulated.Games.SuperMarioSunshinePlugin());
         GameRegistry.Register(new Plugins.DeepRockGalactic.DeepRockGalacticPlugin());
-        GameRegistry.Register(new Plugins.SWE1R.SWE1RPlugin());
         GameRegistry.Register(new Plugins.SystemShock2.SystemShock2Plugin());
         GameRegistry.Register(new Plugins.PlateUp.PlateUpPlugin());
         GameRegistry.Register(new Plugins.TwilightPrincess.TwilightPrincessPlugin());

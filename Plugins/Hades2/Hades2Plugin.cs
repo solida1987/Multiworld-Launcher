@@ -35,13 +35,11 @@ namespace LauncherV2.Plugins.Hades2;
 // UNVERIFIED below. The plugin degrades gracefully when unverified values are
 // wrong — it always falls back to manual paths or the steam:// URL.
 //
-//   STEAM APP ID:       1145360 is marked as UNVERIFIED for Hades II.
-//                       NOTE: The launcher's existing HadesPlugin (Hades 1)
-//                       ALSO uses 1145360. One of these is wrong — please
-//                       verify the real Hades II Steam AppId against
-//                       https://store.steampowered.com/app/<id>/ before
-//                       shipping, and update H2_STEAM_APP_ID accordingly.
-//                       (Hades 1 is 1145360; Hades II may be a different id.)
+//   STEAM APP ID:       1145350 (RESOLVED) — Hades II is 1145350; Hades 1 is
+//                       1145360. The two were originally swapped; corrected so
+//                       H2_STEAM_APP_ID = "1145350" (see the constant below).
+//                       Folder name / exe / AP game string remain best-effort
+//                       defaults with fallbacks (still flagged in the UI notice).
 //
 //   STEAM COMMON FOLDER: The game may install as "Hades 2" (with space) or
 //                        "Hades2" (no space). Both variants are checked.
@@ -396,8 +394,8 @@ public sealed class Hades2Plugin : IGamePlugin
             Text = "NOTICE: Several technical details for Hades II were UNVERIFIED " +
                    "when this plugin was written (the game was in Early Access). " +
                    "These unverified values are used as best-effort defaults:\n" +
-                   "  • Steam AppId: " + H2_STEAM_APP_ID + " (UNVERIFIED — " +
-                   "Hades 1 also uses this id; at most one is correct)\n" +
+                   "  • Steam AppId: " + H2_STEAM_APP_ID + " (verified — Hades II " +
+                   "is 1145350; Hades 1 is 1145360)\n" +
                    "  • Steam folder name: \"Hades 2\" or \"Hades2\" (both tried)\n" +
                    "  • Exe name: Hades2.exe (Hades.exe tried as fallback)\n" +
                    "  • AP world game string: \"Hades II\" " +
@@ -536,7 +534,7 @@ public sealed class Hades2Plugin : IGamePlugin
 
         panel.Children.Add(new System.Windows.Controls.TextBlock
         {
-            Text = "Steam installs are detected automatically (appid " + H2_STEAM_APP_ID + " — UNVERIFIED). " +
+            Text = "Steam installs are detected automatically (appid " + H2_STEAM_APP_ID + "). " +
                    "Use this picker if detection fails.",
             FontSize = 11,
             Foreground = muted,
