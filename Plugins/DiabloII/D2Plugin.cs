@@ -118,6 +118,11 @@ public sealed class D2Plugin : IGamePlugin
 
     public event Action<long[]>? LocationsChecked;
 
+    /// "RECV:&lt;text&gt;" from the DLL in standalone — a reward notification formatted
+    /// "&lt;location&gt;: &lt;reward&gt;". The host appends it to the tracker's Received
+    /// tab so a solo run shows what each check granted (no AP server involved).
+    public event Action<string>? StandaloneItemReceived;
+
     /// The game's full active location universe (standalone only) — the DLL
     /// streams it as MISSING: once the pipe connects so the tracker can show
     /// unchecked locations + per-category totals like an AP session. Not on
@@ -147,6 +152,11 @@ public sealed class D2Plugin : IGamePlugin
     /// write ap_settings.dat BEFORE the STATE:CONNECTED push so the DLL never
     /// applies the connected state ahead of the settings file.
     public Func<JsonElement?>? GetSlotData { get; set; }
+
+    /// Supplies the current AP room seed name (null when not connected). The AP
+    /// launch path derives a stable per-world seed from this so its data-file
+    /// randomization is reproducible across relaunches of the same multiworld.
+    public Func<string?>? GetSeedName { get; set; }
 
     // ── GitHub API ────────────────────────────────────────────────────────────
 
@@ -408,6 +418,107 @@ public sealed class D2Plugin : IGamePlugin
         {
             // Update: manifest-based incremental file sync.
             await InstallFromManifestAsync(manifestUrl, apworldUrl, tag, progress, ct);
+        }
+    }
+
+    // ── Repair (antivirus deletes D2Arch_Launcher.exe) ────────────────────────
+
+    /// Mod binaries that MUST exist for the game to launch. Antivirus — especially
+    /// Windows Defender — frequently quarantines D2Arch_Launcher.exe (the 32-bit
+    /// injector) as a false positive; the Repair flow restores exactly these.
+    private static readonly string[] CriticalModFiles =
+    {
+        "D2Arch_Launcher.exe",
+        "D2Archipelago.dll",
+        @"patch\D2Archipelago.dll",
+    };
+
+    /// Critical mod files currently missing from the install (paths relative to
+    /// GameDirectory). Empty list = nothing to repair. Used by the launch-time
+    /// Repair prompt so a quarantined file is a one-click fix, not a dead end.
+    public List<string> GetMissingCriticalFiles()
+    {
+        var missing = new List<string>();
+        if (!Directory.Exists(GameDirectory)) return missing;   // not installed → not a "repair" case
+        foreach (string rel in CriticalModFiles)
+            if (!File.Exists(Path.Combine(GameDirectory, rel)))
+                missing.Add(rel);
+        return missing;
+    }
+
+    /// Re-download the mod package and restore ONLY the missing critical files,
+    /// without touching the rest of the install. Returns how many were restored.
+    public async Task<int> RepairMissingFilesAsync(
+        IProgress<(int Pct, string Msg)> progress, CancellationToken ct = default)
+    {
+        var missing = GetMissingCriticalFiles();
+        if (missing.Count == 0) return 0;
+
+        progress.Report((0, "Checking release..."));
+        string? tag = await FetchLatestTagAsync(ct)
+            ?? throw new InvalidOperationException(
+                "Could not reach GitHub to download the missing files — check your internet connection.");
+        string packageUrl = DownloadUrl(tag, "game_package.zip");
+
+        string tempZip = Path.Combine(Path.GetTempPath(), "d2arch_repair.zip");
+        try
+        {
+            progress.Report((5, "Downloading mod files..."));
+            await DownloadWithProgressAsync(packageUrl, tempZip, 5, 85, progress, ct);
+            ct.ThrowIfCancellationRequested();
+
+            progress.Report((88, "Restoring missing files..."));
+            var wanted = new HashSet<string>(
+                missing.Select(m => m.Replace('\\', '/')), StringComparer.OrdinalIgnoreCase);
+
+            int restored = 0;
+            using var zip = ZipFile.OpenRead(tempZip);
+            foreach (var entry in zip.Entries)
+            {
+                if (string.IsNullOrEmpty(entry.Name)) continue;
+                if (!wanted.Contains(entry.FullName.Replace('\\', '/'))) continue;
+                string dest = Path.Combine(GameDirectory, entry.FullName.Replace('/', '\\'));
+                string? dir = Path.GetDirectoryName(dest);
+                if (dir != null) Directory.CreateDirectory(dir);
+                entry.ExtractToFile(dest, overwrite: true);
+                restored++;
+            }
+            progress.Report((100, $"Restored {restored} file(s)."));
+            return restored;
+        }
+        finally { try { File.Delete(tempZip); } catch { /* ignore */ } }
+    }
+
+    /// Add the install folder to Windows Defender's exclusion list so it stops
+    /// flagging D2Arch_Launcher.exe as a false positive (the mod injects into D2,
+    /// which Defender treats as suspicious). Requires admin — launches an elevated
+    /// PowerShell (UAC prompt). Returns true if the exclusion command succeeded.
+    /// Returns false if the user declined UAC or Defender cmdlets aren't available
+    /// (e.g. a third-party antivirus is the active provider).
+    public bool AddDefenderExclusion()
+    {
+        try
+        {
+            string psPath = GameDirectory.Replace("'", "''");
+            var psi = new ProcessStartInfo
+            {
+                FileName  = "powershell.exe",
+                Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command " +
+                            $"\"Add-MpPreference -ExclusionPath '{psPath}'; " +
+                            "Add-MpPreference -ExclusionProcess 'D2Arch_Launcher.exe'\"",
+                UseShellExecute = true,   // required for Verb=runas
+                Verb            = "runas",
+                CreateNoWindow  = true,
+                WindowStyle     = ProcessWindowStyle.Hidden,
+            };
+            using var p = Process.Start(psi);
+            if (p == null) return false;
+            p.WaitForExit(30000);
+            return p.HasExited && p.ExitCode == 0;
+        }
+        catch
+        {
+            return false;
         }
     }
 
@@ -726,6 +837,14 @@ public sealed class D2Plugin : IGamePlugin
             $"d2arch_v2_{Environment.ProcessId}_{Guid.NewGuid().ToString("N")[..8]}";
         WriteApCredentials(session, pipeName);
 
+        // 1.5 — AP parity: apply the same seed-bound txt randomization the standalone
+        // path uses (monster / super-unique / shop shuffle + skill/item reqs), driven
+        // by the AP slot_data + a stable per-world seed, with the same progress bar.
+        // The DLL then skips its own monster/super-unique shuffle (LauncherDataShuffle)
+        // but still does the act-boss cosmetic swap. No-op (DLL keeps its runtime
+        // shuffle) if slot_data isn't available yet. RestorePristine runs on exit.
+        await ApplyApDataTablesAsync(session);
+
         // 2. Start named pipe server BEFORE launching Game.exe so the DLL
         //    can connect immediately after injection. Byte mode: the DLL
         //    client reads a byte stream and frames messages by '\n', so the
@@ -753,6 +872,13 @@ public sealed class D2Plugin : IGamePlugin
             if (Interlocked.Exchange(ref exitRaised, 1) == 1) return;
             IsRunning = false;
             ScrubApPassword();   // session over — blank the ini password (P3-20)
+            if (_apAppliedDataTables)
+            {
+                _apAppliedDataTables = false;
+                // Reset the seed-patched tables (with the "Nulstiller" bar), same as
+                // the standalone exit handler — never leave the install patched.
+                D2RandomizeProgress.RunRestoreWithProgress(GameDirectory);
+            }
             int code = 0;
             try { code = proc?.ExitCode ?? 0; } catch { /* handle already gone */ }
             GameExited?.Invoke(code);
@@ -876,6 +1002,61 @@ public sealed class D2Plugin : IGamePlugin
         }
     }
 
+    // ── AP data-table parity (mirror the standalone txt randomization) ────────
+
+    /// Set once we've applied seed-patched tables for an AP session, so the exit
+    /// handler knows to reset the install (and only then shows the reset bar).
+    private bool _apAppliedDataTables;
+
+    /// Run the standalone seed-bound txt randomization for an AP world: read the
+    /// toggles from slot_data, derive a stable per-world seed, generate+apply the
+    /// tables (with the progress bar), and flag the DLL to skip its own monster/
+    /// super-unique shuffle. Best-effort — if slot_data isn't ready (connected after
+    /// launch) it does nothing and the DLL keeps doing the shuffle at runtime.
+    private async Task ApplyApDataTablesAsync(ApSession session)
+    {
+        try
+        {
+            if (GetSlotData?.Invoke() is not JsonElement sd || sd.ValueKind != JsonValueKind.Object)
+                return;
+
+            var settings = D2RandomizerSettings.FromSlotData(sd);
+            long seed = StableApSeed(session);
+            string saveFolder = new D2SeedLibrary(GameDirectory).SeedFolder(seed);
+            Directory.CreateDirectory(saveFolder);
+
+            // Tell the DLL the launcher owns the monster/super-unique shuffle this
+            // session (it still does the act-boss cosmetic swap itself). Written to
+            // d2arch.ini [settings]; the DLL reads it in both AP and offline modes.
+            try
+            {
+                string ini = Path.Combine(GameDirectory, "Archipelago", "d2arch.ini");
+                var lines = File.Exists(ini)
+                    ? new List<string>(File.ReadAllLines(ini)) : new List<string>();
+                SetIniSectionValue(lines, "settings", "LauncherDataShuffle", "1");
+                File.WriteAllLines(ini, lines);
+            }
+            catch { /* non-fatal */ }
+
+            await D2RandomizeProgress.RunApplyAsync(settings, seed, saveFolder, GameDirectory);
+            _apAppliedDataTables = true;
+        }
+        catch { /* non-fatal — fall back to the DLL's runtime shuffle */ }
+    }
+
+    /// Stable, reproducible per-world seed for AP data-file randomization: derived
+    /// from the AP room seed name (falling back to the server) + the slot name, so
+    /// the same multiworld always yields the same local cosmetic randomization.
+    private long StableApSeed(ApSession session)
+    {
+        string seedName = GetSeedName?.Invoke() ?? "";
+        string basis = (string.IsNullOrEmpty(seedName) ? session.ServerUri : seedName)
+                       + "|" + session.SlotName;
+        ulong h = 1469598103934665603UL;          // FNV-1a 64-bit
+        foreach (char c in basis) { h ^= c; h *= 1099511628211UL; }
+        return (long)(h & 0x7FFFFFFFFFFFFFFFUL);
+    }
+
     // ── Standalone launch (no AP connection) ──────────────────────────────────
 
     public bool SupportsStandalone => true;
@@ -922,6 +1103,15 @@ public sealed class D2Plugin : IGamePlugin
         string saveFolder = lib.SeedFolder(choice.Seed);
         Directory.CreateDirectory(saveFolder);
 
+        // 2.1 — Seed-bound data tables. Generate this seed's complete excel set
+        // (skill/item level + stat requirements baked in per its settings, default
+        // or not) into its folder, then overlay onto the live install so the game
+        // loads the seed's tables. RestorePristine in the Exited handler resets the
+        // install afterwards; ApplySeed also restores-then-overlays so a prior crash
+        // never leaves the folder patched. The on-screen bar steps through
+        // backup → generate → apply → confirm so it's visible the world is randomized.
+        await D2RandomizeProgress.RunApplyAsync(settings, choice.Seed, saveFolder, GameDirectory);
+
         // 3. Persist the chosen options. We write a PipeName (but blank server/
         //    slot/pass) so the mod opens the launcher pipe and streams CHECK:
         //    for the TRACKER — the DLL sends checks whenever the pipe is open,
@@ -952,6 +1142,9 @@ public sealed class D2Plugin : IGamePlugin
         {
             IsRunning = false;
             DisposePipe();   // tear down the tracker pipe with the game
+            // 2.1 — reset seed-patched data tables, with a small "nulstiller" bar
+            // (falls back to a silent restore if the app is already shutting down).
+            D2RandomizeProgress.RunRestoreWithProgress(GameDirectory);
             int code = 0;
             try { code = game.ExitCode; } catch { /* handle already gone */ }
             GameExited?.Invoke(code);
@@ -1154,6 +1347,13 @@ public sealed class D2Plugin : IGamePlugin
                 if (long.TryParse(p.Trim(), out long id))
                     ids.Add(id);
             if (ids.Count > 0) LocationsMissing?.Invoke(ids.ToArray());
+        }
+        // "RECV:<text>" — standalone reward notification ("<location>: <reward>"),
+        // surfaced in the tracker's Received tab so solo runs show what each check gave.
+        else if (msg.StartsWith("RECV:", StringComparison.Ordinal))
+        {
+            string text = msg[5..].Trim();
+            if (text.Length > 0) StandaloneItemReceived?.Invoke(text);
         }
         // "GOAL" — player completed the Archipelago goal
         else if (msg == "GOAL")
@@ -1373,6 +1573,45 @@ public sealed class D2Plugin : IGamePlugin
         chkNoSound.Checked   += (_, _) => { var s = SettingsStore.Load(); s.D2NoSound = true;  SettingsStore.Save(s); };
         chkNoSound.Unchecked += (_, _) => { var s = SettingsStore.Load(); s.D2NoSound = false; SettingsStore.Save(s); };
         panel.Children.Add(chkNoSound);
+
+        // ── Section: Graphics (D2GL) ───────────────────────────────────────
+        panel.Children.Add(new TextBlock
+        {
+            Text = "GRAPHICS (D2GL)", FontSize = 10, FontWeight = FontWeights.SemiBold,
+            Foreground = muted, Margin = new Thickness(0, 0, 0, 8),
+        });
+        panel.Children.Add(new TextBlock
+        {
+            Text = "Fullscreen, window size, v-sync, FPS caps and more — set them here " +
+                   "before launch instead of the in-game Ctrl+O menu.",
+            FontSize = 11, Foreground = muted, TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 0, 0, 8),
+        });
+        var gfxBtn = new Button
+        {
+            Content             = "🖵  Graphics settings…",
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Padding             = new Thickness(10, 6, 10, 6),
+            Background          = new SolidColorBrush(Color.FromRgb(0x1A, 0x1E, 0x30)),
+            Foreground          = fg,
+            BorderBrush         = new SolidColorBrush(Color.FromRgb(0x2A, 0x30, 0x50)),
+            FontSize            = 12,
+            Cursor              = System.Windows.Input.Cursors.Hand,
+            Margin              = new Thickness(0, 0, 0, 16),
+        };
+        gfxBtn.Click += (_, _) =>
+        {
+            if (!Directory.Exists(GameDirectory))
+            {
+                System.Windows.MessageBox.Show(
+                    "Install Diablo II from the Play tab first — the graphics config " +
+                    "lives in the game folder.", "Not installed yet",
+                    System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Information);
+                return;
+            }
+            D2GLSettingsDialog.ShowFor(Application.Current?.MainWindow, GameDirectory);
+        };
+        panel.Children.Add(gfxBtn);
 
         // ── Section: Links ────────────────────────────────────────────────
         panel.Children.Add(new TextBlock

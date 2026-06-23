@@ -268,6 +268,11 @@ public partial class MainWindow : Window
 
         SetStatus("Checking for updates...");
 
+        // First run (and every run until accepted): make sure the launcher + game
+        // folders are in Windows Defender's exclusions so the mod isn't blocked or
+        // deleted. Fire-and-forget — it waits for the UI to settle, never blocks.
+        _ = EnsureDefenderExclusionsAtStartupAsync();
+
         // Build sidebar respecting library order (favorites first)
         RebuildGameList();
 
@@ -7074,6 +7079,10 @@ public partial class MainWindow : Window
             return;
         }
 
+        // Antivirus often deletes D2Arch_Launcher.exe — offer a one-click repair
+        // before dead-ending at launch (buttons not yet disabled, so cancel is clean).
+        if (!await EnsureD2ModFilesAsync(plugin)) return;
+
         BtnStandalone.IsEnabled = false;
         BtnPlay.IsEnabled       = false;
         SyncOverviewPlayButton();
@@ -7151,7 +7160,10 @@ public partial class MainWindow : Window
         {
             SetStatus($"Standalone launch failed: {ex.Message}");
             AppendLog($"[Error] {ex.Message}");
-            ConfirmDialog.ShowInfo(this, "Could not launch the game", ex.Message);
+            // If Windows Defender blocked the mod exe, offer to add a Defender
+            // exclusion instead of just showing the dead-end error.
+            if (!await TryOfferDefenderExclusionAsync(plugin, ex))
+                ConfirmDialog.ShowInfo(this, "Could not launch the game", ex.Message);
             BtnStandalone.IsEnabled = true;
             BtnPlay.IsEnabled       = true;
             SyncOverviewPlayButton();
@@ -7948,8 +7960,254 @@ public partial class MainWindow : Window
         plugin.GoalCompleted    -= OnPluginGoalCompleted;
     }
 
+    /// 2.1 — Before launching Diablo II, make sure the antivirus-prone mod files
+    /// exist. Antivirus (especially Windows Defender) routinely quarantines
+    /// D2Arch_Launcher.exe; rather than dead-ending at launch, offer a one-click
+    /// repair that re-downloads + restores just the missing files. Returns true when
+    /// it's safe to launch (nothing missing, or repair succeeded), false otherwise.
+    private async Task<bool> EnsureD2ModFilesAsync(IGamePlugin plugin)
+    {
+        if (plugin is not Plugins.DiabloII.D2Plugin d2) return true;
+        var missing = d2.GetMissingCriticalFiles();
+        if (missing.Count == 0) return true;
+
+        string list = string.Join("\n", missing.Select(m => "   • " + m));
+        var ask = System.Windows.MessageBox.Show(this,
+            "Some Diablo II mod files are missing:\n\n" + list +
+            "\n\nThis is almost always your antivirus (especially Windows Defender) " +
+            "removing D2Arch_Launcher.exe as a false positive.\n\n" +
+            "Download and restore them now?",
+            "Mod files missing — repair?",
+            System.Windows.MessageBoxButton.YesNo, System.Windows.MessageBoxImage.Warning);
+        if (ask != System.Windows.MessageBoxResult.Yes) return false;
+
+        try
+        {
+            SwitchTab(PageTab.Play);
+            SetStatus("Repairing — downloading missing mod files...");
+            var progress = new Progress<(int Pct, string Msg)>(p =>
+            {
+                ProgressBar.Value = p.Pct;
+                SetStatus("Repairing — " + p.Msg);
+            });
+            int restored = await d2.RepairMissingFilesAsync(progress);
+            AppendLog($"[Repair] Restored {restored} file(s).");
+
+            var still = d2.GetMissingCriticalFiles();
+            if (still.Count > 0)
+            {
+                System.Windows.MessageBox.Show(this,
+                    "The files downloaded but are still missing — your antivirus is " +
+                    "deleting them again as they're written. Add the game's install folder " +
+                    "to your antivirus exclusions, then try launching again.",
+                    "Repair blocked by antivirus",
+                    System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
+                SetStatus("Repair blocked by antivirus.");
+                return false;
+            }
+            SetStatus("Repair complete.");
+            AppendLog("[Repair] All required files restored.");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            AppendLog("[Repair] Failed: " + ex.Message);
+            System.Windows.MessageBox.Show(this,
+                "Could not download the missing files:\n\n" + ex.Message,
+                "Repair failed", System.Windows.MessageBoxButton.OK,
+                System.Windows.MessageBoxImage.Error);
+            SetStatus("Repair failed.");
+            return false;
+        }
+    }
+
+    /// True when a launch exception means Windows Defender (or another AV) blocked
+    /// the mod exe as a virus/PUA false positive — Win32 error 225 (ERROR_VIRUS_
+    /// INFECTED) or a localized "virus / unwanted software" message.
+    private static bool IsAntivirusBlock(Exception ex)
+    {
+        for (Exception? e = ex; e != null; e = e.InnerException)
+        {
+            if (e is System.ComponentModel.Win32Exception w32 && w32.NativeErrorCode == 225)
+                return true;
+            string m = (e.Message ?? "").ToLowerInvariant();
+            if (m.Contains("virus") || m.Contains("potentially unwanted")
+                || m.Contains("unwanted software") || m.Contains("uønsket"))
+                return true;
+        }
+        return false;
+    }
+
+    /// When a launch failed because Defender blocked the mod exe, offer a one-click
+    /// fix: add the game folder to Windows Defender's exclusion list (one admin/UAC
+    /// click). Returns true if it handled the error (showed its own UI), false to
+    /// fall through to the generic "could not launch" dialog.
+    private async Task<bool> TryOfferDefenderExclusionAsync(IGamePlugin plugin, Exception ex)
+    {
+        if (plugin is not Plugins.DiabloII.D2Plugin d2 || !IsAntivirusBlock(ex)) return false;
+
+        string gameDir = d2.GameDirectory;
+        var ask = System.Windows.MessageBox.Show(this,
+            "Windows Defender blocked the mod from starting (false positive):\n\n" +
+            ex.Message +
+            "\n\nThe mod injects into Diablo II, which Defender flags as suspicious. " +
+            "I can add the game folder to Defender's exclusion list so it stops:\n\n" +
+            gameDir +
+            "\n\nWindows will ask for administrator permission. Add the exclusion now?",
+            "Add Windows Defender exclusion?",
+            System.Windows.MessageBoxButton.YesNo, System.Windows.MessageBoxImage.Warning);
+        if (ask != System.Windows.MessageBoxResult.Yes) return true;   // handled — user declined the fix
+
+        SetStatus("Adding Windows Defender exclusion...");
+        bool ok = await Task.Run(() => d2.AddDefenderExclusion());
+        if (ok)
+        {
+            // Defender may also have quarantined the exe — restore it if so.
+            try { if (d2.GetMissingCriticalFiles().Count > 0) await EnsureD2ModFilesAsync(plugin); }
+            catch { /* best effort */ }
+            AppendLog("[Defender] Exclusion added for " + gameDir);
+            System.Windows.MessageBox.Show(this,
+                "Added to Windows Defender's exclusions. Click Play / Launch again to start the game.",
+                "Exclusion added", System.Windows.MessageBoxButton.OK,
+                System.Windows.MessageBoxImage.Information);
+        }
+        else
+        {
+            System.Windows.MessageBox.Show(this,
+                "Couldn't add the exclusion automatically (the admin prompt may have been " +
+                "declined, or a third-party antivirus is active). Add it manually:\n\n" +
+                "Windows Security → Virus & threat protection → Manage settings → " +
+                "Exclusions → Add an exclusion → Folder:\n\n" + gameDir,
+                "Add the exclusion manually", System.Windows.MessageBoxButton.OK,
+                System.Windows.MessageBoxImage.Warning);
+        }
+        return true;
+    }
+
+    /// At startup, make sure the launcher's own folder + the Diablo II install are in
+    /// Windows Defender's exclusion list (Defender false-positives the mod injector and
+    /// blocks/deletes it). Re-prompts every startup until the user accepts. Best-effort —
+    /// never blocks startup, and silently no-ops when Defender isn't the active provider.
+    private async Task EnsureDefenderExclusionsAtStartupAsync()
+    {
+        try
+        {
+            var s = SettingsStore.Load();
+            if (s.DefenderExclusionsDone) return;
+
+            await Task.Delay(1500);   // let the main window finish rendering first
+
+            var paths = new List<string>();
+            try { paths.Add(AppContext.BaseDirectory.TrimEnd('\\')); } catch { }
+            try
+            {
+                string d2dir = SettingsStore.DefaultGamePath("diablo2_archipelago").TrimEnd('\\');
+                if (Directory.Exists(d2dir)) paths.Add(d2dir);
+            }
+            catch { }
+            if (paths.Count == 0) return;
+
+            // Already excluded? (read-only query — no admin needed)
+            var existing = await Task.Run(GetDefenderExclusionPaths);
+            var missing = paths.Where(p => !existing.Any(e =>
+                string.Equals(e.TrimEnd('\\'), p, StringComparison.OrdinalIgnoreCase))).ToList();
+            if (missing.Count == 0)
+            {
+                s.DefenderExclusionsDone = true; SettingsStore.Save(s);
+                return;
+            }
+
+            string list = string.Join("\n", missing.Select(m => "   • " + m));
+            var ask = System.Windows.MessageBox.Show(this,
+                "To stop Windows Defender from blocking or deleting the Diablo II mod " +
+                "(it false-positives the injector), these folders should be added to " +
+                "Defender's exclusion list:\n\n" + list +
+                "\n\nWindows will ask for administrator permission once. Add them now?",
+                "Allow the game in Windows Defender?",
+                System.Windows.MessageBoxButton.YesNo, System.Windows.MessageBoxImage.Warning);
+            if (ask != System.Windows.MessageBoxResult.Yes) return;  // re-prompt next startup
+
+            bool ok = await Task.Run(() => AddDefenderExclusionPaths(missing));
+            if (ok)
+            {
+                s.DefenderExclusionsDone = true; SettingsStore.Save(s);
+                AppendLog("[Defender] Exclusions added: " + string.Join(", ", missing));
+                System.Windows.MessageBox.Show(this,
+                    "Done — the launcher and game folders are now allowed in Windows Defender.",
+                    "Exclusions added", System.Windows.MessageBoxButton.OK,
+                    System.Windows.MessageBoxImage.Information);
+            }
+            else
+            {
+                AppendLog("[Defender] Startup exclusion add was declined or failed.");
+                // Flag stays false → we ask again next startup.
+            }
+        }
+        catch (Exception ex)
+        {
+            AppendLog("[Defender] Startup check failed: " + ex.Message);
+        }
+    }
+
+    /// Read Windows Defender's current ExclusionPath list (no admin). Empty list when
+    /// Defender isn't the active provider or the query fails.
+    private static List<string> GetDefenderExclusionPaths()
+    {
+        var result = new List<string>();
+        try
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName  = "powershell.exe",
+                Arguments = "-NoProfile -ExecutionPolicy Bypass -Command \"(Get-MpPreference).ExclusionPath\"",
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError  = true,
+                CreateNoWindow = true,
+            };
+            using var p = System.Diagnostics.Process.Start(psi);
+            if (p == null) return result;
+            string outp = p.StandardOutput.ReadToEnd();
+            p.WaitForExit(8000);
+            foreach (var line in outp.Split('\n'))
+            {
+                string t = line.Trim();
+                if (t.Length > 0) result.Add(t);
+            }
+        }
+        catch { /* Defender absent / query blocked — treat as none excluded */ }
+        return result;
+    }
+
+    /// Add multiple paths to Windows Defender's exclusions in one elevated call (UAC).
+    private static bool AddDefenderExclusionPaths(List<string> paths)
+    {
+        try
+        {
+            string arr = string.Join(",", paths.Select(p => "'" + p.Replace("'", "''") + "'"));
+            var psi = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName  = "powershell.exe",
+                Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command " +
+                            $"\"Add-MpPreference -ExclusionPath {arr}\"",
+                UseShellExecute = true,
+                Verb            = "runas",
+                CreateNoWindow  = true,
+                WindowStyle     = System.Diagnostics.ProcessWindowStyle.Hidden,
+            };
+            using var p = System.Diagnostics.Process.Start(psi);
+            if (p == null) return false;
+            p.WaitForExit(30000);
+            return p.HasExited && p.ExitCode == 0;
+        }
+        catch { return false; }
+    }
+
     private async Task LaunchGameAsync(IGamePlugin plugin)
     {
+        // Antivirus often quarantines D2Arch_Launcher.exe — offer repair, not a dead end.
+        if (!await EnsureD2ModFilesAsync(plugin)) return;
+
         bool alreadyConnected = _apClient?.State == ApConnectionState.Connected;
 
         // Native-AP games (ConnectsItself, e.g. the OpenTTD fork) hold the slot
@@ -8094,6 +8352,21 @@ public partial class MainWindow : Window
             // Slot-data supplier — lets the plugin write ap_settings.dat
             // BEFORE pushing STATE:CONNECTED (LoadAPSettings ordering).
             d2.GetSlotData = () => _apClient?.SlotData;
+
+            // Seed-name supplier — the AP launch path derives a stable per-world
+            // seed from it for the data-file randomization (same-world reproducible).
+            d2.GetSeedName = () => _apClient?.SeedName;
+
+            // Standalone "Received" — the mod forwards each check's reward as
+            // "<location>: <reward>"; split it and append to the item tracker so a
+            // solo run's Received tab lists what every check granted (no AP server).
+            d2.StandaloneItemReceived += text =>
+            {
+                int sep = text.IndexOf(": ", StringComparison.Ordinal);
+                string loc    = sep > 0 ? text[..sep]       : "Check";
+                string reward = sep > 0 ? text[(sep + 2)..] : text;
+                _tracker.RecordStandalone(loc, reward);
+            };
 
             // DeathLink send-side: in-game death → AP Bounce, only when opted in.
             d2.OnPlayerDied = cause =>
@@ -8280,6 +8553,8 @@ public partial class MainWindow : Window
             // launch-specific errors (AV guidance etc.) pass through unchanged.
             AppendLog($"[Error] {TranslateConnectError(ex, session.ServerUri)}");
             SetStatus("Launch failed.");
+            // If Windows Defender blocked the mod exe, offer to add an exclusion.
+            await TryOfferDefenderExclusionAsync(plugin, ex);
             await CleanupSessionAsync();
             _currentSession = null;
         }

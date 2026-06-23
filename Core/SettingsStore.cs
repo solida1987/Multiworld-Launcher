@@ -47,6 +47,13 @@ public sealed class LauncherSettings
     [JsonPropertyName("d2_no_sound")]
     public bool D2NoSound { get; set; } = false;
 
+    /// One-time: the launcher + game folders have been added to (or already exist
+    /// in) Windows Defender's exclusions. Re-checked at every startup until true, so
+    /// the prompt keeps reappearing until the user accepts (Defender false-positives
+    /// the mod injector). Set once the exclusions are confirmed present.
+    [JsonPropertyName("defender_exclusions_done")]
+    public bool DefenderExclusionsDone { get; set; } = false;
+
     /// Launch OpenTTD fullscreen (§12). Applied by writing "fullscreen = …"
     /// into the [misc] section of the install's own data\openttd.cfg before
     /// each launch — OpenTTD has no Windows command-line fullscreen switch

@@ -173,6 +173,38 @@ public sealed class ApItemTracker
         ItemsAdded?.Invoke(added);
     }
 
+    /// Record a STANDALONE reward (no AP server). The D2 mod forwards each check's
+    /// reward as "&lt;location&gt;: &lt;reward&gt;" over the pipe; the caller splits it
+    /// and we append an entry attributed to the local player so it shows up in the
+    /// Received tab exactly like an AP item. Thread-safe; raises ItemsAdded.
+    public void RecordStandalone(string locationName, string rewardName)
+    {
+        TrackedItem entry;
+        lock (_lock)
+        {
+            entry = new TrackedItem
+            {
+                Index        = _nextIndex++,
+                ItemId       = 0,
+                ItemName     = rewardName,
+                LocationId   = 0,
+                LocationName = locationName,
+                SenderSlot   = _mySlot,
+                SenderName   = "Me",
+                ReceiverSlot = _mySlot,
+                ReceiverName = "Me",
+                Timestamp    = DateTimeOffset.Now,
+                IsForMe      = true,
+                IFoundIt     = true,
+                ItemFlags    = 0,
+            };
+            _all.Add(entry);
+            if (_all.Count > LauncherConstants.ItemTrackerMaxEntries)
+                _all.RemoveRange(0, _all.Count - LauncherConstants.ItemTrackerMaxEntries);
+        }
+        ItemsAdded?.Invoke(new[] { entry });
+    }
+
     // ── Filter API (for UI filter dropdowns) ─────────────────────────────────
 
     public enum FilterMode

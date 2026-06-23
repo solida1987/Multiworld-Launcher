@@ -410,7 +410,10 @@ internal sealed class D2StandaloneSettingsDialog : Window
     {
         host.Children.Add(Section("SHUFFLES"));
         host.Children.Add(Check("Monster shuffle", _s.MonsterShuffle, v => _s.MonsterShuffle = v));
-        host.Children.Add(Check("Boss shuffle",    _s.BossShuffle,    v => _s.BossShuffle = v));
+        host.Children.Add(Check("Super-unique shuffle (Bishibosh, Rakanishu, Pindleskin…)",
+            _s.SuperUniqueShuffle, v => _s.SuperUniqueShuffle = v));
+        host.Children.Add(Check("Act-boss shuffle (Andariel → Duriel → Mephisto → Diablo → Baal)",
+            _s.ActBossShuffle, v => _s.ActBossShuffle = v));
         host.Children.Add(Check("Shop shuffle",    _s.ShopShuffle,    v => _s.ShopShuffle = v));
         host.Children.Add(Check("Entrance shuffle", _s.EntranceShuffle, v => _s.EntranceShuffle = v));
     }
@@ -715,7 +718,8 @@ internal sealed class D2StandaloneSettingsDialog : Window
         TrapsEnabled = s.TrapsEnabled, TrapPct = s.TrapPct, GoldPct = s.GoldPct,
         StatPtsPct = s.StatPtsPct, SkillPtsPct = s.SkillPtsPct,
         ResetPtsPct = s.ResetPtsPct, LootPct = s.LootPct,
-        MonsterShuffle = s.MonsterShuffle, BossShuffle = s.BossShuffle,
+        MonsterShuffle = s.MonsterShuffle, SuperUniqueShuffle = s.SuperUniqueShuffle,
+        ActBossShuffle = s.ActBossShuffle,
         ShopShuffle = s.ShopShuffle, EntranceShuffle = s.EntranceShuffle,
         SkillLevelReqs = s.SkillLevelReqs, ItemLevelReqs = s.ItemLevelReqs,
         XPMultiplier = s.XPMultiplier,

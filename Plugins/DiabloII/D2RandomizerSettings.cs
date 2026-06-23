@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Text.Json;
 
 namespace LauncherV2.Plugins.DiabloII;
 
@@ -52,10 +53,16 @@ public sealed class D2RandomizerSettings
     public int  LootPct      { get; set; } = 18;
 
     // ── Shuffles ──────────────────────────────────────────────────────────
-    public bool MonsterShuffle  { get; set; } = false;
-    public bool BossShuffle     { get; set; } = false;
-    public bool ShopShuffle     { get; set; } = false;
-    public bool EntranceShuffle { get; set; } = false;
+    public bool MonsterShuffle     { get; set; } = false;
+    /// Super-unique (named mini-boss) shuffle — done via SuperUniques.txt swap
+    /// in the launcher (always-killable, no cinematic boss).
+    public bool SuperUniqueShuffle { get; set; } = false;
+    /// Act-boss shuffle — Andariel/Duriel/Mephisto/Diablo/Baal. Done in the DLL
+    /// (cosmetic only; each boss keeps its own behaviour slot so quests/cinematics
+    /// still resolve correctly).
+    public bool ActBossShuffle     { get; set; } = false;
+    public bool ShopShuffle        { get; set; } = false;
+    public bool EntranceShuffle    { get; set; } = false;
 
     // ── Requirements ──────────────────────────────────────────────────────
     public bool SkillLevelReqs { get; set; } = true;
@@ -260,9 +267,17 @@ public sealed class D2RandomizerSettings
         yield return new("LootPct",              LootPct.ToString(CultureInfo.InvariantCulture));
 
         yield return new("MonsterShuffle",       B(MonsterShuffle));
-        yield return new("BossShuffle",          B(BossShuffle));
+        yield return new("SuperUniqueShuffle",   B(SuperUniqueShuffle));
+        yield return new("ActBossShuffle",       B(ActBossShuffle));
+        // Back-compat: the DLL reads ActBossShuffle (falling back to BossShuffle).
+        yield return new("BossShuffle",          B(ActBossShuffle));
         yield return new("ShopShuffle",          B(ShopShuffle));
         yield return new("EntranceShuffle",      B(EntranceShuffle));
+
+        // 2.1 — the launcher now applies monster/boss/shop shuffle + skill/item
+        // requirements via the seed-bound data files (D2DataFiles). This flag tells
+        // the DLL to skip its own runtime monster/boss shuffle so they don't double.
+        yield return new("LauncherDataShuffle",  "1");
 
         yield return new("SkillLevelReqs",       B(SkillLevelReqs));
         yield return new("ItemLevelReqs",        B(ItemLevelReqs));
@@ -361,10 +376,13 @@ public sealed class D2RandomizerSettings
         d.ResetPtsPct  = Math.Clamp(I("ResetPtsPct", d.ResetPtsPct), 0, 100);
         d.LootPct      = Math.Clamp(I("LootPct",     d.LootPct),     0, 100);
 
-        d.MonsterShuffle  = Bl("MonsterShuffle",  d.MonsterShuffle);
-        d.BossShuffle     = Bl("BossShuffle",     d.BossShuffle);
-        d.ShopShuffle     = Bl("ShopShuffle",     d.ShopShuffle);
-        d.EntranceShuffle = Bl("EntranceShuffle", d.EntranceShuffle);
+        d.MonsterShuffle     = Bl("MonsterShuffle", d.MonsterShuffle);
+        // SuperUniqueShuffle is the renamed old "BossShuffle"; fall back to it so
+        // existing inis keep working. ActBossShuffle is the new DLL act-boss toggle.
+        d.SuperUniqueShuffle = Bl("SuperUniqueShuffle", Bl("BossShuffle", d.SuperUniqueShuffle));
+        d.ActBossShuffle     = Bl("ActBossShuffle", d.ActBossShuffle);
+        d.ShopShuffle        = Bl("ShopShuffle",     d.ShopShuffle);
+        d.EntranceShuffle    = Bl("EntranceShuffle", d.EntranceShuffle);
 
         d.SkillLevelReqs = Bl("SkillLevelReqs", d.SkillLevelReqs);
         d.ItemLevelReqs  = Bl("ItemLevelReqs",  d.ItemLevelReqs);
@@ -418,6 +436,40 @@ public sealed class D2RandomizerSettings
                 StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
         d.CustomGoalGold = L("CustomGoalGold", 0);
 
+        return d;
+    }
+
+    /// Build the data-file-relevant settings from an AP slot_data object, so an AP
+    /// world randomizes its tables exactly like a standalone seed. Only the fields
+    /// the txt patcher consumes are mapped (monster / super-unique / shop shuffle +
+    /// skill/item requirements); everything else keeps its default. Act-boss shuffle
+    /// stays in the DLL (it reads boss_shuffle from slot_data itself).
+    public static D2RandomizerSettings FromSlotData(JsonElement sd)
+    {
+        var d = new D2RandomizerSettings();
+        if (sd.ValueKind != JsonValueKind.Object) return d;
+
+        bool B(string key, bool def)
+        {
+            if (!sd.TryGetProperty(key, out var v)) return def;
+            return v.ValueKind switch
+            {
+                JsonValueKind.True   => true,
+                JsonValueKind.False  => false,
+                JsonValueKind.Number => v.TryGetInt32(out int n) && n != 0,
+                JsonValueKind.String => int.TryParse(v.GetString(), out int s) && s != 0,
+                _                    => def,
+            };
+        }
+
+        d.MonsterShuffle     = B("monster_shuffle", d.MonsterShuffle);
+        // The apworld emits split keys (superunique_shuffle / act_boss_shuffle);
+        // fall back to the legacy single boss_shuffle so older worlds still work.
+        d.SuperUniqueShuffle = B("superunique_shuffle", B("boss_shuffle", d.SuperUniqueShuffle));
+        d.ActBossShuffle     = B("act_boss_shuffle",   B("boss_shuffle", d.ActBossShuffle));
+        d.ShopShuffle        = B("shop_shuffle", d.ShopShuffle);
+        d.SkillLevelReqs     = B("skill_level_reqs", d.SkillLevelReqs);
+        d.ItemLevelReqs      = B("item_level_reqs", d.ItemLevelReqs);
         return d;
     }
 }
