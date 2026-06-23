@@ -15,8 +15,13 @@ No separate runtime is required — everything needed is bundled.
 ### Requirements
 - Windows 10 / 11
 
-### Windows SmartScreen
-If you see the blue warning screen, click **"More info"** → **"Run anyway"**.
+### Antivirus & Windows SmartScreen
+
+Some antivirus tools and Windows SmartScreen may flag **`Multiworld Launcher.exe`** the first time you run it. **This is a false positive.** The launcher is a brand-new application that Windows doesn't recognise yet, and unrecognised, unsigned programs are flagged by default until they build up reputation — regardless of what they actually contain. It is safe to run.
+
+This is being addressed on two fronts: the application has been submitted to Microsoft for review, and Windows SmartScreen builds trust automatically as more people download and run it, so the warning clears on its own over time. *(A commercial code-signing certificate would remove the warning instantly, but it carries a significant recurring cost, so we're pursuing the free Microsoft review and reputation route first.)*
+
+**To run it:** on the SmartScreen prompt click **"More info"** → **"Run anyway"**. If your antivirus quarantines the file, restore it or add an exception.
 
 ### Self-update
 On launch, the launcher checks for a newer version of itself and updates automatically when one is available — you always stay current without re-downloading by hand. Game updates are offered separately as an optional button, so updating a game never blocks you from playing.
