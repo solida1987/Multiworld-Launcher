@@ -256,8 +256,9 @@ public sealed class StardewValleyPlugin : IGamePlugin
 
         try
         {
-            var (version, _, _) = await ResolveLatestModAsync(ct);
-            AvailableVersion = version;
+            // CDN HEAD redirect — no REST API quota consumed.
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync(MOD_OWNER, MOD_REPO, ct));
         }
         catch
         {

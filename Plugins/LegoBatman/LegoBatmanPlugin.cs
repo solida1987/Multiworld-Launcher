@@ -14,7 +14,9 @@ public sealed class LegoBatmanPlugin : IGamePlugin
 {
     // ── Constants ────────────────────────────────────────────────────────────
 
-    private const int STEAM_APPID = 21000;
+    private const int    STEAM_APPID = 21000;
+    private const string MOD_OWNER   = "ZAPaDASH04";
+    private const string MOD_REPO    = "LEGO-Batman-Archipelago-Mod";
 
     // ── Identity ──────────────────────────────────────────────────────────────
 
@@ -37,8 +39,8 @@ public sealed class LegoBatmanPlugin : IGamePlugin
 
     // ── Version state ─────────────────────────────────────────────────────────
 
-    public string? InstalledVersion => null;
-    public string? AvailableVersion => null;
+    public string? InstalledVersion { get; private set; }
+    public string? AvailableVersion { get; private set; }
     public bool    IsInstalled      => !string.IsNullOrEmpty(GameDirectory) && Directory.Exists(GameDirectory);
     public bool    IsRunning        { get; private set; }
 
@@ -64,17 +66,28 @@ public sealed class LegoBatmanPlugin : IGamePlugin
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
-    public Task CheckForUpdateAsync(CancellationToken ct = default)
-        => Task.CompletedTask;
+    public async Task CheckForUpdateAsync(CancellationToken ct = default)
+    {
+        InstalledVersion = IsInstalled ? "installed" : null;
+        try
+        {
+            // CDN HEAD redirect — no REST API quota consumed.
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync(MOD_OWNER, MOD_REPO, ct));
+        }
+        catch { AvailableVersion = null; }
+    }
 
     public Task InstallOrUpdateAsync(
         IProgress<(int Pct, string Msg)> progress,
         CancellationToken ct = default)
     {
+        progress.Report((50, "Opening LEGO Batman Archipelago mod releases page..."));
+        OpenUrl($"https://github.com/{MOD_OWNER}/{MOD_REPO}/releases/latest");
         progress.Report((100,
-            "LEGO Batman: The Videogame requires manual mod installation. " +
-            "Install the game via Steam (appid 21000), then follow the " +
-            "Archipelago setup guide for this game."));
+            "Download the latest LEGO Batman Archipelago mod from the releases page " +
+            "and install it following the setup guide. The game must be installed via " +
+            "Steam (appid 21000) first."));
         return Task.CompletedTask;
     }
 
@@ -181,8 +194,9 @@ public sealed class LegoBatmanPlugin : IGamePlugin
 
         foreach (var (label, url) in new[]
         {
-            ("LEGO Batman on Steam ↗", $"https://store.steampowered.com/app/{STEAM_APPID}/"),
-            ("Archipelago Official ↗", "https://archipelago.gg"),
+            ("LEGO Batman AP Mod Releases ↗", $"https://github.com/{MOD_OWNER}/{MOD_REPO}/releases/latest"),
+            ("LEGO Batman on Steam ↗",       $"https://store.steampowered.com/app/{STEAM_APPID}/"),
+            ("Archipelago Official ↗",        "https://archipelago.gg"),
         })
         {
             var btn = new Button
@@ -268,5 +282,10 @@ public sealed class LegoBatmanPlugin : IGamePlugin
                 "Could not launch LEGO Batman: The Videogame. " +
                 "Make sure the game is installed via Steam.", ex);
         }
+    }
+
+    private static void OpenUrl(string url)
+    {
+        try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); } catch { }
     }
 }

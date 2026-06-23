@@ -184,19 +184,9 @@ public sealed class CatQuestPlugin : IGamePlugin
 
         try
         {
-            string json = await _http.GetStringAsync(GH_RELEASES_URL, ct);
-            using var doc = JsonDocument.Parse(json);
-            if (doc.RootElement.ValueKind == JsonValueKind.Array)
-            {
-                foreach (var el in doc.RootElement.EnumerateArray())
-                {
-                    if (el.TryGetProperty("tag_name", out var t))
-                    {
-                        AvailableVersion = t.GetString()?.Trim();
-                        break;
-                    }
-                }
-            }
+            // CDN HEAD redirect — no REST API quota consumed.
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync(MOD_OWNER, MOD_REPO, ct));
         }
         catch { AvailableVersion = null; }
     }

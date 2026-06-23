@@ -19,6 +19,11 @@ namespace LauncherV2.Plugins.Osu;
 
 public sealed class OsuPlugin : IGamePlugin
 {
+    // ── Constants ─────────────────────────────────────────────────────────────
+
+    private const string MOD_OWNER = "lilymnky-F";
+    private const string MOD_REPO  = "Archipelago-Osu";
+
     // ── IGamePlugin — Identity ────────────────────────────────────────────────
 
     public string GameId      => "osu";
@@ -76,17 +81,24 @@ public sealed class OsuPlugin : IGamePlugin
     public async Task CheckForUpdateAsync(CancellationToken ct = default)
     {
         InstalledVersion = IsInstalled ? "installed" : null;
-        AvailableVersion = null;
-        await Task.CompletedTask;
+        try
+        {
+            // CDN HEAD redirect — no REST API quota consumed.
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync(MOD_OWNER, MOD_REPO, ct));
+        }
+        catch { AvailableVersion = null; }
     }
 
     public Task InstallOrUpdateAsync(
         IProgress<(int Pct, string Msg)> progress,
         CancellationToken ct = default)
     {
+        progress.Report((50, "Opening osu! Archipelago releases page..."));
+        OpenUrl($"https://github.com/{MOD_OWNER}/{MOD_REPO}/releases/latest");
         progress.Report((100,
-            "osu! requires manual installation from osu.ppy.sh. " +
-            "Set the install folder in Settings after installation."));
+            "Download the latest osu! Archipelago client from the releases page " +
+            "and follow the setup guide. Install osu! from osu.ppy.sh first."));
         return Task.CompletedTask;
     }
 
@@ -194,9 +206,10 @@ public sealed class OsuPlugin : IGamePlugin
         panel.Children.Add(Header("LINKS", muted));
         foreach (var (label, url) in new[]
         {
-            ("osu! AP Setup Guide ↗",    "https://archipelago.gg/tutorial/Osu!/setup/en"),
-            ("osu! Official ↗",          "https://osu.ppy.sh"),
-            ("Archipelago Official ↗",   "https://archipelago.gg"),
+            ("Archipelago-Osu Releases ↗", $"https://github.com/{MOD_OWNER}/{MOD_REPO}/releases/latest"),
+            ("osu! AP Setup Guide ↗",      "https://archipelago.gg/tutorial/Osu!/setup/en"),
+            ("osu! Official ↗",            "https://osu.ppy.sh"),
+            ("Archipelago Official ↗",     "https://archipelago.gg"),
         })
         {
             var btn = new Button
@@ -283,4 +296,9 @@ public sealed class OsuPlugin : IGamePlugin
         Text = text, FontSize = 10, FontWeight = FontWeights.SemiBold,
         Foreground = fg, Margin = new Thickness(0, 8, 0, 8),
     };
+
+    private static void OpenUrl(string url)
+    {
+        try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); } catch { }
+    }
 }

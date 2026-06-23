@@ -222,8 +222,9 @@ public sealed class NineSolsPlugin : IGamePlugin
         // Latest available from GitHub releases.
         try
         {
-            var (version, _, _) = await ResolveLatestModReleaseAsync(ct);
-            AvailableVersion = version;
+            // CDN HEAD redirect — no REST API quota consumed.
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync(MOD_OWNER, MOD_REPO, ct));
         }
         catch { AvailableVersion = null; }
     }

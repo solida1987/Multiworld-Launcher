@@ -13068,42 +13068,6 @@
       "install_guide": null
     },
     {
-      "id": "star_wars_ep1_racer",
-      "display_name": "Star Wars Episode I: Racer",
-      "author": "",
-      "category": "Action",
-      "description": "Star Wars Episode I: Racer (1999) â€” the classic podracing game by LucasArts â€”",
-      "ap_world_name": "Star Wars Episode I Racer",
-      "plugin_type": "native",
-      "emulator": null,
-      "thumbnail_url": "Assets/Thumbs/star_wars_ep1_racer_thumb.png",
-      "video_url": null,
-      "screenshot_urls": [],
-      "install_url": null,
-      "news_url": null,
-      "tags": [],
-      "hint_game": false,
-      "min_launcher_version": "2.0.0",
-      "status": "available",
-      "platforms": [
-        "PC"
-      ],
-      "free": false,
-      "requires_rom": false,
-      "install_strategy": "mod_on_top",
-      "credits": [],
-      "links": {
-        "ap_game_page": "https://archipelago.gg/games/Star%20Wars%20Episode%20I%20Racer",
-        "ap_discord": "https://discord.gg/archipelago"
-      },
-      "subcategory": "",
-      "est_playtime_min": 60,
-      "player_count": "1+",
-      "steam_app_id": 0,
-      "purchase_url": null,
-      "install_guide": null
-    },
-    {
       "id": "tloz_ooa",
       "display_name": "Oracle of Ages",
       "author": "",

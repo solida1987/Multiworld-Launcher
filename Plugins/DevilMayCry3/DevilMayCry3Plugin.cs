@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -242,13 +242,16 @@ public sealed class DevilMayCry3Plugin : IGamePlugin
                 : null;
         }
         catch { InstalledVersion = null; }
-
-        try
+            try
         {
-            var (version, _) = await ResolveLatestModAsync(ct);
-            AvailableVersion = version;
+            // CDN HEAD redirect — no REST API quota consumed.
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync(ModOwner, ModRepo, ct));
         }
-        catch { AvailableVersion = null; }
+        catch
+        {
+            AvailableVersion = null; // contract: never throw on network failure
+        }
     }
 
     // ── Lifecycle — InstallOrUpdate ───────────────────────────────────────────

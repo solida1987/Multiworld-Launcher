@@ -20,7 +20,9 @@ namespace LauncherV2.Plugins.HexcellsInfinite;
 public sealed class HexcellsInfinitePlugin : IGamePlugin
 {
     // ── Constants ────────────────────────────────────────────────────────────
-    private const int STEAM_APPID = 304410;
+    private const int    STEAM_APPID = 304410;
+    private const string MOD_OWNER   = "Heaxeus";
+    private const string MOD_REPO    = "Archipelago";
 
     private static readonly HttpClient _http = new()
     {
@@ -73,15 +75,23 @@ public sealed class HexcellsInfinitePlugin : IGamePlugin
     public async Task CheckForUpdateAsync(CancellationToken ct = default)
     {
         InstalledVersion = IsInstalled ? "installed" : null;
-        await Task.CompletedTask;
-        AvailableVersion = null;
+        try
+        {
+            // CDN HEAD redirect — no REST API quota consumed.
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync(MOD_OWNER, MOD_REPO, ct));
+        }
+        catch { AvailableVersion = null; }
     }
 
     public Task InstallOrUpdateAsync(IProgress<(int Pct, string Msg)> progress,
                                      CancellationToken ct = default)
     {
-        progress.Report((100, "Hexcells Infinite requires manual mod installation. " +
-            "See the Settings panel for setup instructions."));
+        progress.Report((50, "Opening Hexcells Infinite AP mod releases page..."));
+        OpenUrl($"https://github.com/{MOD_OWNER}/{MOD_REPO}/releases/latest");
+        progress.Report((100,
+            "Download the latest Hexcells Infinite Archipelago release " +
+            "and install it following the setup guide."));
         return Task.CompletedTask;
     }
 
@@ -159,8 +169,9 @@ public sealed class HexcellsInfinitePlugin : IGamePlugin
         panel.Children.Add(SectionHeader("LINKS", muted));
         foreach (var (label, url) in new[]
         {
-            ("Hexcells Infinite on Steam ↗", "https://store.steampowered.com/app/304410/Hexcells_Infinite/"),
-            ("Archipelago Official ↗",        "https://archipelago.gg"),
+            ("Hexcells Infinite AP Releases ↗", $"https://github.com/{MOD_OWNER}/{MOD_REPO}/releases/latest"),
+            ("Hexcells Infinite on Steam ↗",   "https://store.steampowered.com/app/304410/Hexcells_Infinite/"),
+            ("Archipelago Official ↗",          "https://archipelago.gg"),
         })
         {
             var btn = new Button
@@ -227,4 +238,9 @@ public sealed class HexcellsInfinitePlugin : IGamePlugin
         Text = text, FontSize = 10, FontWeight = FontWeights.SemiBold,
         Foreground = muted, Margin = new Thickness(0, 8, 0, 8),
     };
+
+    private static void OpenUrl(string url)
+    {
+        try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); } catch { }
+    }
 }

@@ -245,19 +245,9 @@ public sealed class UFO50Plugin : IGamePlugin
         // Available: latest apworld release tag.
         try
         {
-            string json = await _http.GetStringAsync(GH_APWORLD_RELEASES_URL, ct);
-            using var doc = JsonDocument.Parse(json);
-            if (doc.RootElement.ValueKind == JsonValueKind.Array)
-            {
-                foreach (var el in doc.RootElement.EnumerateArray())
-                {
-                    if (el.TryGetProperty("tag_name", out var t))
-                    {
-                        AvailableVersion = t.GetString();
-                        break;
-                    }
-                }
-            }
+            // CDN HEAD redirect — no REST API quota consumed.
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync(APWORLD_OWNER, APWORLD_REPO, ct));
         }
         catch { AvailableVersion = null; }
     }

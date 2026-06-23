@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -213,22 +213,9 @@ public sealed class OriAndTheWillOfTheWispsPlugin : IGamePlugin
     {
         try
         {
-            InstalledVersion = IsInstalled
-                ? (ReadStampedVersion() ?? "installed")
-                : null;
-        }
-        catch
-        {
-            InstalledVersion = null;
-        }
-
-        try
-        {
-            string json = await _http.GetStringAsync(GH_RANDO_RELEASES_LATEST_URL, ct);
-            using var doc = JsonDocument.Parse(json);
-            AvailableVersion = doc.RootElement.TryGetProperty("tag_name", out var t)
-                ? NormalizeTag(t.GetString())
-                : null;
+            // CDN HEAD redirect — no REST API quota consumed.
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync(RANDO_OWNER, RANDO_REPO, ct));
         }
         catch
         {

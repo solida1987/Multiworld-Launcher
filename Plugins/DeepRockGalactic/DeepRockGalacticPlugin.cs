@@ -217,8 +217,9 @@ public sealed class DeepRockGalacticPlugin : IGamePlugin
 
         try
         {
-            var (version, _, _) = await ResolveLatestReleaseAsync(ct);
-            AvailableVersion = version;
+            // CDN HEAD redirect — no REST API quota consumed.
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync("Cousinit117", "Deep-Rock-Galactic-AP", ct));
         }
         catch
         {

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -236,11 +236,11 @@ public sealed class JakAndDaxterPlugin : IGamePlugin
         {
             InstalledVersion = null;
         }
-
-        try
+            try
         {
-            var (version, _) = await ResolveLatestOpenGoalAsync(ct);
-            AvailableVersion = version;
+            // CDN HEAD redirect — no REST API quota consumed.
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync(OG_OWNER, OG_REPO, ct));
         }
         catch
         {

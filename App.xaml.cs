@@ -58,7 +58,11 @@ public partial class App : Application
 
         GameRegistry.Register(new D2Plugin
         {
-            GameDirectory = settings.DiabloIIPath
+            // The mod installs into Games/diablo2_archipelago next to the launcher
+            // — never the user's own Diablo II. DiabloIIPath now records where the
+            // player's ORIGINAL Diablo II lives, used only to copy the MPQ data in.
+            GameDirectory       = SettingsStore.DefaultGamePath("diablo2_archipelago"),
+            OriginalD2Directory = settings.DiabloIIPath,
         });
 
         GameRegistry.Register(new OpenTTDPlugin
@@ -307,7 +311,6 @@ public partial class App : Application
         GameRegistry.Register(new Plugins.FinalFantasyXIITrialMode.FinalFantasyXIITrialModePlugin());
         GameRegistry.Register(new Plugins.Emulated.Games.SuperMarioSunshinePlugin());
         GameRegistry.Register(new Plugins.DeepRockGalactic.DeepRockGalacticPlugin());
-        GameRegistry.Register(new Plugins.SWE1R.SWE1RPlugin());
         GameRegistry.Register(new Plugins.SystemShock2.SystemShock2Plugin());
         GameRegistry.Register(new Plugins.PlateUp.PlateUpPlugin());
         GameRegistry.Register(new Plugins.TwilightPrincess.TwilightPrincessPlugin());
@@ -459,14 +462,6 @@ public partial class App : Application
         GameRegistry.Register(new Plugins.Peak.PeakPlugin());
         GameRegistry.Register(new Plugins.OblivionRemastered.OblivionRemasteredPlugin());
 
-        // ── Self-test smoke command ──────────────────────────────────────────
-        // Usage: MultiworldLauncher.exe --self-test
-        // Writes self_test.log, exits 0 (pass) or 1 (fail). No UI is shown.
-        if (Array.IndexOf(e.Args, "--self-test") >= 0)
-        {
-            SelfTest.Run();
-            return;   // unreachable — SelfTest.Run calls Environment.Exit
-        }
 
 
 

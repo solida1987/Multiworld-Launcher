@@ -1131,7 +1131,7 @@
                                         <DockPanel LastChildFill="False">
                                             <Button x:Name="BtnOverviewPlay"
                                                     DockPanel.Dock="Left"
-                                                    Content="▶  Play"
+                                                    Content="▶  AP Play"
                                                     Style="{StaticResource BtnPlayStyle}"
                                                     MinWidth="150"
                                                     Click="BtnOverviewPlay_Click"/>
@@ -1140,12 +1140,25 @@
                                                  re-raises the header button's Click. -->
                                             <Button x:Name="BtnOverviewStandalone"
                                                     DockPanel.Dock="Left"
-                                                    Content="Launch Standalone"
+                                                    Content="▶  Standalone"
                                                     Style="{StaticResource BtnSecondaryStyle}"
                                                     Margin="10,0,0,0"
                                                     Visibility="Collapsed"
-                                                    ToolTip="Launch the game without an Archipelago connection"
+                                                    ToolTip="Launch the game solo, without an Archipelago server"
                                                     Click="BtnOverviewStandalone_Click"/>
+                                            <!-- Optional, opt-in update for an already-installed game.
+                                                 Lights up only when a NEWER version is published;
+                                                 re-raises the hidden header BtnInstall (update only,
+                                                 no launch). The launcher itself is the only thing
+                                                 that updates as a requirement. -->
+                                            <Button x:Name="BtnOverviewUpdate"
+                                                    DockPanel.Dock="Left"
+                                                    Content="↑  Update available"
+                                                    Style="{StaticResource BtnPlayStyle}"
+                                                    Margin="10,0,0,0"
+                                                    Visibility="Collapsed"
+                                                    ToolTip="Download and install the newest published version"
+                                                    Click="BtnOverviewUpdate_Click"/>
                                             <Button x:Name="BtnOverviewGetGame"
                                                     DockPanel.Dock="Left"
                                                     Content="Get the game ↗"
@@ -1208,6 +1221,11 @@
                                                        Margin="0,4,0,0"
                                                        Visibility="Collapsed"/>
                                             <TextBlock x:Name="TxtOverviewCreditsApAuthor"
+                                                       FontSize="11"
+                                                       Foreground="{StaticResource BrushMuted}"
+                                                       Margin="0,2,0,0"
+                                                       Visibility="Collapsed"/>
+                                            <TextBlock x:Name="TxtOverviewCreditsApLogic"
                                                        FontSize="11"
                                                        Foreground="{StaticResource BrushMuted}"
                                                        Margin="0,2,0,0"

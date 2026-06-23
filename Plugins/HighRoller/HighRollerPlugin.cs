@@ -169,8 +169,9 @@ public sealed class HighRollerPlugin : IGamePlugin
         // Available version from GitHub Releases API.
         try
         {
-            var (ver, _) = await ResolveLatestReleaseAsync(ct);
-            AvailableVersion = ver;
+            // CDN HEAD redirect — no REST API quota consumed.
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync(GITHUB_OWNER, GITHUB_REPO, ct));
         }
         catch { AvailableVersion = null; }
     }

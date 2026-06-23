@@ -102,6 +102,10 @@ public interface IGamePlugin
     /// When true, a "Launch Standalone" button is shown in the game header.
     bool SupportsStandalone => false;
 
+    /// True for browser/web games that require no local installation.
+    /// These are never auto-added to a fresh library — the user adds them manually.
+    bool IsWebBased => false;
+
     /// True when the game ships its OWN native AP client and connects to the
     /// slot itself (e.g. the OpenTTD Archipelago fork). AP servers allow one
     /// connection per slot and kick the older one — so for these games the

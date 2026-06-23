@@ -90,6 +90,7 @@ public sealed class CliquePlugin : IGamePlugin
 
     /// Always true — the game is an HTML file; no launcher-managed install.
     public bool IsInstalled => true;
+    public bool IsWebBased => true;
 
     /// Never running as a local launcher-tracked process.
     public bool IsRunning => false;

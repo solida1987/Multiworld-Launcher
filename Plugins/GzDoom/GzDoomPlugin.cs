@@ -12,6 +12,11 @@ namespace LauncherV2.Plugins.GzDoom;
 
 public sealed class GzDoomPlugin : IGamePlugin
 {
+    // ── Constants ─────────────────────────────────────────────────────────────
+
+    private const string MOD_OWNER = "ToxicFrog";
+    private const string MOD_REPO  = "doom-mods";
+
     // ── Identity ──────────────────────────────────────────────────────────────
 
     public string GameId           => "gzdoom";
@@ -33,8 +38,8 @@ public sealed class GzDoomPlugin : IGamePlugin
 
     // ── Version state ─────────────────────────────────────────────────────────
 
-    public string? InstalledVersion => null;
-    public string? AvailableVersion => null;
+    public string? InstalledVersion { get; private set; }
+    public string? AvailableVersion { get; private set; }
     public bool    IsInstalled      => !string.IsNullOrEmpty(GameDirectory) && Directory.Exists(GameDirectory);
     public bool    IsRunning        { get; private set; }
 
@@ -61,16 +66,27 @@ public sealed class GzDoomPlugin : IGamePlugin
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
-    public Task CheckForUpdateAsync(CancellationToken ct = default)
-        => Task.CompletedTask;
+    public async Task CheckForUpdateAsync(CancellationToken ct = default)
+    {
+        InstalledVersion = IsInstalled ? "installed" : null;
+        try
+        {
+            // CDN HEAD redirect — no REST API quota consumed.
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync(MOD_OWNER, MOD_REPO, ct));
+        }
+        catch { AvailableVersion = null; }
+    }
 
     public Task InstallOrUpdateAsync(
         IProgress<(int Pct, string Msg)> progress,
         CancellationToken ct = default)
     {
+        progress.Report((50, "Opening doom-mods AP releases page..."));
+        OpenUrl($"https://github.com/{MOD_OWNER}/{MOD_REPO}/releases/latest");
         progress.Report((100,
-            "GZDoom is distributed via gzdoom.net. Download and install it from " +
-            "the official website, then set the install directory in Settings."));
+            "Download the latest GZDoom Archipelago mod from the releases page " +
+            "and follow the setup guide. Install GZDoom from gzdoom.net first."));
         return Task.CompletedTask;
     }
 
@@ -188,8 +204,9 @@ public sealed class GzDoomPlugin : IGamePlugin
 
         foreach (var (label, url) in new[]
         {
-            ("GZDoom Official ↗",      "https://www.gzdoom.net"),
-            ("Archipelago Official ↗", "https://archipelago.gg"),
+            ("doom-mods AP Releases ↗", $"https://github.com/{MOD_OWNER}/{MOD_REPO}/releases/latest"),
+            ("GZDoom Official ↗",       "https://www.gzdoom.net"),
+            ("Archipelago Official ↗",  "https://archipelago.gg"),
         })
         {
             var btn = new Button
@@ -217,6 +234,11 @@ public sealed class GzDoomPlugin : IGamePlugin
         => Task.FromResult(Array.Empty<NewsItem>());
 
     // ── Private helpers ───────────────────────────────────────────────────────
+
+    private static void OpenUrl(string url)
+    {
+        try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); } catch { }
+    }
 
     private void StartGame()
     {

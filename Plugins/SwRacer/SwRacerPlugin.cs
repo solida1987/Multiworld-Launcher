@@ -106,8 +106,9 @@ public sealed class SwRacerPlugin : IGamePlugin
         catch { InstalledVersion = null; }
         try
         {
-            var (version, _, _, _) = await ResolveLatestReleaseAsync(ct);
-            AvailableVersion = version;
+            // CDN HEAD redirect — no REST API quota consumed.
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync(CLIENT_GH_OWNER, CLIENT_GH_REPO, ct));
         }
         catch { AvailableVersion = null; }
     }

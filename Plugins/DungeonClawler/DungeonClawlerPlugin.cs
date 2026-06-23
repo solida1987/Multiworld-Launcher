@@ -254,8 +254,9 @@ public sealed class DungeonClawlerPlugin : IGamePlugin
         // Available version — query GitHub.
         try
         {
-            var (ver, _, _) = await ResolveLatestReleaseAsync(ct);
-            AvailableVersion = ver;
+            // CDN HEAD redirect — no REST API quota consumed.
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync(GITHUB_OWNER, GITHUB_REPO, ct));
         }
         catch { AvailableVersion = null; }
     }

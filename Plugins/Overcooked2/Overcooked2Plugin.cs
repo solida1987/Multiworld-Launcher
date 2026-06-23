@@ -292,8 +292,9 @@ public sealed class Overcooked2Plugin : IGamePlugin
 
         try
         {
-            var (version, _, _) = await ResolveLatestModAsync(ct);
-            AvailableVersion = version == FallbackModVersion ? null : version;
+            // CDN HEAD redirect — no REST API quota consumed.
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync(MOD_OWNER, MOD_REPO, ct));
         }
         catch
         {

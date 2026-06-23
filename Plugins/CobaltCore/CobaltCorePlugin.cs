@@ -231,8 +231,12 @@ public sealed class CobaltCorePlugin : IGamePlugin
 
         try
         {
-            var (version, _, _) = await ResolveLatestReleaseAsync(ct);
-            AvailableVersion = version;
+            // CDN HEAD redirect — no REST API quota consumed.
+            // GitHubRepo = "owner/repo" combined — split for the CDN trick.
+            string[] parts = GitHubRepo.Split('/', 2);
+            AvailableVersion = parts.Length == 2
+                ? GitHubHelper.NormalizeTag(await GitHubHelper.FetchLatestTagAsync(parts[0], parts[1], ct))
+                : null;
         }
         catch { AvailableVersion = null; }
     }

@@ -83,17 +83,16 @@ public sealed class APSudokuPlugin : IGamePlugin
 
     public async Task CheckForUpdateAsync(CancellationToken ct = default)
     {
+        try { InstalledVersion = ReadInstalledVersion(); }
+        catch { InstalledVersion = null; }
+
         try
         {
-            using var http = new HttpClient();
-            http.DefaultRequestHeaders.Add("User-Agent", "MultiworldLauncher");
-            var url  = $"https://api.github.com/repos/{GH_OWNER}/{GH_REPO}/releases/latest";
-            var json = await http.GetStringAsync(url, ct);
-            using var doc = JsonDocument.Parse(json);
-            AvailableVersion = doc.RootElement.GetProperty("tag_name").GetString();
-            InstalledVersion = ReadInstalledVersion();
+            // CDN HEAD redirect — no REST API quota consumed.
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync(GH_OWNER, GH_REPO, ct));
         }
-        catch { /* non-fatal */ }
+        catch { AvailableVersion = null; }
     }
 
     // -- Lifecycle -- InstallOrUpdate ------------------------------------------

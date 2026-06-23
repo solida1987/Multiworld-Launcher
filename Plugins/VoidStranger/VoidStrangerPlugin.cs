@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -249,29 +249,14 @@ public sealed class VoidStrangerPlugin : IGamePlugin
         // Installed version from stamp
         try
         {
-            string? dir = ResolveGameDir();
-            if (dir != null && File.Exists(Path.Combine(dir, StampFileName)))
-            {
-                string txt = await File.ReadAllTextAsync(
-                    Path.Combine(dir, StampFileName), ct);
-                var stamp = JsonSerializer.Deserialize<VsStamp>(txt);
-                InstalledVersion = string.IsNullOrWhiteSpace(stamp?.Version)
-                    ? null : stamp.Version;
-            }
-            else
-            {
-                InstalledVersion = null;
-            }
+            // CDN HEAD redirect — no REST API quota consumed.
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync(MOD_OWNER, MOD_REPO, ct));
         }
-        catch { InstalledVersion = null; }
-
-        // Available version from GitHub
-        try
+        catch
         {
-            var (version, _, _, _) = await ResolveLatestReleaseAsync(ct);
-            AvailableVersion = version;
-        }
-        catch { AvailableVersion = null; } // contract: never throw on network failure
+            AvailableVersion = null; // contract: never throw on network failure
+        } // contract: never throw on network failure
     }
 
     // ── Lifecycle — InstallOrUpdate ───────────────────────────────────────────

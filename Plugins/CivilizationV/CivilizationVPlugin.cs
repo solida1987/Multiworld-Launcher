@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -250,35 +250,20 @@ public sealed class CivilizationVPlugin : IGamePlugin
 
     public event Action<int>? GameExited;
 
-    // ── Constructor ───────────────────────────────────────────────────────────
-
-    public CivilizationVPlugin()
-    {
-        try
-        {
-            var s = LoadSettings();
-            if (!string.IsNullOrWhiteSpace(s.RootDirOverride) &&
-                Directory.Exists(s.RootDirOverride))
-                _overrideRootDir = s.RootDirOverride;
-            if (!string.IsNullOrWhiteSpace(s.ModsDirOverride) &&
-                Directory.Exists(s.ModsDirOverride))
-                _overrideModsDir = s.ModsDirOverride;
-        }
-        catch { /* fall back to detection only */ }
-    }
-
     // ── Lifecycle — CheckForUpdate ────────────────────────────────────────────
 
     public async Task CheckForUpdateAsync(CancellationToken ct = default)
     {
         try
         {
-            string json = await _http.GetStringAsync(GitHubReleasesApiUrl, ct);
-            using var doc = JsonDocument.Parse(json);
-            if (doc.RootElement.TryGetProperty("tag_name", out var tag))
-                AvailableVersion = tag.GetString();
+            // CDN HEAD redirect — no REST API quota consumed.
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync("1313e", "Civ-V-AP-World", ct));
         }
-        catch { AvailableVersion = null; }
+        catch
+        {
+            AvailableVersion = null; // contract: never throw on network failure
+        }
     }
 
     // ── Lifecycle — InstallOrUpdate ───────────────────────────────────────────

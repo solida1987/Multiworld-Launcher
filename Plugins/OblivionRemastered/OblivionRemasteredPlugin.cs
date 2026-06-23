@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -239,11 +239,11 @@ public sealed class OblivionRemasteredPlugin : IGamePlugin
         {
             InstalledVersion = null;
         }
-
-        try
+            try
         {
-            var (version, _) = await ResolveLatestModAsync(ct);
-            AvailableVersion = version;
+            // CDN HEAD redirect — no REST API quota consumed.
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync(APWORLD_OWNER, APWORLD_REPO, ct));
         }
         catch
         {

@@ -171,6 +171,7 @@ public sealed class AutopelagoPlugin : IGamePlugin
 
     /// Always true — the web app at autopelago.app requires no local install.
     public bool IsInstalled => true;
+    public bool IsWebBased => true;
 
     /// Always false — no process to track (the game runs in the browser).
     public bool IsRunning => false;
@@ -214,9 +215,11 @@ public sealed class AutopelagoPlugin : IGamePlugin
         // at the latest deployed version; the user cannot be "behind").
         try
         {
-            var (version, _) = await ResolveLatestReleaseAsync(ct);
-            AvailableVersion  = version;
-            InstalledVersion  = version;   // web app is always current
+            // CDN HEAD redirect — no REST API quota consumed.
+            string ver = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync(GITHUB_OWNER, GITHUB_REPO, ct));
+            AvailableVersion  = ver;
+            InstalledVersion  = ver;   // web app is always current
         }
         catch
         {

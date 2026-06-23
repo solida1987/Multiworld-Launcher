@@ -206,16 +206,9 @@ public sealed class Sims4Plugin : IGamePlugin
         // Poll the mod's GitHub release for the latest tag.
         try
         {
-            string json = await _http.GetStringAsync(GhModReleasesApiUrl, ct);
-            using var doc = JsonDocument.Parse(json);
-            foreach (var el in doc.RootElement.EnumerateArray())
-            {
-                if (el.TryGetProperty("tag_name", out var t))
-                {
-                    AvailableVersion = NormalizeTag(t.GetString());
-                    break;
-                }
-            }
+            // CDN HEAD redirect — no REST API quota consumed.
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync(ModOwner, ModRepo, ct));
         }
         catch { AvailableVersion = null; }
     }

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -133,12 +133,16 @@ public sealed class SuperCatPlanetPlugin : IGamePlugin
     {
         InstalledVersion = IsInstalled
             ? (ReadStampedVersion() ?? "installed") : null;
-        try
+            try
         {
-            var (ver, _) = await ResolveLatestAsync(ct);
-            AvailableVersion = ver;
+            // CDN HEAD redirect — no REST API quota consumed.
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync(GH_OWNER, GH_REPO, ct));
         }
-        catch { AvailableVersion = null; }
+        catch
+        {
+            AvailableVersion = null; // contract: never throw on network failure
+        }
     }
 
     // ── Lifecycle — InstallOrUpdate ───────────────────────────────────────────

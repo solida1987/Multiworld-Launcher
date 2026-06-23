@@ -71,6 +71,7 @@ public sealed class ApItemTracker
 {
     private readonly object _lock = new();
     private readonly List<TrackedItem> _all = new();
+    private int _nextIndex = 1;   // monotonic display index; survives trimming
     private int _mySlot;
     private IReadOnlyList<ApNetworkPlayer> _players = Array.Empty<ApNetworkPlayer>();
 
@@ -146,7 +147,7 @@ public sealed class ApItemTracker
             {
                 var entry = new TrackedItem
                 {
-                    Index        = _all.Count + 1,
+                    Index        = _nextIndex++,
                     ItemId       = raw.ItemId,
                     ItemName     = _itemNames.GetValueOrDefault(raw.ItemId, $"#{raw.ItemId}"),
                     LocationId   = raw.LocationId,
@@ -230,6 +231,7 @@ public sealed class ApItemTracker
         lock (_lock)
         {
             _all.Clear();
+            _nextIndex = 1;
             _itemNames.Clear();
             _locationNames.Clear();
         }

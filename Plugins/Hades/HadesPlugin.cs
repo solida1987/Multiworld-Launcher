@@ -220,19 +220,11 @@ public sealed class HadesPlugin : IGamePlugin
             InstalledVersion = null;
         }
 
-        // Available version — latest Polycosmos release tag.
+        // Available version — latest Polycosmos release tag. CDN HEAD redirect — no quota.
         try
         {
-            string json = await _http.GetStringAsync(GH_POLY_RELEASES_URL, ct);
-            using var doc = JsonDocument.Parse(json);
-            var arr = doc.RootElement;
-            if (arr.GetArrayLength() > 0)
-            {
-                var first = arr[0];
-                AvailableVersion = first.TryGetProperty("tag_name", out var t)
-                    ? t.GetString()?.TrimStart('v')
-                    : null;
-            }
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync(POLY_OWNER, POLY_REPO, ct));
         }
         catch
         {

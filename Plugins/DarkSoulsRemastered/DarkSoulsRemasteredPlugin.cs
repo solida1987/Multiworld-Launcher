@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -241,11 +241,11 @@ public sealed class DarkSoulsRemasteredPlugin : IGamePlugin
         {
             InstalledVersion = null;
         }
-
-        try
+            try
         {
-            var (version, _, _) = await ResolveLatestClientAsync(ct);
-            AvailableVersion = version;
+            // CDN HEAD redirect — no REST API quota consumed.
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync(APP_OWNER, APP_REPO, ct));
         }
         catch
         {

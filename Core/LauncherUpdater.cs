@@ -185,7 +185,11 @@ public sealed class LauncherUpdater
         });
 
         // Exit the application — the batch script will restart it.
-        System.Windows.Application.Current.Shutdown();
+        // Shutdown() must run on the dispatcher thread; this method may be
+        // awaited on a background continuation, so marshal explicitly.
+        var app = System.Windows.Application.Current;
+        if (app != null)
+            app.Dispatcher.Invoke(() => app.Shutdown());
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────

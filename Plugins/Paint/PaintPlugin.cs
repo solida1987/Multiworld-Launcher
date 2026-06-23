@@ -144,6 +144,7 @@ public sealed class PaintPlugin : IGamePlugin
 
     /// Always true — the game is hosted on the web and requires no local files.
     public bool IsInstalled => true;
+    public bool IsWebBased => true;
 
     public bool IsRunning { get; private set; }
 

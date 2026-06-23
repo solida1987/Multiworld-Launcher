@@ -97,8 +97,7 @@ public sealed class PanelDePonPlugin : IGamePlugin
     public string? InstalledVersion { get; private set; }
     public string? AvailableVersion { get; private set; }
 
-    // ROM availability is the user's responsibility — always report installed.
-    public bool IsInstalled => true;
+    public bool IsInstalled => InstalledVersion != null;
     public bool IsRunning   { get; private set; }
 
     public bool ConnectsItself     => false;
@@ -127,12 +126,9 @@ public sealed class PanelDePonPlugin : IGamePlugin
         InstalledVersion = FindBizHawk() != null ? "BizHawk" : null;
         try
         {
-            string json = await _http.GetStringAsync(GH_RELEASES, ct);
-            using var doc = JsonDocument.Parse(json);
-            if (doc.RootElement.ValueKind == JsonValueKind.Array)
-                foreach (var el in doc.RootElement.EnumerateArray())
-                    if (el.TryGetProperty("tag_name", out var t))
-                    { AvailableVersion = t.GetString()?.Trim(); break; }
+            // CDN HEAD redirect — no REST API quota consumed.
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync(GH_OWNER, GH_REPO, ct));
         }
         catch { AvailableVersion = null; }
     }

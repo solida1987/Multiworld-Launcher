@@ -243,8 +243,9 @@ public sealed class AxiomVergePlugin : IGamePlugin
 
         try
         {
-            string? ver = await ResolveLatestTagAsync(ct);
-            AvailableVersion = ver;
+            // CDN HEAD redirect — no REST API quota consumed.
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync(FORK_OWNER, FORK_REPO, ct));
         }
         catch { AvailableVersion = null; }
     }

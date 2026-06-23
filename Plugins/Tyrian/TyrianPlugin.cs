@@ -19,6 +19,11 @@ namespace LauncherV2.Plugins.Tyrian;
 
 public sealed class TyrianPlugin : IGamePlugin
 {
+    // ── Constants ─────────────────────────────────────────────────────────────
+
+    private const string MOD_OWNER = "KScl";
+    private const string MOD_REPO  = "TyrianArchipelago";
+
     // ── IGamePlugin — Identity ────────────────────────────────────────────────
 
     public string GameId      => "tyrian";
@@ -57,7 +62,7 @@ public sealed class TyrianPlugin : IGamePlugin
 
     // ── Paths ─────────────────────────────────────────────────────────────────
 
-    public string GameDirectory { get; set; } = string.Empty;
+    public string GameDirectory { get; set; } = SettingsStore.DefaultGamePath("tyrian");
 
     // ── Internal state ────────────────────────────────────────────────────────
 
@@ -76,17 +81,24 @@ public sealed class TyrianPlugin : IGamePlugin
     public async Task CheckForUpdateAsync(CancellationToken ct = default)
     {
         InstalledVersion = IsInstalled ? "installed" : null;
-        AvailableVersion = null;
-        await Task.CompletedTask;
+        try
+        {
+            // CDN HEAD redirect — no REST API quota consumed.
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync(MOD_OWNER, MOD_REPO, ct));
+        }
+        catch { AvailableVersion = null; }
     }
 
     public Task InstallOrUpdateAsync(
         IProgress<(int Pct, string Msg)> progress,
         CancellationToken ct = default)
     {
+        progress.Report((50, "Opening TyrianArchipelago releases page..."));
+        OpenUrl($"https://github.com/{MOD_OWNER}/{MOD_REPO}/releases/latest");
         progress.Report((100,
-            "Download Tyrian 2000 (freeware) and the Archipelago client mod, " +
-            "then set the install folder in Settings. See the AP setup guide for details."));
+            "Download the latest TyrianArchipelago client from the releases page " +
+            "and follow the setup guide. Tyrian 2000 (freeware) is required."));
         return Task.CompletedTask;
     }
 
@@ -194,8 +206,9 @@ public sealed class TyrianPlugin : IGamePlugin
         panel.Children.Add(Header("LINKS", muted));
         foreach (var (label, url) in new[]
         {
-            ("Tyrian AP Setup Guide ↗", "https://archipelago.gg/tutorial/Tyrian/setup/en"),
-            ("Archipelago Official ↗",  "https://archipelago.gg"),
+            ("TyrianArchipelago Releases ↗", $"https://github.com/{MOD_OWNER}/{MOD_REPO}/releases/latest"),
+            ("Tyrian AP Setup Guide ↗",      "https://archipelago.gg/tutorial/Tyrian/setup/en"),
+            ("Archipelago Official ↗",       "https://archipelago.gg"),
         })
         {
             var btn = new Button
@@ -281,4 +294,9 @@ public sealed class TyrianPlugin : IGamePlugin
         Text = text, FontSize = 10, FontWeight = FontWeights.SemiBold,
         Foreground = fg, Margin = new Thickness(0, 8, 0, 8),
     };
+
+    private static void OpenUrl(string url)
+    {
+        try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); } catch { }
+    }
 }

@@ -257,8 +257,9 @@ public sealed class BloonsTD6Plugin : IGamePlugin
 
         try
         {
-            var (version, _) = await ResolveLatestModAsync(ct);
-            AvailableVersion = version;
+            // CDN HEAD redirect — no REST API quota consumed.
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync(ModGhOwner, ModGhRepo, ct));
         }
         catch { AvailableVersion = null; }
     }

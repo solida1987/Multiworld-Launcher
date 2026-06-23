@@ -20,7 +20,9 @@ namespace LauncherV2.Plugins.Shapez2;
 
 public sealed class Shapez2Plugin : IGamePlugin
 {
-    private const int STEAM_APPID = 2162800;
+    private const int    STEAM_APPID = 2162800;
+    private const string MOD_OWNER   = "BlastSlimey";
+    private const string MOD_REPO    = "2hapezipelago";
 
     // ── IGamePlugin — Identity ────────────────────────────────────────────────
 
@@ -80,17 +82,24 @@ public sealed class Shapez2Plugin : IGamePlugin
     public async Task CheckForUpdateAsync(CancellationToken ct = default)
     {
         InstalledVersion = IsInstalled ? "installed" : null;
-        AvailableVersion = null;
-        await Task.CompletedTask;
+        try
+        {
+            // CDN HEAD redirect — no REST API quota consumed.
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync(MOD_OWNER, MOD_REPO, ct));
+        }
+        catch { AvailableVersion = null; }
     }
 
     public Task InstallOrUpdateAsync(
         IProgress<(int Pct, string Msg)> progress,
         CancellationToken ct = default)
     {
+        progress.Report((50, "Opening shapez 2 AP mod releases page..."));
+        OpenUrl($"https://github.com/{MOD_OWNER}/{MOD_REPO}/releases/latest");
         progress.Report((100,
-            "shapez 2 requires manual mod installation. " +
-            "See the AP setup guide and Settings panel for steps."));
+            "Download the latest 2hapezipelago mod from the releases page " +
+            "and install it following the setup guide. shapez 2 must be installed via Steam first."));
         return Task.CompletedTask;
     }
 
@@ -198,6 +207,7 @@ public sealed class Shapez2Plugin : IGamePlugin
         panel.Children.Add(Header("LINKS", muted));
         foreach (var (label, url) in new[]
         {
+            ("shapez 2 AP Mod Releases ↗", $"https://github.com/{MOD_OWNER}/{MOD_REPO}/releases/latest"),
             ("shapez 2 AP Setup Guide ↗", "https://archipelago.gg/tutorial/shapez%202/setup/en"),
             ("shapez 2 on Steam ↗",       "https://store.steampowered.com/app/2162800/shapez_2/"),
             ("Archipelago Official ↗",    "https://archipelago.gg"),
@@ -289,4 +299,9 @@ public sealed class Shapez2Plugin : IGamePlugin
         Text = text, FontSize = 10, FontWeight = FontWeights.SemiBold,
         Foreground = fg, Margin = new Thickness(0, 8, 0, 8),
     };
+
+    private static void OpenUrl(string url)
+    {
+        try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); } catch { }
+    }
 }

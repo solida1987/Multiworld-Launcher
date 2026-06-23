@@ -268,12 +268,6 @@ public partial class MainWindow : Window
 
         SetStatus("Checking for updates...");
 
-        // On first run, only auto-add games that are already installed on this machine.
-        // This keeps the library empty for fresh standalone installs, while games that
-        // are present (e.g. D2 LoD in the D2 repo) appear automatically.
-        foreach (var p in GameRegistry.All.Where(p => p.IsInstalled))
-            LibraryStore.Add(p.GameId);
-
         // Build sidebar respecting library order (favorites first)
         RebuildGameList();
 
@@ -293,12 +287,20 @@ public partial class MainWindow : Window
                 SelectGame(firstPlugin);
         }
 
-        // Background: check for updates on all plugins — in PARALLEL with a
-        // 15 s per-check bound (P3-23). The old sequential loop ran on the D2
-        // client's 30-MINUTE HttpClient timeout, so one slow GitHub response
-        // stalled the whole startup sequence (and "Ready.") behind it.
-        var updateChecks = GameRegistry.All.Select(async plugin =>
+        // Background: check for updates only on library plugins — not all 382.
+        // Running all plugins in parallel would fire hundreds of network calls at
+        // once and immediately exhaust the unauthenticated GitHub rate limit
+        // (60/hour). Library plugins are the only ones the user cares about now.
+        // A concurrency gate caps the simultaneous in-flight checks so the launcher
+        // never fires a burst — this protects every backend (GitHub, Thunderstore,
+        // Codeberg, …) regardless of whether a given plugin uses the CDN helper.
+        var libraryIds  = new HashSet<string>(LibraryStore.GetSortedGameIds(), StringComparer.OrdinalIgnoreCase);
+        using var updateGate = new SemaphoreSlim(6);
+        var updateChecks = GameRegistry.All
+            .Where(p => libraryIds.Contains(p.GameId))
+            .Select(async plugin =>
         {
+            await updateGate.WaitAsync();
             try
             {
                 using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
@@ -306,10 +308,21 @@ public partial class MainWindow : Window
                 await plugin.CheckForUpdateAsync(cts.Token).WaitAsync(cts.Token);
             }
             catch { /* timeout / offline — the version badge just stays as-is */ }
+            finally { updateGate.Release(); }
 
             // Continuations resume on the UI context (started from OnLoaded).
+            // The install/version check just learned InstalledVersion (read from
+            // disk), so the whole selected-game UI must refresh — not just the
+            // version line. Without RefreshButtons/Overview the Play button stayed
+            // "Install" and the requirement badge stale until the user clicked.
             if (_selectedPlugin == plugin)
+            {
                 RefreshVersionBadges(plugin);
+                RefreshHeaderBadges(plugin);
+                RefreshButtons(plugin);
+                SyncOverviewPlayButton();
+                RefreshOverview(plugin);
+            }
 
             // Surface updates for installed games as a toast — the user may be
             // on another tab (or another game) when the startup check lands.
@@ -321,6 +334,13 @@ public partial class MainWindow : Window
             }
         }).ToList();
         await Task.WhenAll(updateChecks);
+
+        // Every library game's InstalledVersion is now known — rebuild the sidebar
+        // so install pills + the favorites/installed/not-installed grouping are
+        // correct. RebuildGameList ran once at startup BEFORE these checks, when
+        // every game still looked uninstalled (hence "Not installed" stuck on the
+        // sidebar until the user clicked the game). It re-highlights the selection.
+        RebuildGameList();
 
         SetStatus("Ready.");
 
@@ -617,10 +637,63 @@ public partial class MainWindow : Window
     /// True when the plugin has a known available version that differs from
     /// the installed one after normalization.
     private static bool UpdateAvailable(IGamePlugin plugin)
-        => plugin.AvailableVersion != null &&
-           !string.Equals(NormalizeVersion(plugin.InstalledVersion),
-                          NormalizeVersion(plugin.AvailableVersion),
-                          StringComparison.OrdinalIgnoreCase);
+    {
+        // No known available version means we can't claim an update. This also
+        // catches NormalizeTag(null) == "" (network failure / repo has no
+        // releases), which would otherwise render an empty "↑ UPDATE " badge.
+        if (string.IsNullOrEmpty(plugin.AvailableVersion)) return false;
+
+        string installed = NormalizeVersion(plugin.InstalledVersion);
+
+        // "installed" is a sentinel used by manual / ConnectsItself plugins that
+        // open a releases page and cannot report a real version. They can never
+        // know if an update exists, so suppress the (permanently-true) badge
+        // instead of nagging the user on every launch.
+        if (installed.Length == 0 ||
+            string.Equals(installed, "installed", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        string available = NormalizeVersion(plugin.AvailableVersion);
+
+        // When BOTH versions parse to numeric x.y.z tuples, an update only exists
+        // when the published version is actually NEWER. An installed build that is
+        // AHEAD of the latest release (e.g. local Stable-2.0.0 vs published
+        // Beta-1.9.13) must NOT show an update badge.
+        if (TryParseVersion(installed, out var iv) && TryParseVersion(available, out var av))
+            return CompareVersion(av, iv) > 0;
+
+        // Non-numeric / unparseable versions: fall back to "differs = update".
+        return !string.Equals(installed, available, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// Extract the leading dotted numeric groups from a normalized version
+    /// (e.g. "1.9.13" → [1,9,13], "2.0.0" → [2,0,0]). Returns false if none.
+    private static bool TryParseVersion(string s, out int[] parts)
+    {
+        var nums = new List<int>();
+        foreach (var seg in s.Split('.', '-', '_', ' '))
+        {
+            int i = 0;
+            while (i < seg.Length && char.IsDigit(seg[i])) i++;
+            if (i == 0) { if (nums.Count > 0) break; else continue; }
+            if (int.TryParse(seg[..i], out int v)) nums.Add(v);
+        }
+        parts = nums.ToArray();
+        return parts.Length > 0;
+    }
+
+    /// Semver-ish compare: >0 if a is newer than b, <0 older, 0 equal.
+    private static int CompareVersion(int[] a, int[] b)
+    {
+        int n = Math.Max(a.Length, b.Length);
+        for (int i = 0; i < n; i++)
+        {
+            int x = i < a.Length ? a[i] : 0;
+            int y = i < b.Length ? b[i] : 0;
+            if (x != y) return x - y;
+        }
+        return 0;
+    }
 
     /// "Beta-1.9.13", "Beta 1.9.13", "beta1.9.13", "v1.9.13" → "1.9.13".
     /// Unknown formats pass through trimmed, so two equal odd strings still match.
@@ -693,6 +766,7 @@ public partial class MainWindow : Window
         if (!plugin.IsInstalled)
         {
             BtnOverviewStandalone.Visibility = Visibility.Collapsed;
+            BtnOverviewUpdate.Visibility     = Visibility.Collapsed;
             BtnPlay.Content                  = NotInstalledActionLabel(plugin);
         }
         else if (plugin.IsRunning)
@@ -702,19 +776,20 @@ public partial class MainWindow : Window
             // but the label used to reset to "Play" after a manual sidebar
             // AP disconnect while the game kept running — P2-5.)
             BtnOverviewStandalone.Visibility = Visibility.Collapsed;
+            BtnOverviewUpdate.Visibility     = Visibility.Collapsed;
             BtnPlay.Content                  = "Stop";
-        }
-        else if (UpdateAvailable(plugin))
-        {
-            BtnOverviewStandalone.Visibility = plugin.SupportsStandalone
-                ? Visibility.Visible : Visibility.Collapsed;
-            BtnPlay.Content                  = "Update + Play";
         }
         else
         {
+            // Installed + idle. Play ALWAYS just launches AP ("AP Play") — it
+            // never auto-updates. An available update is an OPTIONAL separate
+            // button that only lights up when a NEWER version is published; the
+            // launcher itself is the only thing that self-updates as a must.
             BtnOverviewStandalone.Visibility = plugin.SupportsStandalone
                 ? Visibility.Visible : Visibility.Collapsed;
-            BtnPlay.Content                  = "Play";
+            BtnOverviewUpdate.Visibility = UpdateAvailable(plugin)
+                ? Visibility.Visible : Visibility.Collapsed;
+            BtnPlay.Content = "AP Play";
         }
 
         // ── One game at a time (P2-5) ────────────────────────────────────────
@@ -1456,11 +1531,23 @@ public partial class MainWindow : Window
             {
                 TxtOverviewCreditsApAuthor.Visibility = Visibility.Collapsed;
             }
+
+            string? apLogic = LauncherV2.Core.GameCredits.GetApLogic(plugin.GameId);
+            if (apLogic != null)
+            {
+                TxtOverviewCreditsApLogic.Text       = $"AP logic by: {apLogic}";
+                TxtOverviewCreditsApLogic.Visibility = Visibility.Visible;
+            }
+            else
+            {
+                TxtOverviewCreditsApLogic.Visibility = Visibility.Collapsed;
+            }
         }
         else
         {
             TxtOverviewCreditsGameDev.Visibility  = Visibility.Collapsed;
             TxtOverviewCreditsApAuthor.Visibility = Visibility.Collapsed;
+            TxtOverviewCreditsApLogic.Visibility  = Visibility.Collapsed;
         }
 
         // ── Teasers ───────────────────────────────────────────────────────────
@@ -1547,6 +1634,17 @@ public partial class MainWindow : Window
         if (BtnStandalone.IsEnabled)
             BtnStandalone.RaiseEvent(new RoutedEventArgs(
                 System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+    }
+
+    /// Opt-in "Update available" button — downloads + installs the newest
+    /// published version WITHOUT launching (Play is now AP-launch only). Only
+    /// visible when a strictly-newer version exists. Updating a game is never
+    /// required; only the launcher itself self-updates as a must.
+    private async void BtnOverviewUpdate_Click(object sender, RoutedEventArgs e)
+    {
+        if (_selectedPlugin == null) return;
+        SwitchTab(PageTab.Play);
+        await RunInstallAsync(_selectedPlugin);
     }
 
     private void BtnOverviewGetGame_Click(object sender, RoutedEventArgs e)
@@ -2510,9 +2608,14 @@ public partial class MainWindow : Window
         });
         _apClient.SessionConnected += (mySlot, players) =>
         {
+            // Runs on the AP receive thread — capture the raising client so a
+            // concurrent sidebar Disconnect (which nulls/replaces + disposes
+            // _apClient) can't NRE us between these field reads.
+            var ap = _apClient;
+            if (ap == null) return;
             _tracker.OnConnected(mySlot, players);
-            _locationTracker.OnConnected(_apClient.ConnectedChecked,
-                                          _apClient.ConnectedMissing, players);
+            _locationTracker.OnConnected(ap.ConnectedChecked,
+                                          ap.ConnectedMissing, players);
             // Achievement ladder: first-connect + distinct-server tracking.
             AchievementStore.Instance.RecordApConnected(plugin.GameId, server);
             Dispatcher.Invoke(() =>
@@ -2521,7 +2624,7 @@ public partial class MainWindow : Window
                 RefreshProgressionPanel();
                 UpdateGameSuggestionBanner();
             });
-            _ = _apClient.GetDataPackageAsync(new[] { plugin.ApWorldName });
+            _ = ap.GetDataPackageAsync(new[] { plugin.ApWorldName });
         };
         _apClient.DataPackageReceived += (gameKey, data) =>
         {
@@ -2912,12 +3015,27 @@ public partial class MainWindow : Window
                             string text        = await File.ReadAllTextAsync(communityPath);
                             var communityResult = GameCatalog.ParseCommunityGamesText(text);
 
-                            // Merge: community entries not already present (by ApWorldName/Title)
-                            var existing = new HashSet<string>(
-                                merged.Select(e => string.IsNullOrEmpty(e.ApWorldName) ? e.DisplayName : e.ApWorldName),
-                                StringComparer.OrdinalIgnoreCase);
+                            // Merge: community entries not already present.
+                            // Dedup on DisplayName, ApWorldName, AND a normalized slug of each
+                            // (lowercase + alphanumeric-only) so that punctuation/accent
+                            // differences ("Diablo II Archipelago" vs "Diablo II: Lord of
+                            // Destruction", "Pokémon" vs "Pokemon") don't produce duplicates.
+                            static string Slug(string s) => System.Text.RegularExpressions.Regex
+                                .Replace(s.ToLowerInvariant().Normalize(
+                                    System.Text.NormalizationForm.FormD), @"[^a-z0-9]", "");
+
+                            var existingNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                            var existingSlugs = new HashSet<string>(StringComparer.Ordinal);
+                            foreach (var e in merged)
+                            {
+                                if (!string.IsNullOrEmpty(e.ApWorldName)) { existingNames.Add(e.ApWorldName); existingSlugs.Add(Slug(e.ApWorldName)); }
+                                if (!string.IsNullOrEmpty(e.DisplayName))  { existingNames.Add(e.DisplayName);  existingSlugs.Add(Slug(e.DisplayName)); }
+                            }
                             var newEntries = communityResult.Games
-                                .Where(e => !existing.Contains(string.IsNullOrEmpty(e.ApWorldName) ? e.DisplayName : e.ApWorldName))
+                                .Where(e => !existingNames.Contains(e.ApWorldName ?? "")
+                                         && !existingNames.Contains(e.DisplayName ?? "")
+                                         && !existingSlugs.Contains(Slug(e.ApWorldName ?? ""))
+                                         && !existingSlugs.Contains(Slug(e.DisplayName ?? "")))
                                 .ToList();
                             if (newEntries.Count > 0)
                                 merged = merged.Concat(newEntries)
@@ -2942,6 +3060,22 @@ public partial class MainWindow : Window
                     }
                 }, bgCts.Token);
             }
+        }
+        catch (Exception ex)
+        {
+            // BtnBrowse_Click is async void — an unhandled throw from the catalog
+            // fetch/parse/render would crash the process. Surface it as a card.
+            AppendLog($"[Catalog] Load failed: {ex.Message}");
+            CatalogPanel.Children.Clear();
+            CatalogPanel.Children.Add(new TextBlock
+            {
+                Text          = "Could not load the game catalog.\nCheck your internet connection and try again.",
+                FontSize      = 14,
+                Foreground    = (Brush)FindResource("BrushMuted"),
+                TextAlignment = TextAlignment.Center,
+                TextWrapping  = TextWrapping.Wrap,
+                Margin        = new Thickness(40)
+            });
         }
         finally
         {
@@ -6524,6 +6658,52 @@ public partial class MainWindow : Window
             return false;
         }
 
+        // D2Plugin: the mod installs into its OWN folder (Games/diablo2_archipelago)
+        // — never the user's Diablo II. We only need to know where the player's own
+        // Classic Diablo II lives so we can COPY the original Blizzard data files
+        // (MPQs) from it; the original is never modified. Auto-detect first, and
+        // only prompt the user if that fails.
+        if (plugin is Plugins.DiabloII.D2Plugin d2pre
+            && !d2pre.IsInstalled
+            && !d2pre.IsOriginalD2Configured)
+        {
+            string? detected = d2pre.AutoDetectOriginalD2();
+            if (detected != null)
+            {
+                d2pre.OriginalD2Directory = detected;
+            }
+            else
+            {
+                bool pick = ConfirmDialog.Show(this,
+                    "Locate your original Diablo II",
+                    "Diablo II Archipelago is built from your own copy of Diablo II: " +
+                    "Lord of Destruction. Select the folder where Classic Diablo II is " +
+                    "installed — the launcher copies the needed game files from there " +
+                    "into its own folder and never modifies your original install.",
+                    "Select folder…", "Cancel");
+                if (!pick) return false;
+
+                var dlg = new Microsoft.Win32.OpenFolderDialog
+                {
+                    Title            = "Select your Classic Diablo II: Lord of Destruction folder",
+                    InitialDirectory = @"C:\Program Files (x86)",
+                };
+                if (dlg.ShowDialog(this) != true) return false;
+
+                string? err = d2pre.ValidateExistingInstall(dlg.FolderName);
+                if (err != null)
+                {
+                    ConfirmDialog.ShowInfo(this, "Folder not recognized", err);
+                    return false;
+                }
+                d2pre.OriginalD2Directory = dlg.FolderName;
+            }
+
+            var ls = SettingsStore.Load();
+            ls.DiabloIIPath = d2pre.OriginalD2Directory;
+            SettingsStore.Save(ls);
+        }
+
         var installCts = new CancellationTokenSource();
         _installCts    = installCts;
 
@@ -6562,6 +6742,15 @@ public partial class MainWindow : Window
                     : $"Game installed — {plugin.InstalledVersion ?? "latest"}",
                 plugin.DisplayName, ToastKind.Success);
             success = true;
+
+            // Add to library on first install (not on updates).
+            // Games are ONLY auto-added to the library when the user installs them —
+            // not on startup (startup auto-add was removed to prevent SC2/etc. ghost entries).
+            if (!wasInstalled)
+            {
+                LibraryStore.Add(plugin.GameId);
+                RebuildGameList();
+            }
 
             // Achievement ladder: first-time installs only — an update of an
             // already-installed game is not an install.
@@ -6788,13 +6977,64 @@ public partial class MainWindow : Window
             return;
         }
 
-        // Install / update if needed first. A failed or cancelled install must
-        // not fall through to the launch (P2-11/P2-3) — the version stamp only
-        // lands on success, so the next Play retries the install.
-        if (!_selectedPlugin.IsInstalled || UpdateAvailable(_selectedPlugin))
+        // Install if not installed (required). Play NO LONGER auto-updates an
+        // already-installed game — updating is opt-in via the separate Update
+        // button (BtnOverviewUpdate), so "AP Play" just launches what's there.
+        // A failed/cancelled install must not fall through to launch (P2-11/P2-3).
+        if (!_selectedPlugin.IsInstalled)
         {
             bool installed = await RunInstallAsync(_selectedPlugin);
             if (!installed || !_selectedPlugin.IsInstalled) return;
+        }
+
+        // D2: the install dir must contain the copied original MPQs before launch.
+        // If they're missing (copy failed, or the original D2 source moved), make
+        // sure we know where the player's own Diablo II is, then re-run the install
+        // so the copy step runs again. The original install is never modified.
+        if (_selectedPlugin is Plugins.DiabloII.D2Plugin d2launch
+            && !d2launch.HasOriginalGameFiles())
+        {
+            if (!d2launch.IsOriginalD2Configured)
+            {
+                string? detected2 = d2launch.AutoDetectOriginalD2();
+                if (detected2 != null)
+                {
+                    d2launch.OriginalD2Directory = detected2;
+                }
+                else
+                {
+                    bool pick = ConfirmDialog.Show(this,
+                        "Locate your original Diablo II",
+                        "The launcher needs your Classic Diablo II: Lord of Destruction " +
+                        "folder to copy the original game files from. Your original " +
+                        "install is never modified.",
+                        "Select folder…", "Cancel");
+                    if (!pick) return;
+
+                    var dlg2 = new Microsoft.Win32.OpenFolderDialog
+                    {
+                        Title            = "Select your Classic Diablo II: Lord of Destruction folder",
+                        InitialDirectory = @"C:\Program Files (x86)",
+                    };
+                    if (dlg2.ShowDialog(this) != true) return;
+
+                    string? err2 = d2launch.ValidateExistingInstall(dlg2.FolderName);
+                    if (err2 != null)
+                    {
+                        ConfirmDialog.ShowInfo(this, "Folder not recognized", err2);
+                        return;
+                    }
+                    d2launch.OriginalD2Directory = dlg2.FolderName;
+                }
+
+                var ls2 = SettingsStore.Load();
+                ls2.DiabloIIPath = d2launch.OriginalD2Directory;
+                SettingsStore.Save(ls2);
+            }
+
+            // Re-run install so the original files get copied into the mod folder.
+            bool reinstalled = await RunInstallAsync(d2launch);
+            if (!reinstalled || !d2launch.IsInstalled) return;
         }
 
         // Switch to Play tab so the log is visible
@@ -6860,9 +7100,52 @@ public partial class MainWindow : Window
             plugin.GameExited -= OnStandaloneGameExited;
             plugin.GameExited += OnStandaloneGameExited;
 
+            // Tracker for standalone: the plugin streams CHECK: over its pipe even
+            // with no AP server, so wire the same LocationsChecked → tracker path
+            // the AP launch uses. _runningPlugin lets OnPluginLocationsChecked
+            // attribute checks; the Changed subscription refreshes the tabs.
+            _runningPlugin = plugin;
+            _locationTracker.Clear();
+            // Feed the bundled location id→name table (no AP server to deliver a
+            // DataPackage), so standalone checks show real names + categories.
+            if (plugin is Plugins.DiabloII.D2Plugin d2track
+                && d2track.GetLocationDataPackage() is { } d2data)
+            {
+                _locationTracker.OnDataPackage(plugin.ApWorldName, d2data);
+                // No AP server → derive the FULL active location universe ourselves
+                // from the [settings] we just wrote + that table, so the tracker
+                // shows every UNCHECKED location + per-category totals (not only the
+                // checks that have fired) — exactly like an AP session. Standalone
+                // runs all difficulties (g_apMode=FALSE in the mod), so the universe
+                // is purely a function of the settings.
+                long[] universe = Plugins.DiabloII.D2LocationUniverse.ComputeActiveIds(
+                    d2track.GetStandaloneSettings(), d2data);
+                if (universe.Length > 0) _locationTracker.OnMissingLocations(universe);
+            }
+            _locationTracker.Changed -= OnLocationTrackerChanged;
+            _locationTracker.Changed += OnLocationTrackerChanged;
+            plugin.LocationsChecked  -= OnPluginLocationsChecked;
+            plugin.LocationsChecked  += OnPluginLocationsChecked;
+            if (plugin is Plugins.DiabloII.D2Plugin d2miss)
+            {
+                d2miss.LocationsMissing -= OnPluginLocationsMissing;
+                d2miss.LocationsMissing += OnPluginLocationsMissing;
+            }
+            OnLocationTrackerChanged();   // reset the tab counters to 0 for the new run
+
             _trayIcon.Show($"Playing {plugin.DisplayName} (standalone)");
             SetStatus("Game running (standalone).");
             AppendLog("[Standalone] Game launched. No AP connection active.");
+        }
+        catch (OperationCanceledException)
+        {
+            // The user closed the pre-launch options dialog (e.g. D2's
+            // randomizer settings) — abort quietly, no error popup.
+            SetStatus("Standalone launch cancelled.");
+            AppendLog("[Standalone] Cancelled before launch.");
+            BtnStandalone.IsEnabled = true;
+            BtnPlay.IsEnabled       = true;
+            SyncOverviewPlayButton();
         }
         catch (Exception ex)
         {
@@ -6883,6 +7166,13 @@ public partial class MainWindow : Window
         if (plugin == null) return;
         _standalonePlugin  = null;
         plugin.GameExited -= OnStandaloneGameExited;
+
+        // Unwire the standalone tracker feed (the tracker keeps its final state
+        // on screen until the next session clears it).
+        plugin.LocationsChecked -= OnPluginLocationsChecked;
+        if (plugin is Plugins.DiabloII.D2Plugin d2miss)
+            d2miss.LocationsMissing -= OnPluginLocationsMissing;
+        if (ReferenceEquals(_runningPlugin, plugin)) _runningPlugin = null;
 
         // Playtime accounting — standalone sessions count too (no AP server,
         // no slot, goal never reached).
@@ -7608,7 +7898,11 @@ public partial class MainWindow : Window
                 if (_pendingChecks.Add(id)) newChecks++;
 
         _ = _apClient?.SendLocationsCheckedAsync(ids);
-        _locationTracker.OnLocationsChecked(ids);
+        // Standalone (no AP server delivered the location universe) → add unseen
+        // ids on the fly so a solo run's checks still populate the tracker. The
+        // bundled D2 location table (fed via OnDataPackage at session start) gives
+        // them real names + categories.
+        _locationTracker.OnLocationsChecked(ids, addUnknown: _standalonePlugin != null);
 
         // Achievement ladder: count only ids NEW to this session (the game can
         // re-report on reload). Credited to the RUNNING game (P2-6) — the
@@ -7617,6 +7911,11 @@ public partial class MainWindow : Window
             AchievementStore.Instance.IncrementCounter(
                 checkedPlugin.GameId, AchievementCounters.ChecksSent, newChecks);
     }
+
+    /// Standalone only: the game streamed its full active location universe so
+    /// the tracker can show unchecked locations + per-category totals like AP.
+    private void OnPluginLocationsMissing(long[] ids)
+        => _locationTracker.OnMissingLocations(ids);
 
     private void OnPluginGameExited(int code)
         => Dispatcher.Invoke(() => OnGameExited(code));
@@ -7712,9 +8011,14 @@ public partial class MainWindow : Window
             });
             _apClient.SessionConnected += (mySlot, players) =>
             {
+                // Runs on the AP receive thread — capture the raising client so a
+                // concurrent sidebar Disconnect (which nulls/replaces + disposes
+                // _apClient) can't NRE us between these field reads.
+                var ap = _apClient;
+                if (ap == null) return;
                 _tracker.OnConnected(mySlot, players);
-                _locationTracker.OnConnected(_apClient.ConnectedChecked,
-                                              _apClient.ConnectedMissing, players);
+                _locationTracker.OnConnected(ap.ConnectedChecked,
+                                              ap.ConnectedMissing, players);
                 // Achievement ladder: first-connect + distinct-server tracking.
                 AchievementStore.Instance.RecordApConnected(
                     plugin.GameId, session.ServerUri);
@@ -7724,7 +8028,7 @@ public partial class MainWindow : Window
                     RefreshProgressionPanel();
                     UpdateGameSuggestionBanner();
                 });
-                _ = _apClient.GetDataPackageAsync(new[] { plugin.ApWorldName });
+                _ = ap.GetDataPackageAsync(new[] { plugin.ApWorldName });
             };
             _apClient.DataPackageReceived += (gameKey, data) =>
             {
@@ -7983,8 +8287,18 @@ public partial class MainWindow : Window
 
     private async void OnGameExited(int exitCode)
     {
-        SetStatus($"Game exited (code {exitCode}).");
-        await CleanupSessionAsync();
+        // async void on a plugin event that fires on an arbitrary thread: an
+        // unhandled throw here would be unobserved and crash the process exactly
+        // when a game closes. Guard the whole teardown.
+        try
+        {
+            SetStatus($"Game exited (code {exitCode}).");
+            await CleanupSessionAsync();
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"[Error] Cleanup after game exit failed: {ex.Message}");
+        }
     }
 
     private async Task CleanupSessionAsync()

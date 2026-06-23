@@ -205,14 +205,11 @@ public sealed class SpyroYearOfTheDragonPSXPlugin : IGamePlugin
             ? ReadExeVersion(exe)
             : null;
 
-        // Poll GitHub for the latest release tag.
+        // CDN HEAD redirect — no REST API quota consumed.
         try
         {
-            string apiUrl = "https://api.github.com/repos/" + GhOwner + "/" + GhRepo + "/releases/latest";
-            string json = await _http.GetStringAsync(apiUrl, ct);
-            using var doc = JsonDocument.Parse(json);
-            if (doc.RootElement.TryGetProperty("tag_name", out var tag))
-                AvailableVersion = tag.GetString();
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync(GhOwner, GhRepo, ct));
         }
         catch
         {

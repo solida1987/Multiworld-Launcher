@@ -102,7 +102,11 @@ public sealed class SeedLibraryStore
             lock (_saveLock)
             {
                 Directory.CreateDirectory(DataDir);
-                File.WriteAllText(FilePath, json);
+                // Atomic write (temp + swap) so a crash mid-write can't truncate
+                // the seed library and lose ROM/seed play history.
+                string tmp = FilePath + ".tmp";
+                File.WriteAllText(tmp, json);
+                File.Move(tmp, FilePath, overwrite: true);
             }
         }
         catch { /* non-fatal */ }

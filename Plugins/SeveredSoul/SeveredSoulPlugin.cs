@@ -154,8 +154,9 @@ public sealed class SeveredSoulPlugin : IGamePlugin
 
         try
         {
-            var (version, _, _) = await ResolveLatestReleaseAsync(ct);
-            AvailableVersion = version;
+            // CDN HEAD redirect — no REST API quota consumed.
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync(GITHUB_OWNER, GITHUB_REPO, ct));
         }
         catch
         {

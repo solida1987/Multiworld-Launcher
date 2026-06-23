@@ -223,8 +223,9 @@ public sealed class HasteBrokenWorldsPlugin : IGamePlugin
         // The "available" version is the latest apworld release tag on GitHub.
         try
         {
-            string? tag = await FetchLatestApWorldTagAsync(ct);
-            AvailableVersion = tag;
+            // CDN HEAD redirect — no REST API quota consumed.
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync("WritingHusky", "haste_apworld", ct));
         }
         catch
         {

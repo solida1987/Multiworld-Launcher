@@ -88,6 +88,7 @@ public sealed class BKPicrossPlugin : IGamePlugin
 
     /// Always treated as installed (no auto-install; user manages the download).
     public bool IsInstalled => true;
+    public bool IsWebBased => true;
 
     public bool IsRunning { get; private set; }
 
@@ -131,8 +132,9 @@ public sealed class BKPicrossPlugin : IGamePlugin
         InstalledVersion = null;   // no auto-install, version unknown locally
         try
         {
-            var (version, _) = await ResolveLatestReleaseAsync(ct);
-            AvailableVersion = version;
+            // CDN HEAD redirect — no REST API quota consumed.
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync(GH_OWNER, GH_REPO, ct));
         }
         catch
         {

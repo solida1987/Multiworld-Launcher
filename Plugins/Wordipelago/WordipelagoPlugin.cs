@@ -73,6 +73,7 @@ public sealed class WordipelagoPlugin : IGamePlugin
 
     // Always "installed" — it is a web game with no local files.
     public bool IsInstalled => true;
+    public bool IsWebBased => true;
     public bool IsRunning { get; private set; }
 
     public bool ConnectsItself     => true;
@@ -97,12 +98,9 @@ public sealed class WordipelagoPlugin : IGamePlugin
         InstalledVersion = "web";
         try
         {
-            string json = await _http.GetStringAsync(GH_RELEASES, ct);
-            using var doc = JsonDocument.Parse(json);
-            if (doc.RootElement.ValueKind == JsonValueKind.Array)
-                foreach (var el in doc.RootElement.EnumerateArray())
-                    if (el.TryGetProperty("tag_name", out var t))
-                    { AvailableVersion = t.GetString()?.Trim(); break; }
+            // CDN HEAD redirect — no REST API quota consumed.
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync(GH_OWNER, GH_REPO, ct));
         }
         catch { AvailableVersion = null; }
     }

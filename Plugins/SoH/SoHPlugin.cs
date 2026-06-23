@@ -223,11 +223,9 @@ public sealed class SoHPlugin : IGamePlugin
 
         try
         {
-            string json = await _http.GetStringAsync(GH_RELEASES_LATEST_URL, ct);
-            using var doc = JsonDocument.Parse(json);
-            AvailableVersion = doc.RootElement.TryGetProperty("tag_name", out var t)
-                ? NormalizeTag(t.GetString())
-                : null;
+            // CDN HEAD redirect — no REST API quota consumed.
+            AvailableVersion = GitHubHelper.NormalizeTag(
+                await GitHubHelper.FetchLatestTagAsync(GITHUB_OWNER, GITHUB_REPO, ct));
         }
         catch
         {
