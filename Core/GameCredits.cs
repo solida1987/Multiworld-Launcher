@@ -25,6 +25,17 @@ public static class GameCredits
     public static (string GameDev, string? ApAuthor)? Get(string gameId)
         => _registry.TryGetValue(gameId, out var c) ? c : null;
 
+    /// Extra contributors who help with the Archipelago LOGIC (regions/rules) for
+    /// a game, shown as a separate credit line. null when no one is registered.
+    public static string? GetApLogic(string gameId)
+        => _apLogic.TryGetValue(gameId, out var c) ? c : null;
+
+    private static readonly Dictionary<string, string> _apLogic = new()
+    {
+        { "diablo2_archipelago",            "ꓘicka & Zoë" },
+        { "diablo_ii_lord_of_destruction",  "ꓘicka & Zoë" },
+    };
+
     private static readonly Dictionary<string, (string GameDev, string? ApAuthor)>
         _registry = new()
     {

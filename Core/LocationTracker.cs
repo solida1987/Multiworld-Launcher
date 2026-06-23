@@ -156,14 +156,60 @@ public sealed class LocationTracker
     }
 
     /// Mark location IDs as checked (from our plugin checks or server RoomUpdate).
-    public void OnLocationsChecked(IEnumerable<long> ids)
+    /// <paramref name="addUnknown"/> = true (standalone / no AP server, so the
+    /// full location universe was never delivered by OnConnected) adds any
+    /// unseen id as a freshly-checked entry, so a solo run's checks still show
+    /// up in the tracker instead of being dropped.
+    public void OnLocationsChecked(IEnumerable<long> ids, bool addUnknown = false)
     {
         bool any = false;
         lock (_sync)
         {
+            // When the location table is loaded (standalone DataPackage / AP), an
+            // id that isn't in it is a phantom — e.g. the mod's MISSING/CHECK
+            // enumeration emits base+qid+diff*1000 combinations that don't map to a
+            // real location (level-milestone ids bake difficulty into the qid). Drop
+            // those instead of showing "#42282" rows. Only filters NEW ids; ids
+            // already tracked (added by the computed universe) always update.
+            bool haveTable = _locNames.Count > 0;
             foreach (var id in ids)
-                if (_entries.TryGetValue(id, out var e) && !e.IsChecked)
-                { e.IsChecked = true; any = true; }
+            {
+                if (_entries.TryGetValue(id, out var e))
+                {
+                    if (!e.IsChecked) { e.IsChecked = true; any = true; }
+                }
+                else if (addUnknown && (!haveTable || _locNames.ContainsKey(id)))
+                {
+                    GetOrAdd(id).IsChecked = true;
+                    any = true;
+                }
+            }
+            if (addUnknown && any) ApplyNames();
+        }
+        if (any) Changed?.Invoke();
+    }
+
+    /// Add location IDs as "missing" (unchecked) without disturbing entries that
+    /// already exist — used in STANDALONE, where the game streams its full active
+    /// location universe (MISSING:) separately from the checks (CHECK:), in any
+    /// order. Gives the tracker per-category totals + the unchecked list, like an
+    /// AP session's OnConnected, but merge-friendly.
+    public void OnMissingLocations(IEnumerable<long> ids)
+    {
+        bool any = false;
+        lock (_sync)
+        {
+            // Same phantom guard as OnLocationsChecked: only add ids the table
+            // knows about, so a buggy/over-eager MISSING: stream can't inject
+            // nameless "#<id>" rows. (The launcher-computed universe is built FROM
+            // the table, so it passes cleanly.)
+            bool haveTable = _locNames.Count > 0;
+            foreach (var id in ids)
+            {
+                if (haveTable && !_locNames.ContainsKey(id)) continue;
+                if (!_entries.ContainsKey(id)) { GetOrAdd(id); any = true; }
+            }
+            if (any) ApplyNames();
         }
         if (any) Changed?.Invoke();
     }

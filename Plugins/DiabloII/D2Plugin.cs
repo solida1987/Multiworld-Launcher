@@ -117,6 +117,12 @@ public sealed class D2Plugin : IGamePlugin
     // ── AP bridge events ──────────────────────────────────────────────────────
 
     public event Action<long[]>? LocationsChecked;
+
+    /// The game's full active location universe (standalone only) — the DLL
+    /// streams it as MISSING: once the pipe connects so the tracker can show
+    /// unchecked locations + per-category totals like an AP session. Not on
+    /// IGamePlugin (D2-specific); the host wires it via a cast.
+    public event Action<long[]>? LocationsMissing;
     public event Action<int>?    GameExited;
 
     /// Fired when the DLL sends a "GOAL" message (player completed the goal).
@@ -731,32 +737,16 @@ public sealed class D2Plugin : IGamePlugin
         _pipe    = pipe;
         _pipeCts = new CancellationTokenSource();
 
-        // 3. Start Game.exe via D2.DetoursLauncher
-        string detours   = Path.Combine(GameDirectory, "D2.DetoursLauncher.exe");
-        string gameExe   = Path.Combine(GameDirectory, "Game.exe");
-        string extraArgs = BuildExtraLaunchArgs();
-        var launchPsi = new ProcessStartInfo
-        {
-            FileName         = detours,
-            Arguments        = $"\"{gameExe}\" -- -direct -txt{extraArgs}",
-            WorkingDirectory = GameDirectory,
-            UseShellExecute  = false,
-        };
-        // The DLL scrubs ap_settings.dat at startup unless this is set
-        // (d2arch_main.c) — without it our slot-data hand-off gets deleted
-        // the moment the game boots. Inherited by Game.exe via DetoursLauncher.
-        launchPsi.Environment["D2ARCH_AP_MODE"] = "1";
-        var proc = Process.Start(launchPsi)
-            ?? throw new InvalidOperationException("Failed to start Game.exe.");
-        _gameProcess = proc;
-
-        // Exit monitoring is wired BEFORE the bridge handshake so a process
-        // that crashes during boot aborts the wait below instead of leaving
-        // the launch hanging forever. The handler captures the local `proc` —
-        // never the field, which a relaunch may have replaced by exit time.
+        // 3. Launch Game.exe through the 32-bit bootstrap (D2Arch_Launcher.exe),
+        //    which sets DIABLO2_PATCH (so D2.Detours loads the patched DLLs),
+        //    launches the game via D2.Detours, and injects D2Archipelago.dll.
+        //    The 64-bit launcher cannot inject into the 32-bit game itself.
+        //    D2ARCH_AP_MODE keeps ap_settings.dat alive for the slot-data
+        //    hand-off (the DLL scrubs it at startup otherwise).
         int launchCompleted = 0;   // 1 once the pipe handshake succeeded
         int exitRaised      = 0;   // GameExited must fire at most once
         var deathCts        = new CancellationTokenSource();
+        Process? proc       = null;
 
         void RaiseExited()
         {
@@ -764,40 +754,38 @@ public sealed class D2Plugin : IGamePlugin
             IsRunning = false;
             ScrubApPassword();   // session over — blank the ini password (P3-20)
             int code = 0;
-            try { code = proc.ExitCode; } catch { /* handle already gone */ }
+            try { code = proc?.ExitCode ?? 0; } catch { /* handle already gone */ }
             GameExited?.Invoke(code);
         }
 
-        proc.EnableRaisingEvents = true;
-        proc.Exited += (_, _) =>
-        {
-            IsRunning = false;
-            try { deathCts.Cancel(); } catch (ObjectDisposedException) { }
-            if (Volatile.Read(ref launchCompleted) == 1)
-                RaiseExited();
-        };
-
         try
         {
-            // 4+5. PID wait → DLL injection → pipe handshake, all bounded by
-            // one linked token: caller cancel (Stop/cleanup) + plugin teardown
-            // + process death + a 30 s overall timeout. Without the timeout a
-            // DLL that never opens the pipe (AV blocked the injection, or a
-            // V1 file-bridge DLL is deployed) would hang the launch forever.
+            // Bootstrap inject (up to ~60 s) + pipe handshake, bounded by one
+            // linked token: caller cancel + plugin teardown + process death +
+            // a 90 s overall ceiling.
             using var launchCts = CancellationTokenSource.CreateLinkedTokenSource(
                 ct, _pipeCts.Token, deathCts.Token);
-            launchCts.CancelAfter(TimeSpan.FromSeconds(30));
+            launchCts.CancelAfter(TimeSpan.FromSeconds(90));
 
-            string dllPath = Path.Combine(GameDirectory, "D2Archipelago.dll");
-            int    gamePid = await WaitForGamePidAsync(launchCts.Token);
-            await InjectDllAsync(gamePid, dllPath, launchCts.Token);
+            proc = await RunBootstrapAndFindGameAsync(apMode: true, launchCts.Token);
+            _gameProcess = proc;
+            proc.EnableRaisingEvents = true;
+            proc.Exited += (_, _) =>
+            {
+                IsRunning = false;
+                try { deathCts.Cancel(); } catch (ObjectDisposedException) { }
+                if (Volatile.Read(ref launchCompleted) == 1)
+                    RaiseExited();
+            };
+
+            // Game.exe is modded + running; wait for the DLL to open our pipe.
             await pipe.WaitForConnectionAsync(launchCts.Token);
         }
         catch (Exception ex)
         {
             // The launch is dead either way — never leave a half-modded
             // Game.exe running behind a failed bridge.
-            try { proc.Kill(entireProcessTree: true); } catch { }
+            try { proc?.Kill(entireProcessTree: true); } catch { }
             DisposePipe();
             IsRunning = false;
 
@@ -812,11 +800,11 @@ public sealed class D2Plugin : IGamePlugin
                         "Check your antivirus — add D2Archipelago.dll, Game.exe and the " +
                         "launcher to its exclusion list, then try again.");
                 throw new InvalidOperationException(
-                    "The game started but the mod never connected (waited 30 seconds). " +
+                    "The game started but the mod never connected to the launcher. " +
                     "This usually means antivirus blocked the mod — add D2Archipelago.dll " +
                     "and the launcher to your antivirus exclusions, then try again.");
             }
-            throw;   // PID-wait / injection errors already carry actionable text
+            throw;   // bootstrap / injection errors already carry actionable text
         }
         finally
         {
@@ -828,7 +816,7 @@ public sealed class D2Plugin : IGamePlugin
 
         // Closes the race where the process died between the pipe handshake
         // and the flag write above (the Exited handler saw launchCompleted=0).
-        if (proc.HasExited) RaiseExited();
+        if (proc is { HasExited: true }) RaiseExited();
 
         // Push the current AP state immediately: if the AP server connected
         // before the game was up, the DLL would otherwise never receive a
@@ -892,48 +880,101 @@ public sealed class D2Plugin : IGamePlugin
 
     public bool SupportsStandalone => true;
 
-    /// Launch Game.exe directly without DLL injection or an AP connection.
-    /// Lets the user play Diablo II without an Archipelago session.
-    public Task LaunchStandaloneAsync(CancellationToken ct = default)
+    /// Launch a SOLO randomized run — no Archipelago server. Pops the randomizer
+    /// dialog (same options the apworld exposes), writes the choices to
+    /// d2arch.ini [settings], then launches the game through the 32-bit
+    /// D2Arch_Launcher.exe bootstrap (which injects D2Archipelago.dll — the
+    /// 64-bit launcher cannot inject into the 32-bit game itself) WITHOUT a pipe
+    /// and WITHOUT D2ARCH_AP_MODE, so the mod runs offline and applies the local
+    /// randomization. This is what makes standalone actually randomize.
+    public async Task LaunchStandaloneAsync(CancellationToken ct = default)
     {
         if (!IsInstalled)
             throw new InvalidOperationException("Diablo II: Lord of Destruction is not installed.");
 
-        string gameExe = Path.Combine(GameDirectory, "Game.exe");
+        string gameExe   = Path.Combine(GameDirectory, "Game.exe");
+        string bootstrap = Path.Combine(GameDirectory, "D2Arch_Launcher.exe");
+        string dllPath   = Path.Combine(GameDirectory, "D2Archipelago.dll");
         if (!File.Exists(gameExe))
             throw new InvalidOperationException(
                 $"Game.exe not found at:\n{gameExe}\n\nVerify your install directory in Settings.");
-
-        // Pin save path so D2 1.10f saves to our folder, not wherever the stale registry points.
-        PinSavePathRegistry();
-
-        string extraArgs = BuildExtraLaunchArgs();
-        var proc = Process.Start(new ProcessStartInfo
-        {
-            FileName         = gameExe,
-            Arguments        = $"-direct -txt{extraArgs}",
-            WorkingDirectory = GameDirectory,
-            UseShellExecute  = false,
-        });
-
-        if (proc == null)
+        if (!File.Exists(bootstrap) || !File.Exists(dllPath))
             throw new InvalidOperationException(
-                "Process.Start returned null — check that Game.exe is not blocked by antivirus.");
+                "The Archipelago mod files are missing from the install folder " +
+                "(D2Arch_Launcher.exe / D2Archipelago.dll). Re-install the game " +
+                "from the Play tab, then try again.");
 
-        _gameProcess = proc;
-        IsRunning    = true;
-        proc.EnableRaisingEvents = true;
-        // Capture the local `proc` — reading the field here would throw if a
-        // relaunch replaced it before this (older) process exited.
-        proc.Exited += (_, _) =>
+        // 1. Randomizer + seed library dialog (UI thread — still synchronous here
+        //    before the first await). The user either starts a NEW seed (with the
+        //    chosen options) or LOADS a previous one. Cancel aborts quietly.
+        var lib = new D2SeedLibrary(GameDirectory);
+        var choice = D2StandaloneSettingsDialog.ShowAndGet(
+            Application.Current?.MainWindow, ReadStandaloneSettings(), lib);
+        if (choice == null)
+            throw new OperationCanceledException("Standalone launch cancelled.");
+
+        // 2. Resolve the world: ShuffleSeed must match the seed so the mod
+        //    reproduces it; persist the seed's settings + isolate its characters
+        //    in its own save folder.
+        var settings = choice.Settings;
+        settings.Seed = choice.Seed;
+        lib.SaveMeta(new D2SeedInfo { Seed = choice.Seed, Settings = settings });
+        string saveFolder = lib.SeedFolder(choice.Seed);
+        Directory.CreateDirectory(saveFolder);
+
+        // 3. Persist the chosen options. We write a PipeName (but blank server/
+        //    slot/pass) so the mod opens the launcher pipe and streams CHECK:
+        //    for the TRACKER — the DLL sends checks whenever the pipe is open,
+        //    independent of any AP connection. We never send STATE:CONNECTED, so
+        //    the mod stays offline and grants rewards locally (true standalone).
+        string pipeName =
+            $"d2arch_v2_{Environment.ProcessId}_{Guid.NewGuid().ToString("N")[..8]}";
+        WriteStandaloneSettings(settings, pipeName);
+
+        // Open the pipe BEFORE launch so the DLL can connect at init.
+        DisposePipe();
+        var pipe = new NamedPipeServerStream(pipeName, PipeDirection.InOut,
+                       maxNumberOfServerInstances: 1,
+                       transmissionMode: PipeTransmissionMode.Byte,
+                       options: PipeOptions.Asynchronous);
+        _pipe    = pipe;
+        _pipeCts = new CancellationTokenSource();
+
+        // 4. Launch + inject via the 32-bit bootstrap (which pins the per-seed
+        //    save folder via D2ARCH_SAVE_PATH), then attach to Game.exe.
+        Process game = await RunBootstrapAndFindGameAsync(apMode: false, ct, saveFolder);
+        _gameProcess = game;
+
+        // Capture the local `game` for the exit handler — reading the field
+        // would throw if a relaunch replaced it before this process exits.
+        game.EnableRaisingEvents = true;
+        game.Exited += (_, _) =>
         {
             IsRunning = false;
+            DisposePipe();   // tear down the tracker pipe with the game
             int code = 0;
-            try { code = proc.ExitCode; } catch { /* handle already gone */ }
+            try { code = game.ExitCode; } catch { /* handle already gone */ }
             GameExited?.Invoke(code);
         };
 
-        return Task.CompletedTask;
+        IsRunning = true;
+        if (game.HasExited) { IsRunning = false; DisposePipe(); return; }
+
+        // 5. Pump the DLL's CHECK: messages to the launcher's tracker. Best-effort
+        //    on a background task: a pipe that never connects must NOT break the
+        //    already-running game — the tracker just stays empty that session.
+        var pipeCts = _pipeCts;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                using var pcts = CancellationTokenSource.CreateLinkedTokenSource(pipeCts.Token);
+                pcts.CancelAfter(TimeSpan.FromSeconds(30));
+                await pipe.WaitForConnectionAsync(pcts.Token);
+                await PipeLoopAsync(pipeCts.Token);
+            }
+            catch { /* no tracker this session */ }
+        });
     }
 
     // ── AP bridge: items in, checks out ──────────────────────────────────────
@@ -1103,6 +1144,16 @@ public sealed class D2Plugin : IGamePlugin
                 if (long.TryParse(p.Trim(), out long id))
                     ids.Add(id);
             if (ids.Count > 0) LocationsChecked?.Invoke(ids.ToArray());
+        }
+        // "MISSING:<id,...>" — the game's FULL active location universe (sent in
+        // standalone so the tracker shows unchecked locations + totals like AP).
+        else if (msg.StartsWith("MISSING:", StringComparison.Ordinal))
+        {
+            var ids = new List<long>();
+            foreach (string p in msg[8..].Split(',', StringSplitOptions.RemoveEmptyEntries))
+                if (long.TryParse(p.Trim(), out long id))
+                    ids.Add(id);
+            if (ids.Count > 0) LocationsMissing?.Invoke(ids.ToArray());
         }
         // "GOAL" — player completed the Archipelago goal
         else if (msg == "GOAL")
@@ -1426,7 +1477,12 @@ public sealed class D2Plugin : IGamePlugin
     public string[] ScreenshotUrls => Array.Empty<string>();
     public string   ApWorldName    => "Diablo II Archipelago";
     public string   ThemeAccentColor => "#7A1010";   // blood-red
-    public string[] GameBadges       => new[] { "Requires D2: LoD" };
+    // State-aware (RefreshHeaderBadges rebuilds when requirement state changes):
+    // the "Requires D2: LoD" badge disappears once the user has pointed the
+    // launcher at a valid original Diablo II: LoD install — the requirement is
+    // then satisfied, leaving only the green "✓ Installed" badge.
+    public string[] GameBadges =>
+        IsOriginalD2Configured ? Array.Empty<string>() : new[] { "Requires D2: LoD" };
 
     public async Task<NewsItem[]> GetNewsAsync(CancellationToken ct = default)
     {
@@ -1491,6 +1547,11 @@ public sealed class D2Plugin : IGamePlugin
             // V1 DLLs ignore the key; V2 DLLs switch to the pipe transport.
             SetIniSectionValue(lines, "ap", "PipeName", pipeName);
 
+            // Launcher owns the AP connection + randomization → mod hides its
+            // in-game title overlay + F1 AP login panel (read from disk, so it
+            // works even if the D2ARCH_LAUNCHER env var doesn't propagate).
+            SetIniSectionValue(lines, "launcher", "HideInGameUI", "1");
+
             File.WriteAllLines(ini, lines);
         }
         catch { /* non-fatal — user can set manually in d2arch.ini */ }
@@ -1535,6 +1596,238 @@ public sealed class D2Plugin : IGamePlugin
 
         // Key not found — insert right after the section header
         lines.Insert(sectionIdx + 1, newLine);
+    }
+
+    /// Read <key> from [section] of an in-memory ini (mirrors the scan in
+    /// SetIniSectionValue). Returns the trimmed value, or null if the section
+    /// or key is absent.
+    private static string? ReadIniSectionValue(IReadOnlyList<string> lines, string section, string key)
+    {
+        string header = $"[{section}]";
+        int sectionIdx = -1;
+        for (int i = 0; i < lines.Count; i++)
+        {
+            if (lines[i].Trim().Equals(header, StringComparison.OrdinalIgnoreCase))
+            { sectionIdx = i; break; }
+        }
+        if (sectionIdx < 0) return null;
+
+        for (int i = sectionIdx + 1; i < lines.Count; i++)
+        {
+            string t = lines[i].Trim();
+            if (t.StartsWith('[')) break;            // next section
+            int eq = t.IndexOf('=');
+            if (eq > 0 && t[..eq].Trim().Equals(key, StringComparison.OrdinalIgnoreCase))
+                return t[(eq + 1)..].Trim();
+        }
+        return null;
+    }
+
+    private string D2IniPath => Path.Combine(GameDirectory, "Archipelago", "d2arch.ini");
+
+    /// Load the current standalone randomizer options from d2arch.ini [settings]
+    /// so the dialog opens on whatever was last used (or the mod's defaults when
+    /// a key — or the whole file — is missing).
+    /// Bundled D2 location id↔name table (Game/Archipelago/d2_locations.json,
+    /// extracted from the apworld at build time) as an AP-style data package
+    /// ({ "location_name_to_id": { … } }). Lets the launcher's tracker name +
+    /// categorise standalone checks the same way an AP DataPackage does. Null if
+    /// the file is missing (older install) — the tracker then falls back to #id.
+    public JsonElement? GetLocationDataPackage()
+    {
+        try
+        {
+            string p = Path.Combine(GameDirectory, "Archipelago", "d2_locations.json");
+            if (!File.Exists(p)) return null;
+            using var doc = JsonDocument.Parse(File.ReadAllText(p));
+            return doc.RootElement.Clone();
+        }
+        catch { return null; }
+    }
+
+    private D2RandomizerSettings ReadStandaloneSettings()
+    {
+        try
+        {
+            string ini = D2IniPath;
+            if (!File.Exists(ini)) return new D2RandomizerSettings();
+            var lines = File.ReadAllLines(ini);
+            return D2RandomizerSettings.FromIni(key => ReadIniSectionValue(lines, "settings", key));
+        }
+        catch { return new D2RandomizerSettings(); }
+    }
+
+    /// The standalone randomizer options currently on disk (d2arch.ini
+    /// [settings]) — exactly what the mod reads this session. The host uses these
+    /// + GetLocationDataPackage() to derive the standalone tracker's full active
+    /// location universe (D2LocationUniverse), since there's no AP server to
+    /// deliver one. Read AFTER LaunchStandaloneAsync, so it reflects the just-
+    /// written launch settings.
+    public D2RandomizerSettings GetStandaloneSettings() => ReadStandaloneSettings();
+
+    /// Persist the chosen randomizer options to d2arch.ini [settings] and blank
+    /// the [ap] section. The mod's LoadAPSettings reads [settings] as its single
+    /// source of truth whenever AP is offline, so a standalone (DLL-injected,
+    /// no-pipe) launch randomizes exactly per these values. Blanking [ap]
+    /// guarantees the DLL never tries to reach a stale pipe/server.
+    private void WriteStandaloneSettings(D2RandomizerSettings s, string pipeName)
+    {
+        string ini = D2IniPath;
+        List<string> lines;
+        if (File.Exists(ini))
+        {
+            lines = new List<string>(File.ReadAllLines(ini));
+        }
+        else
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(ini) ?? GameDirectory);
+            lines = new List<string>();
+        }
+
+        foreach (var kv in s.ToIniPairs())
+            SetIniSectionValue(lines, "settings", kv.Key, kv.Value);
+
+        // Standalone: write the PipeName so the mod streams CHECK: to the
+        // launcher's tracker, but blank server/slot/pass so it never tries to
+        // reach an AP server (the launcher never sends STATE:CONNECTED either).
+        SetIniSectionValue(lines, "ap", "PipeName", pipeName);
+        SetIniSectionValue(lines, "ap", "ServerIP", "");
+        SetIniSectionValue(lines, "ap", "SlotName", "");
+        SetIniSectionValue(lines, "ap", "Password", "");
+
+        // Launcher owns randomization → mod hides its in-game title overlay +
+        // F1 AP login panel (read from disk = reliable regardless of env vars).
+        SetIniSectionValue(lines, "launcher", "HideInGameUI", "1");
+
+        File.WriteAllLines(ini, lines);
+    }
+
+    // ── Launch via the 32-bit bootstrap (the ONLY reliable injector) ──────────
+    //
+    // The launcher is a 64-bit process; Game.exe is 32-bit. A 64-bit process
+    // CANNOT inject a DLL into a 32-bit target via CreateRemoteThread +
+    // LoadLibraryA — the kernel32 LoadLibraryA address differs between the
+    // 32- and 64-bit views, so the remote thread runs garbage and the DLL is
+    // never loaded (the game boots completely unmodded). This is exactly why
+    // D2Arch_Launcher.exe exists: it is built x86, so its injection matches the
+    // 32-bit Game.exe. The OLD C# launcher invoked it for precisely this reason
+    // (see src/d2arch_bootstrap.c header). It sets DIABLO2_PATCH, launches
+    // Game.exe via D2.Detours, injects D2Archipelago.dll (with retry), then
+    // exits. We run it and then attach to the running Game.exe.
+
+    /// Run D2Arch_Launcher.exe (kills stale Game.exe, sets DIABLO2_PATCH,
+    /// launches + injects), wait for it to finish, then return the live
+    /// Game.exe process. <paramref name="apMode"/> sets D2ARCH_AP_MODE so the
+    /// DLL keeps ap_settings.dat (AP) instead of scrubbing it (standalone).
+    private async Task<Process> RunBootstrapAndFindGameAsync(
+        bool apMode, CancellationToken ct, string? saveFolder = null)
+    {
+        string bootstrap = Path.Combine(GameDirectory, "D2Arch_Launcher.exe");
+        if (!File.Exists(bootstrap))
+            throw new InvalidOperationException(
+                "D2Arch_Launcher.exe is missing from the install folder — re-install the " +
+                "game from the Play tab, then try again.");
+
+        // -3dfx selects the Glide renderer, which is what D2GL (glide3x.dll)
+        // hooks to provide the HD graphics. Without it the game falls back to
+        // DirectDraw and D2GL never activates (no HD). START.bat passes it too.
+        string extraArgs = BuildExtraLaunchArgs();
+        var psi = new ProcessStartInfo
+        {
+            FileName         = bootstrap,
+            Arguments        = $"-3dfx -direct -txt{extraArgs}",
+            WorkingDirectory = GameDirectory,
+            UseShellExecute  = false,
+            CreateNoWindow   = true,
+        };
+        if (apMode) psi.Environment["D2ARCH_AP_MODE"] = "1";
+        // The bootstrap sets DIABLO2_PATCH itself; set it here too so the
+        // dependency is explicit and survives any future refactor of the exe.
+        psi.Environment["DIABLO2_PATCH"] = Path.Combine(GameDirectory, "patch");
+        // The launcher now owns randomization (it writes d2arch.ini [settings])
+        // and the AP connection (the pipe), so tell the mod to hide its in-game
+        // title-screen overlay (the old toggles + Server/Slot/Pass/Connect panel).
+        psi.Environment["D2ARCH_LAUNCHER"] = "1";
+        // Per-seed character isolation: the bootstrap pins D2's save path here,
+        // so D2's character-select only shows characters created under this seed.
+        if (!string.IsNullOrEmpty(saveFolder))
+            psi.Environment["D2ARCH_SAVE_PATH"] = saveFolder;
+
+        var boot = Process.Start(psi)
+            ?? throw new InvalidOperationException("Failed to start the mod loader (D2Arch_Launcher.exe).");
+
+        // The bootstrap exits the moment injection completes (or fails). Its own
+        // internal waits cap at ~15s for Game.exe + 3 inject retries, so 60s is
+        // a safe ceiling that still surfaces a hung AV scan.
+        using (var bootCts = CancellationTokenSource.CreateLinkedTokenSource(ct))
+        {
+            bootCts.CancelAfter(TimeSpan.FromSeconds(60));
+            try { await boot.WaitForExitAsync(bootCts.Token); }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                try { boot.Kill(entireProcessTree: true); } catch { }
+                throw new InvalidOperationException(
+                    "The mod loader did not finish within 60 seconds — usually antivirus " +
+                    "blocking DLL injection. Add the game folder and the launcher to your " +
+                    "antivirus exclusions, then try again.");
+            }
+        }
+
+        if (boot.ExitCode != 0)
+            throw new InvalidOperationException(
+                $"The randomizer mod could not be injected into the game (loader exit code {boot.ExitCode}). " +
+                "This is almost always antivirus blocking DLL injection — add D2Archipelago.dll, " +
+                "Game.exe, D2Arch_Launcher.exe and the launcher to your antivirus exclusions, then try again.");
+
+        // Bootstrap succeeded → Game.exe is running + modded. Attach to it.
+        int pid = await FindGamePidByImagePathAsync(ct);
+        return Process.GetProcessById(pid);
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern bool QueryFullProcessImageNameW(
+        IntPtr hProcess, int flags, System.Text.StringBuilder exeName, ref int size);
+
+    private const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
+
+    /// Find the Game.exe living under GameDirectory. Uses
+    /// QueryFullProcessImageName (works cross-bitness, unlike Process.MainModule
+    /// which a 64-bit process can't reliably read on a 32-bit target). Retries
+    /// briefly because the bootstrap may exit a beat before the OS finishes
+    /// surfacing the process.
+    private async Task<int> FindGamePidByImagePathAsync(CancellationToken ct, int timeoutMs = 10_000)
+    {
+        string root;
+        try   { root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(GameDirectory)); }
+        catch { root = GameDirectory; }
+
+        var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+        while (DateTime.UtcNow < deadline && !ct.IsCancellationRequested)
+        {
+            foreach (var p in Process.GetProcessesByName("Game"))
+            {
+                IntPtr h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, p.Id);
+                if (h == IntPtr.Zero) continue;
+                try
+                {
+                    var sb  = new System.Text.StringBuilder(1024);
+                    int cap = sb.Capacity;
+                    if (QueryFullProcessImageNameW(h, 0, sb, ref cap))
+                    {
+                        string full = Path.GetFullPath(sb.ToString());
+                        if (full.StartsWith(root + Path.DirectorySeparatorChar,
+                                            StringComparison.OrdinalIgnoreCase))
+                            return p.Id;
+                    }
+                }
+                catch { /* process vanished — skip */ }
+                finally { CloseHandle(h); }
+            }
+            await Task.Delay(200, ct);
+        }
+        throw new InvalidOperationException(
+            "The game started but could not be located under the install folder. " +
+            "If it is running, close it and try again.");
     }
 
     // ── Helpers: wait for Game.exe process ───────────────────────────────────
