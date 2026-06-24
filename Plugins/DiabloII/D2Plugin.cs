@@ -158,6 +158,15 @@ public sealed class D2Plugin : IGamePlugin
     /// randomization is reproducible across relaunches of the same multiworld.
     public Func<string?>? GetSeedName { get; set; }
 
+    /// Invoked once the game's pipe has attached (post-launch). The host wires
+    /// this to ApClient.SyncAsync() so the AP server re-sends the full item
+    /// stream from index 0 — re-delivering any items received while the player
+    /// was still sitting in the launcher (notably the PRECOLLECTED STARTING
+    /// SKILLS at item index 0), which ReceiveItemsAsync had to drop because the
+    /// pipe wasn't connected yet. The DLL dedups by item id, so re-delivered
+    /// items are harmless. Assignment-style for idempotent per-launch re-wiring.
+    public Func<Task>? RequestApResync { get; set; }
+
     // ── GitHub API ────────────────────────────────────────────────────────────
 
     private static readonly HttpClient _http = new()
@@ -948,7 +957,21 @@ public sealed class D2Plugin : IGamePlugin
         // before the game was up, the DLL would otherwise never receive a
         // STATE: message (OnApStateChanged only fires on transitions).
         if (_lastApState == ApConnectionState.Connected)
+        {
             await WritePipeLineAsync("STATE:CONNECTED", ct);
+
+            // The game just attached. Any AP items received while the player was
+            // still in the launcher (notably the precollected STARTING SKILLS at
+            // index 0) were dropped by ReceiveItemsAsync because the pipe wasn't
+            // connected yet. Now that it is, ask the server to resend the full
+            // item stream from index 0 so those items reach the DLL. Best-effort:
+            // a failed/absent resync never blocks the launch (the DLL dedups, so
+            // re-delivered items are harmless).
+            if (RequestApResync != null)
+            {
+                try { await RequestApResync(); } catch { /* resync is best-effort */ }
+            }
+        }
 
         _ = Task.Run(() => PipeLoopAsync(_pipeCts.Token));
     }
@@ -1336,7 +1359,12 @@ public sealed class D2Plugin : IGamePlugin
             foreach (string p in msg[6..].Split(',', StringSplitOptions.RemoveEmptyEntries))
                 if (long.TryParse(p.Trim(), out long id))
                     ids.Add(id);
-            if (ids.Count > 0) LocationsChecked?.Invoke(ids.ToArray());
+            if (ids.Count > 0)
+            {
+                LocationsChecked?.Invoke(ids.ToArray());
+                foreach (var id in ids) { _mapChecked.Add(id); _mapActive.Add(id); }
+                _mapControl?.SetLocations(_mapActive, _mapChecked);   // per-area checklist
+            }
         }
         // "MISSING:<id,...>" — the game's FULL active location universe (sent in
         // standalone so the tracker shows unchecked locations + totals like AP).
@@ -1346,7 +1374,12 @@ public sealed class D2Plugin : IGamePlugin
             foreach (string p in msg[8..].Split(',', StringSplitOptions.RemoveEmptyEntries))
                 if (long.TryParse(p.Trim(), out long id))
                     ids.Add(id);
-            if (ids.Count > 0) LocationsMissing?.Invoke(ids.ToArray());
+            if (ids.Count > 0)
+            {
+                LocationsMissing?.Invoke(ids.ToArray());
+                foreach (var id in ids) _mapActive.Add(id);
+                _mapControl?.SetLocations(_mapActive, _mapChecked);   // per-area checklist universe
+            }
         }
         // "RECV:<text>" — standalone reward notification ("<location>: <reward>"),
         // surfaced in the tracker's Received tab so solo runs show what each check gave.
@@ -1354,6 +1387,19 @@ public sealed class D2Plugin : IGamePlugin
         {
             string text = msg[5..].Trim();
             if (text.Length > 0) StandaloneItemReceived?.Invoke(text);
+        }
+        // "POS:<levelId>|<x>|<y>" — live player position for the map tracker dot.
+        else if (msg.StartsWith("POS:", StringComparison.Ordinal))
+        {
+            var parts = msg[4..].Split('|');
+            if (parts.Length == 3 &&
+                int.TryParse(parts[0], out int lvl) &&
+                int.TryParse(parts[1], out int x) &&
+                int.TryParse(parts[2], out int y))
+            {
+                _lastMapPos = new D2PlayerPos { LevelId = lvl, X = x, Y = y };
+                _mapControl?.SetPlayer(_lastMapPos);   // SetPlayer marshals to the UI thread
+            }
         }
         // "GOAL" — player completed the Archipelago goal
         else if (msg == "GOAL")
@@ -1431,6 +1477,34 @@ public sealed class D2Plugin : IGamePlugin
     {
         if (string.IsNullOrEmpty(s)) return "";
         return s.Replace("|", "/").Replace("\n", " ").Replace("\r", " ").Trim();
+    }
+
+    // ── Map tracker ────────────────────────────────────────────────────────────
+
+    public bool SupportsMapTracker => true;
+
+    private D2MapTrackerControl? _mapControl;
+    private D2PlayerPos?         _lastMapPos;   // last POS seen before the panel existed
+    private readonly HashSet<long> _mapChecked = new();   // checked location ids (CHECK:)
+    private readonly HashSet<long> _mapActive  = new();   // run's location universe (MISSING:)
+
+    /// The launcher hosts this under the Map tab. Cached so the live data
+    /// pipeline (SetWorld/SetPlayer — fed from the DLL's per-area map export +
+    /// the POS pipe messages) keeps updating one persistent control.
+    public UIElement? CreateMapTrackerPanel()
+    {
+        if (_mapControl == null)
+        {
+            _mapControl = new D2MapTrackerControl();
+            if (_lastMapPos != null) _mapControl.SetPlayer(_lastMapPos);
+        }
+        // Seed the checklist with anything already tracked this session.
+        _mapControl.SetLocations(_mapActive, _mapChecked);
+        // Point it at the DLL's live map-export folder so it fills in (and shows
+        // the "you are here" dot) as the player explores.
+        if (!string.IsNullOrEmpty(GameDirectory))
+            _mapControl.SetMapSource(Path.Combine(GameDirectory, "Archipelago", "map"));
+        return _mapControl;
     }
 
     // ── Settings UI ──────────────────────────────────────────────────────────
@@ -1966,6 +2040,16 @@ public sealed class D2Plugin : IGamePlugin
             throw new InvalidOperationException(
                 "D2Arch_Launcher.exe is missing from the install folder — re-install the " +
                 "game from the Play tab, then try again.");
+
+        // Map tracker — wipe the previous session's per-room collision dumps so a
+        // new seed (different layout) never renders on top of stale rooms. The DLL
+        // recreates the folder + appends rooms as the player explores.
+        try
+        {
+            string mapDir = Path.Combine(GameDirectory, "Archipelago", "map");
+            if (Directory.Exists(mapDir)) Directory.Delete(mapDir, recursive: true);
+        }
+        catch { /* non-fatal — stale rooms at worst */ }
 
         // -3dfx selects the Glide renderer, which is what D2GL (glide3x.dll)
         // hooks to provide the HD graphics. Without it the game falls back to

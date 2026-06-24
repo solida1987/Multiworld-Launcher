@@ -163,6 +163,21 @@ public interface IGamePlugin
     /// Called on the UI thread.
     UIElement? CreateSettingsPanel();
 
+    // ── Map tracker (optional) ────────────────────────────────────────────────
+
+    /// True when this game ships a graphical map tracker (PopTracker-style:
+    /// an area/world overview with a "you are here" marker + per-area checks,
+    /// objectives and lock state). When false the launcher's Map tab shows a
+    /// "not available yet" placeholder. Default false — only games with a built
+    /// map integration opt in.
+    bool SupportsMapTracker => false;
+
+    /// Return the WPF map-tracker UI for this game, or null. The launcher hosts
+    /// it under the Map tab and calls this on the UI thread only when
+    /// SupportsMapTracker is true. The plugin owns all map data + rendering, so
+    /// the launcher core stays game-agnostic (mirrors CreateSettingsPanel).
+    UIElement? CreateMapTrackerPanel() => null;
+
     // ── Game store / catalog ──────────────────────────────────────────────────
     // Used by the "Browse Games" store page to show what the game is about.
 

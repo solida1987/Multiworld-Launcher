@@ -246,12 +246,20 @@ public static class D2DataFiles
                     ShuffleVendorStocking(lines, seed ^ salt);
                 }
 
-                // Monster shuffle — permute which monster pool each POPULATED area
-                // uses (levels.txt mon/nmon/umon). Towns + empty rows untouched, so
-                // no area is emptied (also sidesteps the #18 empty-area symptom the
-                // DLL shuffle produced). Supersedes the DLL monster shuffle.
-                if (s.MonsterShuffle && file.Equals("Levels.txt", StringComparison.OrdinalIgnoreCase))
-                    ShuffleMonsters(lines, seed ^ 0x4C56L);
+                // Levels.txt — ALWAYS force full, max-size generation first (so no
+                // area can generate empty), independent of any randomization toggle;
+                // then optionally permute the now-populated pools (monster shuffle).
+                if (file.Equals("Levels.txt", StringComparison.OrdinalIgnoreCase))
+                {
+                    ForceFullGeneration(lines);
+
+                    // Monster shuffle — permute which monster pool each POPULATED area
+                    // uses (levels.txt mon/nmon/umon). Towns + empty rows untouched, so
+                    // no area is emptied (also sidesteps the #18 empty-area symptom the
+                    // DLL shuffle produced). Supersedes the DLL monster shuffle.
+                    if (s.MonsterShuffle)
+                        ShuffleMonsters(lines, seed ^ 0x4C56L);
+                }
 
                 // Super-unique shuffle — permute each SuperUnique's monster base
                 // (Class + hcIdx) within the EXISTING pool, so a named mini-boss
@@ -380,6 +388,130 @@ public static class D2DataFiles
                 cells[groups[gi].mmax] = t[gi].Item4;
             }
             lines[r] = string.Join('\t', cells);
+        }
+    }
+
+    // ── Guaranteed-populated, max-size generation (always on) ───────────────
+
+    /// Density floor applied to every populated non-town area. The tester-reported
+    /// empty floors (Catacombs / Tower Cellar) sit at ~680 MonDen and still
+    /// generate empty under bad RNG on small layouts; 1200 is comfortably above
+    /// that and below the densest vanilla areas (~2200). Tunable in one place.
+    private const int MonDenFloor = 1200;
+
+    /// Boss / event arenas that MUST stay free of random spawns — populating them
+    /// would break their set-piece (Baal in the Worldstone Chamber, the three
+    /// Ancients on the summit, the Shenk siege). Matched on the Levels.txt Name.
+    private static readonly string[] KeepEmptyArenas =
+        { "Act 5 - World Stone", "Act 5 - Mountain Top", "Act 5 - Siege 1" };
+
+    /// <summary>
+    /// Always-applied Levels.txt transform (independent of every randomization
+    /// toggle): force each non-town area to its largest defined ("Hell") size,
+    /// raise monster density to <see cref="MonDenFloor"/> so no area can generate
+    /// empty, and copy an act-appropriate monster pool into the few dungeons that
+    /// ship with none. Towns and the boss/event arenas are left untouched.
+    /// Idempotent. Runs BEFORE the monster shuffle so the shuffle permutes the
+    /// now-populated pools.
+    /// </summary>
+    private static void ForceFullGeneration(List<string> lines)
+    {
+        if (lines.Count == 0) return;
+        string[] header = lines[0].Split('\t');
+        var idx = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < header.Length; i++) idx[header[i].Trim()] = i;
+
+        int Col(string n) => idx.TryGetValue(n, out int v) ? v : -1;
+        int name = Col("Name");
+        int sx = Col("SizeX"), sxn = Col("SizeX(N)"), sxh = Col("SizeX(H)");
+        int sy = Col("SizeY"), syn = Col("SizeY(N)"), syh = Col("SizeY(H)");
+        int md = Col("MonDen"), mdn = Col("MonDen(N)"), mdh = Col("MonDen(H)");
+        if (name < 0 || md < 0) return;
+
+        int mon1 = Col("mon1");
+        var monCols = new List<int>();
+        foreach (string pre in new[] { "mon", "nmon", "umon" })
+            for (int n = 1; n <= 10; n++) { int ci = Col(pre + n); if (ci >= 0) monCols.Add(ci); }
+
+        int maxCol = new[] { name, sx, sxn, sxh, sy, syn, syh, md, mdn, mdh, mon1 }
+                     .Concat(monCols).Max();
+
+        static int IntOr0(string[] cells, int col)
+            => (col >= 0 && col < cells.Length && int.TryParse(cells[col], out int v)) ? v : 0;
+        static void Set(string[] cells, int col, string val)
+        { if (col >= 0 && col < cells.Length) cells[col] = val; }
+        static string ActOf(string nm)
+        { int d = nm.IndexOf(" - ", StringComparison.Ordinal); return d > 0 ? nm.Substring(0, d) : ""; }
+
+        // Parse every wide-enough data row up front so empty dungeons can pull a
+        // donor pool from a preceding populated level in the same act.
+        var cells = new string[lines.Count][];
+        for (int r = 1; r < lines.Count; r++)
+        {
+            if (lines[r].Length == 0) continue;
+            string[] c = lines[r].Split('\t');
+            if (c.Length > maxCol) cells[r] = c;
+        }
+
+        string[]? DonorInAct(int beforeRow, string act)
+        {
+            for (int r = beforeRow - 1; r >= 1; r--)
+            {
+                var c = cells[r];
+                if (c == null || mon1 < 0 || mon1 >= c.Length) continue;
+                if (string.IsNullOrWhiteSpace(c[mon1])) continue;
+                if (!string.Equals(ActOf(c[name]), act, StringComparison.OrdinalIgnoreCase)) continue;
+                // Never donate a set-piece's preset monsters (e.g. the Ancients) into
+                // a normal dungeon — those arenas are excluded from being a source.
+                if (KeepEmptyArenas.Any(a => c[name].Equals(a, StringComparison.OrdinalIgnoreCase))) continue;
+                return c;
+            }
+            return null;
+        }
+
+        for (int r = 1; r < lines.Count; r++)
+        {
+            var c = cells[r];
+            if (c == null) continue;
+            string nm = name < c.Length ? c[name] : "";
+            if (string.IsNullOrWhiteSpace(nm)) continue;
+            if (nm.IndexOf("Town", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                nm.Equals("Null", StringComparison.OrdinalIgnoreCase) ||
+                nm.Equals("Expansion", StringComparison.OrdinalIgnoreCase))
+                continue;                                   // towns: never gain monsters
+            if (KeepEmptyArenas.Any(a => nm.Equals(a, StringComparison.OrdinalIgnoreCase)))
+                continue;                                   // boss/event set-pieces: leave as-is
+
+            // 1) Force the largest ("Hell") size across all difficulties.
+            int bx = Math.Max(IntOr0(c, sx), Math.Max(IntOr0(c, sxn), IntOr0(c, sxh)));
+            int by = Math.Max(IntOr0(c, sy), Math.Max(IntOr0(c, syn), IntOr0(c, syh)));
+            if (bx > 0) { Set(c, sx, bx.ToString()); Set(c, sxn, bx.ToString()); Set(c, sxh, bx.ToString()); }
+            if (by > 0) { Set(c, sy, by.ToString()); Set(c, syn, by.ToString()); Set(c, syh, by.ToString()); }
+
+            bool populated = mon1 >= 0 && mon1 < c.Length && !string.IsNullOrWhiteSpace(c[mon1]);
+
+            // 2) Empty dungeon → copy an act-appropriate pool from the nearest
+            //    preceding populated level in the same act.
+            if (!populated)
+            {
+                var donor = DonorInAct(r, ActOf(nm));
+                if (donor != null)
+                {
+                    foreach (int ci in monCols)
+                        if (ci < c.Length && ci < donor.Length) c[ci] = donor[ci];
+                    populated = true;
+                }
+            }
+
+            // 3) Density floor so no populated area can generate empty.
+            if (populated)
+            {
+                int den = Math.Max(IntOr0(c, md), Math.Max(IntOr0(c, mdn), IntOr0(c, mdh)));
+                den = Math.Max(den, MonDenFloor);
+                Set(c, md, den.ToString()); Set(c, mdn, den.ToString()); Set(c, mdh, den.ToString());
+            }
+
+            lines[r] = string.Join('\t', c);
         }
     }
 

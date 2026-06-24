@@ -1031,6 +1031,17 @@
                                            VerticalAlignment="Center"
                                            Foreground="{StaticResource BrushMuted}"/>
                             </Border>
+                            <Border x:Name="TabMap"
+                                    Style="{StaticResource TabStyle}"
+                                    MouseLeftButtonDown="TabMap_Click">
+                                <TextBlock x:Name="TabMapText"
+                                           Text="Map"
+                                           FontSize="12"
+                                           FontWeight="SemiBold"
+                                           VerticalAlignment="Center"
+                                           ToolTip="Graphical map tracker — areas, checks and where you are"
+                                           Foreground="{StaticResource BrushMuted}"/>
+                            </Border>
                             <Border x:Name="TabNews"
                                     Style="{StaticResource TabStyle}"
                                     MouseLeftButtonDown="TabNews_Click">
@@ -1747,6 +1758,13 @@
                                            Orientation="Horizontal"
                                            Margin="16"/>
                             </ScrollViewer>
+                        </Grid>
+
+                        <!-- ┌─────────────────────────────────────────────────┐
+                             │  PAGE: Map (graphical map tracker)              │
+                             └─────────────────────────────────────────────────┘ -->
+                        <Grid x:Name="PageMap" Visibility="Collapsed">
+                            <ContentControl x:Name="MapHost"/>
                         </Grid>
 
                         <!-- ┌─────────────────────────────────────────────────┐

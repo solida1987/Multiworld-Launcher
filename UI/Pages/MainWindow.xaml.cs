@@ -111,7 +111,7 @@ public partial class MainWindow : Window
     private readonly SystemTrayManager  _trayIcon = new();
 
     // ── Current tab ──────────────────────────────────────────────────────────
-    private enum PageTab { Overview, Play, Progression, Tracker, News, Roms, Settings }
+    private enum PageTab { Overview, Play, Progression, Tracker, Map, News, Roms, Settings }
     private PageTab _currentTab = PageTab.Overview;
 
     // ── Download ETA (rolling window over install progress reports) ──────────
@@ -1044,6 +1044,9 @@ public partial class MainWindow : Window
     private void TabTracker_Click(object sender, MouseButtonEventArgs e)
         => SwitchTab(PageTab.Tracker);
 
+    private void TabMap_Click(object sender, MouseButtonEventArgs e)
+        => SwitchTab(PageTab.Map);
+
     private void TabNews_Click(object sender, MouseButtonEventArgs e)
         => SwitchTab(PageTab.News);
 
@@ -1080,6 +1083,7 @@ public partial class MainWindow : Window
         PagePlay.Visibility        = Visibility.Collapsed;
         PageProgression.Visibility = Visibility.Collapsed;
         PageTracker.Visibility     = Visibility.Collapsed;
+        PageMap.Visibility         = Visibility.Collapsed;
         PageNews.Visibility        = Visibility.Collapsed;
         PageRoms.Visibility        = Visibility.Collapsed;
         PageSettings.Visibility    = Visibility.Collapsed;
@@ -1090,6 +1094,7 @@ public partial class MainWindow : Window
             PageTab.Play        => PagePlay,
             PageTab.Progression => PageProgression,
             PageTab.Tracker     => PageTracker,
+            PageTab.Map         => PageMap,
             PageTab.News        => PageNews,
             PageTab.Roms        => PageRoms,
             PageTab.Settings    => PageSettings,
@@ -1104,6 +1109,7 @@ public partial class MainWindow : Window
         TabPlay.BorderBrush        = tab == PageTab.Play        ? gold : Brushes.Transparent;
         TabProgression.BorderBrush = tab == PageTab.Progression ? gold : Brushes.Transparent;
         TabTracker.BorderBrush     = tab == PageTab.Tracker     ? gold : Brushes.Transparent;
+        TabMap.BorderBrush         = tab == PageTab.Map         ? gold : Brushes.Transparent;
         TabNews.BorderBrush        = tab == PageTab.News        ? gold : Brushes.Transparent;
         TabRoms.BorderBrush        = tab == PageTab.Roms        ? gold : Brushes.Transparent;
         TabSettings.BorderBrush    = tab == PageTab.Settings    ? gold : Brushes.Transparent;
@@ -1112,6 +1118,7 @@ public partial class MainWindow : Window
         TabPlayText.Foreground        = tab == PageTab.Play        ? gold : muted;
         TabProgressionText.Foreground = tab == PageTab.Progression ? gold : muted;
         TabTrackerText.Foreground     = tab == PageTab.Tracker     ? gold : muted;
+        TabMapText.Foreground         = tab == PageTab.Map         ? gold : muted;
         TabNewsText.Foreground        = tab == PageTab.News        ? gold : muted;
         TabRomsText.Foreground        = tab == PageTab.Roms        ? gold : muted;
         TabSettingsText.Foreground    = tab == PageTab.Settings    ? gold : muted;
@@ -1141,9 +1148,74 @@ public partial class MainWindow : Window
         if (tab == PageTab.Tracker)
             ApplyTrackerFilter();
 
+        // Populate the Map tab with the plugin's own map UI (or a placeholder)
+        if (tab == PageTab.Map)
+            PopulateMapTab();
+
         // Rebuild the ROM library list whenever the tab is opened (cheap, local)
         if (tab == PageTab.Roms && _selectedPlugin is Plugins.Emulated.EmulatorPlugin romPlugin)
             RefreshRomsTab(romPlugin);
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Map tab — hosts the selected game's own graphical map tracker
+    //
+    // The launcher core stays game-agnostic: a plugin that sets
+    // SupportsMapTracker=true returns its own WPF map control from
+    // CreateMapTrackerPanel(); every other game shows a "not available yet"
+    // placeholder. The control is cached by game id so its live state (player
+    // position, checks) survives tab switches.
+    // ══════════════════════════════════════════════════════════════════════════
+
+    private string? _mapHostPluginId;
+
+    private void PopulateMapTab()
+    {
+        if (_selectedPlugin is { SupportsMapTracker: true } p)
+        {
+            if (_mapHostPluginId != p.GameId || MapHost.Content == null)
+            {
+                MapHost.Content  = p.CreateMapTrackerPanel() ?? BuildMapPlaceholder(loading: true);
+                _mapHostPluginId = p.GameId;
+            }
+        }
+        else
+        {
+            MapHost.Content  = BuildMapPlaceholder(loading: false);
+            _mapHostPluginId = null;
+        }
+    }
+
+    /// Centered placeholder shown when a game has no map tracker (or its panel
+    /// is not built yet). loading=true softens the wording.
+    private UIElement BuildMapPlaceholder(bool loading)
+    {
+        var stack = new StackPanel
+        {
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment   = VerticalAlignment.Center,
+        };
+        stack.Children.Add(new TextBlock
+        {
+            Text                = "🗺",
+            FontSize            = 48,
+            Opacity             = 0.45,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Margin              = new Thickness(0, 0, 0, 12),
+        });
+        stack.Children.Add(new TextBlock
+        {
+            Text                = loading
+                ? "Loading the map tracker…"
+                : "Map tracker is not available for this game yet.",
+            FontSize            = 15,
+            Foreground          = (Brush)FindResource("BrushMuted"),
+            TextWrapping        = TextWrapping.Wrap,
+            TextAlignment       = TextAlignment.Center,
+            MaxWidth            = 440,
+            HorizontalAlignment = HorizontalAlignment.Center,
+        });
+        return new Grid { Children = { stack } };
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -8356,6 +8428,13 @@ public partial class MainWindow : Window
             // Seed-name supplier — the AP launch path derives a stable per-world
             // seed from it for the data-file randomization (same-world reproducible).
             d2.GetSeedName = () => _apClient?.SeedName;
+
+            // Post-attach resync — once the game's pipe connects, ask the AP
+            // server to resend the full item stream from index 0 so items the
+            // player received while still in the launcher (notably the
+            // precollected STARTING SKILLS) reach the DLL. They were dropped
+            // earlier because the pipe wasn't connected yet.
+            d2.RequestApResync = () => _apClient?.SyncAsync() ?? Task.CompletedTask;
 
             // Standalone "Received" — the mod forwards each check's reward as
             // "<location>: <reward>"; split it and append to the item tracker so a
