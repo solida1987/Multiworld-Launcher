@@ -2088,6 +2088,38 @@ public partial class MainWindow : Window
         await ConnectApGlobalAsync(_selectedPlugin);
     }
 
+    /// Manual "Re-sync" button: ask the server to re-send our items and re-confirm
+    /// our checks WITHOUT dropping the connection. Recovers anything a transient
+    /// glitch failed to deliver (e.g. starting skills that didn't all land).
+    private async void BtnReSync_Click(object sender, RoutedEventArgs e)
+    {
+        var ap = _apClient;
+        if (ap == null || ap.State != ApConnectionState.Connected)
+        {
+            ToastService.Show("Not connected",
+                "Connect to a multiworld first, then re-sync.", ToastKind.Warning);
+            return;
+        }
+
+        try
+        {
+            BtnReSync.IsEnabled = false;
+            await ap.ResyncAsync();
+            ToastService.Show("Re-syncing",
+                "Asked the server to re-send your items and re-confirm your checks.",
+                ToastKind.Info);
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"[AP] Re-sync failed: {ex.Message}");
+            ToastService.Show("Re-sync failed", ex.Message, ToastKind.Error);
+        }
+        finally
+        {
+            BtnReSync.IsEnabled = true;
+        }
+    }
+
     private void ConnectHint_Click(object sender, MouseButtonEventArgs e)
     {
         // Expand the sidebar connect panel when user clicks the hint link in Play tab
@@ -9481,6 +9513,7 @@ public partial class MainWindow : Window
             ConnSlotText.Text      = slot.Length > 0 ? $"Slot: {slot}" : "";
             BtnConnToggle.Content  = "Disconnect";
             BtnConnToggle.IsEnabled = true;
+            BtnReSync.Visibility   = Visibility.Visible;   // re-sync only makes sense while connected
         }
         else if (state == ApConnectionState.Connecting)
         {
@@ -9488,6 +9521,7 @@ public partial class MainWindow : Window
             ConnSlotText.Text      = "";
             BtnConnToggle.Content  = "...";
             BtnConnToggle.IsEnabled = false;
+            BtnReSync.Visibility   = Visibility.Collapsed;
         }
         else
         {
@@ -9495,6 +9529,7 @@ public partial class MainWindow : Window
             ConnSlotText.Text      = "";
             BtnConnToggle.Content  = "Connect";
             BtnConnToggle.IsEnabled = true;
+            BtnReSync.Visibility   = Visibility.Collapsed;
         }
 
         // Update the "not connected" hint and suggestion banner

@@ -14,9 +14,9 @@
     <!-- Code signing (EV certificate) is the only reliable long-term fix.   -->
     <AssemblyName>Multiworld Launcher</AssemblyName>
     <RootNamespace>LauncherV2</RootNamespace>
-    <Version>2.4.0</Version>
-    <FileVersion>2.4.0.0</FileVersion>
-    <AssemblyVersion>2.4.0.0</AssemblyVersion>
+    <Version>2.5.0</Version>
+    <FileVersion>2.5.0.0</FileVersion>
+    <AssemblyVersion>2.5.0.0</AssemblyVersion>
     <Company>Solida Games</Company>
     <Product>Multiworld Launcher</Product>
     <Copyright>Copyright © 2026 Solida Games</Copyright>

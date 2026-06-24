@@ -371,6 +371,45 @@
                                     </ControlTemplate>
                                 </Button.Template>
                             </Button>
+                            <!-- Manual re-sync: re-ask the server for items + replay checks
+                                 WITHOUT disconnecting. Shown only while connected. -->
+                            <Button x:Name="BtnReSync"
+                                    DockPanel.Dock="Right"
+                                    Content="Re-sync"
+                                    Visibility="Collapsed"
+                                    Background="#181C2C"
+                                    Foreground="#7080B0"
+                                    BorderBrush="#252B40"
+                                    BorderThickness="1"
+                                    Padding="8,3"
+                                    FontSize="10"
+                                    Margin="0,0,6,0"
+                                    Cursor="Hand"
+                                    ToolTip="Re-sync with the server: re-request your items and re-confirm your checks — without disconnecting. Use this if something didn't arrive."
+                                    Click="BtnReSync_Click">
+                                <Button.Template>
+                                    <ControlTemplate TargetType="Button">
+                                        <Border x:Name="Bd"
+                                                Background="{TemplateBinding Background}"
+                                                BorderBrush="{TemplateBinding BorderBrush}"
+                                                BorderThickness="{TemplateBinding BorderThickness}"
+                                                CornerRadius="3"
+                                                Padding="{TemplateBinding Padding}">
+                                            <ContentPresenter HorizontalAlignment="Center"
+                                                              VerticalAlignment="Center"/>
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter TargetName="Bd" Property="Background" Value="#1E2438"/>
+                                                <Setter TargetName="Bd" Property="BorderBrush" Value="#4060A0"/>
+                                            </Trigger>
+                                            <Trigger Property="IsEnabled" Value="False">
+                                                <Setter Property="Opacity" Value="0.5"/>
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </Button.Template>
+                            </Button>
                             <StackPanel VerticalAlignment="Center" Margin="0,0,6,0">
                                 <TextBlock x:Name="ConnServerText"
                                            Text="Not connected"

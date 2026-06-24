@@ -378,6 +378,30 @@ public sealed class ApClient : IAsyncDisposable
             new { cmd = "Sync" }
         }, ct);
 
+    /// Manual re-sync (the UI "Re-sync" button): ask the server to resend the
+    /// full item stream AND replay every locally-known check — WITHOUT dropping
+    /// the connection. Recovers items/checks a transient glitch failed to deliver
+    /// (e.g. starting skills that didn't all land on attach). Safe to spam:
+    /// receivers dedup re-delivered items and the server ignores duplicate checks.
+    public async Task ResyncAsync(CancellationToken ct = default)
+    {
+        if (State != ApConnectionState.Connected)
+        {
+            PrintMessage?.Invoke("[AP] Re-sync skipped — not connected.");
+            return;
+        }
+
+        PrintMessage?.Invoke("[AP] Re-syncing with server…");
+        await SyncAsync(ct);
+
+        long[] replay;
+        lock (_checkedLock) replay = _localChecked.ToArray();
+        if (replay.Length > 0)
+            await SendLocationsCheckedAsync(replay, ct);
+
+        PrintMessage?.Invoke($"[AP] Re-sync sent — item stream requested, {replay.Length} check(s) replayed.");
+    }
+
     /// Send !release command — releases all remaining items in this slot to other players.
     public Task ReleaseAsync(CancellationToken ct = default)
         => SendSayAsync("!release", ct);

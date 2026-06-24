@@ -425,8 +425,9 @@ public sealed class D2Plugin : IGamePlugin
         }
         else
         {
-            // Update: manifest-based incremental file sync.
-            await InstallFromManifestAsync(manifestUrl, apworldUrl, tag, progress, ct);
+            // Update: manifest tells us WHAT changed; the release ZIP provides the
+            // bytes (same reliable source as a fresh install).
+            await InstallFromManifestAsync(manifestUrl, packageUrl, apworldUrl, tag, progress, ct);
         }
     }
 
@@ -473,7 +474,7 @@ public sealed class D2Plugin : IGamePlugin
         try
         {
             progress.Report((5, "Downloading mod files..."));
-            await DownloadWithProgressAsync(packageUrl, tempZip, 5, 85, progress, ct);
+            await DownloadZipWithRetryAsync(packageUrl, tempZip, 5, 85, progress, ct);
             ct.ThrowIfCancellationRequested();
 
             progress.Report((88, "Restoring missing files..."));
@@ -539,7 +540,7 @@ public sealed class D2Plugin : IGamePlugin
         try
         {
             progress.Report((5, "Downloading game package..."));
-            await DownloadWithProgressAsync(packageUrl, tempZip, 5, 80, progress, ct);
+            await DownloadZipWithRetryAsync(packageUrl, tempZip, 5, 80, progress, ct);
 
             // A cancelled install must THROW, not return — a silent return made
             // the caller report "Installation complete!" over a partial extract
@@ -604,7 +605,7 @@ public sealed class D2Plugin : IGamePlugin
     }
 
     private async Task InstallFromManifestAsync(
-        string manifestUrl, string? apworldUrl, string? actualTagHint,
+        string manifestUrl, string packageUrl, string? apworldUrl, string? actualTagHint,
         IProgress<(int, string)> progress, CancellationToken ct)
     {
         progress.Report((5, "Downloading manifest..."));
@@ -682,59 +683,64 @@ public sealed class D2Plugin : IGamePlugin
             return;
         }
 
-        string baseUrl = $"https://raw.githubusercontent.com/{GITHUB_OWNER}/{GITHUB_REPO}/main/game/";
-        int downloaded = 0, failed = 0;
+        // Apply the update from the release ZIP — the SAME source a fresh install
+        // uses. The previous per-file path pulled each file from the repo's `main`
+        // branch (raw.githubusercontent .../main/game/<path>), but main's game/ tree
+        // drifts out of sync with the RELEASED manifest: the binaries are an older
+        // build, some data tables differ, and a few manifest files aren't on main at
+        // all. So files downloaded fine (HTTP 200) but failed their SHA → "86 of
+        // 173 file(s) failed", and the only workaround was deleting the whole game
+        // to force the fresh-install ZIP path. The ZIP's bytes ALWAYS match the
+        // manifest (built together), and it's ONE download instead of 800 raw
+        // requests (no rate-limiting). We still extract only the CHANGED paths, so
+        // an update rewrites just what differs.
+        progress.Report((30, $"Downloading update ({toDownload.Count} changed file(s))..."));
 
-        progress.Report((30, $"Downloading {toDownload.Count} files..."));
-
-        foreach (var (path, sha, _) in toDownload)
+        string tempZip = Path.Combine(Path.GetTempPath(), "d2arch_update.zip");
+        int updated = 0, orphans = 0;
+        try
         {
-            // A cancelled update must throw — falling through used to stamp
-            // version.dat over a half-updated install (P2-3).
+            await DownloadZipWithRetryAsync(packageUrl, tempZip, 30, 85, progress, ct);
             ct.ThrowIfCancellationRequested();
 
-            string url   = baseUrl + path;
-            string local = Path.Combine(GameDirectory, path.Replace('/', '\\'));
-            string? dir  = Path.GetDirectoryName(local);
-            if (dir != null) Directory.CreateDirectory(dir);
+            var wanted = new HashSet<string>(
+                toDownload.Select(t => t.path.Replace('\\', '/')),
+                StringComparer.OrdinalIgnoreCase);
 
-            int pct = 30 + downloaded * 65 / toDownload.Count;
-            progress.Report((pct,
-                $"Downloading {Path.GetFileName(path)} ({downloaded + 1}/{toDownload.Count})"));
-
-            bool ok = false;
-            for (int retry = 0; retry < 3 && !ok; retry++)
+            progress.Report((86, "Applying update..."));
+            using var zip = ZipFile.OpenRead(tempZip);
+            foreach (var entry in zip.Entries)
             {
-                try
-                {
-                    await DownloadSimpleAsync(url, local, ct);
-                    if (sha.Length > 0)
-                    {
-                        ok = ComputeSha256(local).Equals(sha, StringComparison.OrdinalIgnoreCase);
-                        if (!ok) try { File.Delete(local); } catch { }
-                    }
-                    else ok = true;
-                }
-                catch (OperationCanceledException) { throw; }
-                catch { /* network hiccup — retry */ }
-            }
+                ct.ThrowIfCancellationRequested();
+                if (string.IsNullOrEmpty(entry.Name)) continue;
 
-            // Count EVERY exhausted file — SHA mismatches included. They used
-            // to vanish from the count, so corrupted downloads still reported
-            // success and ran orphan cleanup (P2-3).
-            if (ok) downloaded++;
-            else    failed++;
+                string rel = entry.FullName.Replace('\\', '/');
+                if (!wanted.Contains(rel)) continue;   // unchanged — leave it
+
+                string dest = Path.Combine(GameDirectory, rel.Replace('/', '\\'));
+                string? dir = Path.GetDirectoryName(dest);
+                if (dir != null) Directory.CreateDirectory(dir);
+                entry.ExtractToFile(dest, overwrite: true);
+                updated++;
+
+                if (updated % 20 == 0)
+                    progress.Report((86 + updated * 8 / Math.Max(1, wanted.Count),
+                        $"Applying update... ({updated}/{wanted.Count})"));
+            }
+        }
+        finally
+        {
+            try { if (File.Exists(tempZip)) File.Delete(tempZip); } catch { }
         }
 
         DeleteBinCache();
 
-        // Remove orphan files (present locally but removed from manifest)
-        int orphans = 0;
-        if (failed == 0) orphans = DeleteOrphans(manifestPaths);
+        // Remove orphan files (present locally but removed from the manifest).
+        orphans = DeleteOrphans(manifestPaths);
 
         if (apworldUrl != null)
         {
-            progress.Report((98, "Downloading AP World..."));
+            progress.Report((96, "Downloading AP World..."));
             try
             {
                 string apworldDir = Path.Combine(GameDirectory, "apworld");
@@ -745,23 +751,16 @@ public sealed class D2Plugin : IGamePlugin
             catch { /* non-fatal — apworld update failure doesn't block the game */ }
         }
 
-        // Failures are an install FAILURE, not a success footnote: without the
-        // new version stamp the next check still says "update available", so
-        // a retry can finish the job (stamping here used to mark stale files
-        // as up to date forever — P2-3).
-        if (failed > 0)
-            throw new InvalidOperationException(
-                $"{failed} of {toDownload.Count} file(s) failed to download " +
-                $"({downloaded} succeeded). The install may be incomplete — " +
-                "check your connection and try again.");
-
         // Heal: ensure the original Blizzard data files are present (an update to
         // an existing install should already have them; best-effort re-copy here).
         CopyOriginalD2Files();
 
+        // Only now that the ZIP extracted cleanly do we stamp the new version —
+        // a failed ZIP download throws above, so a broken update never stamps
+        // (the next check still offers the update). (P2-3 lesson preserved.)
         WriteVersionDat(manifestVersion);
 
-        string msg = $"Updated {downloaded} files.";
+        string msg = $"Updated {updated} file(s).";
         if (orphans > 0) msg += $" Removed {orphans} stale file(s).";
 
         progress.Report((100, msg));
@@ -964,12 +963,31 @@ public sealed class D2Plugin : IGamePlugin
             // still in the launcher (notably the precollected STARTING SKILLS at
             // index 0) were dropped by ReceiveItemsAsync because the pipe wasn't
             // connected yet. Now that it is, ask the server to resend the full
-            // item stream from index 0 so those items reach the DLL. Best-effort:
-            // a failed/absent resync never blocks the launch (the DLL dedups, so
-            // re-delivered items are harmless).
+            // item stream from index 0 so those items reach the DLL.
+            //
+            // Fire the resync from a BACKGROUND task with a readiness delay, NOT
+            // inline: the DLL needs a moment after STATE:CONNECTED to stand up its
+            // AP subsystem + skill tree. Resyncing the instant it attaches races
+            // that startup and only some precollected skills get applied (testers
+            // saw 3/6, 5/6). We re-sync a few times at increasing delays so even a
+            // slow startup catches every item; once they've all landed the index
+            // makes each repeat a no-op, so extra syncs are harmless.
             if (RequestApResync != null)
             {
-                try { await RequestApResync(); } catch { /* resync is best-effort */ }
+                var resyncCt = _pipeCts?.Token ?? CancellationToken.None;
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        foreach (int delayMs in new[] { 2000, 3500, 6000 })
+                        {
+                            await Task.Delay(delayMs, resyncCt);
+                            if (_pipe?.IsConnected != true) return; // game gone
+                            await RequestApResync();
+                        }
+                    }
+                    catch { /* resync is best-effort; cancellation = game exited */ }
+                }, resyncCt);
             }
         }
 
@@ -1199,11 +1217,13 @@ public sealed class D2Plugin : IGamePlugin
     /// pipe with the '\n' terminator the DLL frames on. All writers go
     /// through here so messages never interleave mid-line. Best-effort:
     /// a broken pipe (game exited) is swallowed — the read loop handles
-    /// the disconnect.
-    private async Task WritePipeLineAsync(string line, CancellationToken ct = default)
+    /// the disconnect. Returns true only when the line was actually written
+    /// AND flushed, so callers (notably ReceiveItemsAsync) can avoid marking an
+    /// item delivered when the pipe dropped mid-batch.
+    private async Task<bool> WritePipeLineAsync(string line, CancellationToken ct = default)
     {
         var pipe = _pipe;
-        if (pipe?.IsConnected != true) return;
+        if (pipe?.IsConnected != true) return false;
 
         byte[] msg = Encoding.UTF8.GetBytes(line + "\n");
         await _pipeWriteLock.WaitAsync(ct);
@@ -1211,6 +1231,7 @@ public sealed class D2Plugin : IGamePlugin
         {
             await pipe.WriteAsync(msg, ct);
             await pipe.FlushAsync(ct);
+            return true;
         }
         catch (IOException)              { /* pipe broken — game exited */ }
         catch (ObjectDisposedException)  { /* pipe torn down */ }
@@ -1219,11 +1240,16 @@ public sealed class D2Plugin : IGamePlugin
         {
             _pipeWriteLock.Release();
         }
+        return false;
     }
 
     public async Task ReceiveItemsAsync(ApNetworkItem[] items, int index,
         CancellationToken ct = default)
     {
+        // Load the index for THIS room's seed (handles the player having switched
+        // seeds since the plugin was constructed) before reading it.
+        EnsureApIndexForCurrentSeed();
+
         // AP resume contract: the server replays the FULL item history from
         // index 0 on every connect/Sync. Skip the prefix the game already
         // received and deliver only the remainder — a blanket
@@ -1243,23 +1269,37 @@ public sealed class D2Plugin : IGamePlugin
         // location is the NUMERIC AP id — the DLL sscanf's %d and uses it
         // for self-release auto-complete. Plain "ITEM:<id>" stays the
         // fallback when no resolver is wired — the DLL accepts both.
+        // Deliver in order, counting only what actually reached the pipe. If a
+        // write fails mid-batch (the pipe dropped, or the game is still standing
+        // up), STOP and DON'T mark the rest delivered — the next Sync/reconnect
+        // replays from index 0 and the undelivered tail (e.g. precollected
+        // starting skills) is re-sent instead of being silently lost.
+        int delivered = 0;
         foreach (var item in items.Skip(skip))
         {
+            bool ok;
             if (ResolvePlayerName != null)
             {
                 string sender = SanitizePipeField(
                     ResolvePlayerName(item.Player) ?? $"Player {item.Player}");
-                await WritePipeLineAsync(
+                ok = await WritePipeLineAsync(
                     $"ITEM:{item.ItemId}|{sender}|{item.LocationId}", ct);
             }
             else
             {
-                await WritePipeLineAsync($"ITEM:{item.ItemId}", ct);
+                ok = await WritePipeLineAsync($"ITEM:{item.ItemId}", ct);
             }
+            if (!ok) break;
+            delivered++;
         }
 
-        _apItemIndex = Math.Max(_apItemIndex, index + items.Length);
-        PersistApIndex();
+        if (delivered > 0)
+        {
+            // Highest contiguous index actually delivered = batch start + the
+            // already-seen prefix + what we just wrote.
+            _apItemIndex = Math.Max(_apItemIndex, index + skip + delivered);
+            PersistApIndex();
+        }
     }
 
     public void OnApStateChanged(ApConnectionState state)
@@ -2329,6 +2369,35 @@ public sealed class D2Plugin : IGamePlugin
     private async Task DownloadSimpleAsync(string url, string destPath, CancellationToken ct)
         => await File.WriteAllBytesAsync(destPath, await _http.GetByteArrayAsync(url, ct), ct);
 
+    /// Exponential backoff with jitter: 0.5s, 1s, 2s, 4s, 8s … capped at 10s.
+    private static int BackoffMs(int retry)
+        => (int)Math.Min(10000, 500 * Math.Pow(2, retry)) + Random.Shared.Next(0, 400);
+
+    /// Download a (large) file to disk with progress, retrying the whole transfer
+    /// on a transient failure. Used for the release ZIP on both fresh install and
+    /// update, so a dropped connection mid-download self-corrects instead of
+    /// failing the install.
+    private async Task DownloadZipWithRetryAsync(
+        string url, string destPath, int startPct, int endPct,
+        IProgress<(int, string)> progress, CancellationToken ct, int attempts = 4)
+    {
+        for (int retry = 0; ; retry++)
+        {
+            try
+            {
+                await DownloadWithProgressAsync(url, destPath, startPct, endPct, progress, ct);
+                return;
+            }
+            catch (OperationCanceledException) { throw; }
+            catch when (retry < attempts - 1)
+            {
+                progress.Report((startPct,
+                    $"Download interrupted — retrying ({retry + 1}/{attempts - 1})..."));
+                await Task.Delay(BackoffMs(retry), ct);
+            }
+        }
+    }
+
     // ── Helpers: file operations ──────────────────────────────────────────────
 
     private static string ComputeSha256(string filePath)
@@ -2404,8 +2473,41 @@ public sealed class D2Plugin : IGamePlugin
 
     // ── Helpers: AP index persistence ────────────────────────────────────────
 
+    // The received-items index is PER-SEED (per AP room), not per-install: every
+    // seed starts its own item stream at 0. A single global file meant a returning
+    // player who started a new seed inherited the previous seed's index, so the
+    // new seed's early items — notably the precollected starting skills at index
+    // 0 — were all skipped. Scope the file by the room seed name; fall back to the
+    // legacy global name only when no seed is known.
+    private string? _apIndexSeedKey;   // seed the in-memory _apItemIndex belongs to
+
     private string ApIndexPath
-        => Path.Combine(GameDirectory, "Archipelago", "ap_item_index.dat");
+    {
+        get
+        {
+            string? seed = GetSeedName?.Invoke();
+            string suffix = string.IsNullOrEmpty(seed) ? "" : "_" + StableSeedKey(seed!);
+            return Path.Combine(GameDirectory, "Archipelago", $"ap_item_index{suffix}.dat");
+        }
+    }
+
+    /// Filesystem-safe stable key for a seed name (FNV-1a, 8 hex chars).
+    private static string StableSeedKey(string seed)
+    {
+        uint h = 2166136261u;
+        foreach (char c in seed) { h ^= c; h *= 16777619u; }
+        return h.ToString("x8");
+    }
+
+    /// Reload _apItemIndex from the file for the current seed if the seed changed
+    /// since we last loaded. Call before reading/advancing the index.
+    private void EnsureApIndexForCurrentSeed()
+    {
+        string key = GetSeedName?.Invoke() ?? "";
+        if (_apIndexSeedKey == key) return;
+        _apIndexSeedKey = key;
+        LoadApIndex();
+    }
 
     private void PersistApIndex()
     {
@@ -2414,8 +2516,8 @@ public sealed class D2Plugin : IGamePlugin
 
     private void LoadApIndex()
     {
-        // Missing file (fresh install / directory changed) resets to 0 so a
-        // stale index from a previous GameDirectory can never carry over.
+        // Missing file (fresh install / directory changed / new seed) resets to 0
+        // so a stale index can never carry over.
         try
         {
             _apItemIndex = File.Exists(ApIndexPath)
