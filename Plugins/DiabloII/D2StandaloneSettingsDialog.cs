@@ -342,6 +342,8 @@ internal sealed class D2StandaloneSettingsDialog : Window
             _s.SkillHunting, v => _s.SkillHunting = v));
         host.Children.Add(Check("Zone Locking (unlock areas via checks)",
             _s.ZoneLocking, v => _s.ZoneLocking = v));
+        host.Children.Add(Check("Isolate stash to this seed (off = global, shared across all games)",
+            _s.StashIsolated, v => _s.StashIsolated = v));
     }
 
     /// A readable segmented selector (row of buttons, the selected one

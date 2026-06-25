@@ -32,6 +32,13 @@ public sealed class D2RandomizerSettings
     public bool SkillHunting { get; set; } = true;
     public bool ZoneLocking  { get; set; } = false;
 
+    // ── Stash isolation (2.x one-chest redesign) ──────────────────────────
+    /// ON (default) = the chest is ISOLATED to this seed: only characters in the
+    /// same AP seed share it. OFF = GLOBAL: shared with every "global" character
+    /// across all your AP + standalone games. The mod reads [settings]
+    /// StashIsolated; the seed key comes from SeedKey (AP) / ShuffleSeed (standalone).
+    public bool StashIsolated { get; set; } = true;
+
     // ── Quest / progression check categories ──────────────────────────────
     public bool QuestHunting         { get; set; } = true;
     public bool QuestKillZones       { get; set; } = true;
@@ -249,6 +256,8 @@ public sealed class D2RandomizerSettings
         yield return new("SkillHunting",         B(SkillHunting));
         yield return new("ZoneLocking",          B(ZoneLocking));
 
+        yield return new("StashIsolated",        B(StashIsolated));
+
         yield return new("QuestHunting",         B(QuestHunting));
         yield return new("QuestKillZones",       B(QuestKillZones));
         yield return new("QuestExploration",     B(QuestExploration));
@@ -358,6 +367,8 @@ public sealed class D2RandomizerSettings
 
         d.SkillHunting = Bl("SkillHunting", d.SkillHunting);
         d.ZoneLocking  = Bl("ZoneLocking",  d.ZoneLocking);
+
+        d.StashIsolated = Bl("StashIsolated", d.StashIsolated);
 
         d.QuestHunting         = Bl("QuestHunting",         d.QuestHunting);
         d.QuestKillZones       = Bl("QuestKillZones",       d.QuestKillZones);
@@ -470,6 +481,8 @@ public sealed class D2RandomizerSettings
         d.ShopShuffle        = B("shop_shuffle", d.ShopShuffle);
         d.SkillLevelReqs     = B("skill_level_reqs", d.SkillLevelReqs);
         d.ItemLevelReqs      = B("item_level_reqs", d.ItemLevelReqs);
+        // 2.x one-chest: per-seed stash isolation, set in the player's YAML.
+        d.StashIsolated      = B("stash_isolated", d.StashIsolated);
         return d;
     }
 }

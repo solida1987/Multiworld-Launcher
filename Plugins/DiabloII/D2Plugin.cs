@@ -1075,6 +1075,11 @@ public sealed class D2Plugin : IGamePlugin
                 var lines = File.Exists(ini)
                     ? new List<string>(File.ReadAllLines(ini)) : new List<string>();
                 SetIniSectionValue(lines, "settings", "LauncherDataShuffle", "1");
+                // 2.x one-chest: give the DLL this AP world's per-seed key (the same
+                // stable FNV value the data-file randomization uses) + the stash
+                // isolation choice from slot_data, so the chest keys per-seed in AP.
+                SetIniSectionValue(lines, "settings", "SeedKey", seed.ToString());
+                SetIniSectionValue(lines, "settings", "StashIsolated", settings.StashIsolated ? "1" : "0");
                 File.WriteAllLines(ini, lines);
             }
             catch { /* non-fatal */ }
