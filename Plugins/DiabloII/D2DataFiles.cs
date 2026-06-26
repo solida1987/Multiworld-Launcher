@@ -37,7 +37,12 @@ public static class D2DataFiles
 {
     /// The tables we manage. Keep this list tight — only files we actually patch.
     private static readonly string[] Managed =
-        { "skills.txt", "weapons.txt", "armor.txt", "misc.txt", "Levels.txt", "SuperUniques.txt" };
+        { "skills.txt", "weapons.txt", "armor.txt", "misc.txt", "Levels.txt", "SuperUniques.txt",
+          // 2.x — affix + set/unique tables, so "disable item level requirement" can
+          // reach the AFFIX-derived level reqs (magic/rare) and set/unique reqs, not
+          // just the base-item levelreq in weapons/armor/misc. Without these, magic/
+          // rare gear kept its required level even with the toggle on.
+          "MagicPrefix.txt", "MagicSuffix.txt", "SetItems.txt", "UniqueItems.txt" };
 
     private static string ExcelDir(string gameDir)
         => Path.Combine(gameDir, "data", "global", "excel");
@@ -221,16 +226,35 @@ public static class D2DataFiles
                 if (file.Equals("skills.txt", StringComparison.OrdinalIgnoreCase) && !s.SkillLevelReqs)
                     SetColumn(lines, "reqlevel", "1");
 
-                // #2 — Item level / stat requirements. OFF (false) = remove: items
-                // equip regardless of Level / Strength / Dexterity.
-                if (!s.ItemLevelReqs &&
+                // #2 — Item LEVEL requirements. OFF (false) = remove: every item equips
+                // regardless of character level. Covers base-item levelreq (weapons/
+                // armor/misc), the AFFIX-derived level reqs (MagicPrefix/MagicSuffix
+                // "levelreq" — magic/rare gear), and set/unique reqs (SetItems/
+                // UniqueItems "lvl req"). The affix/set/unique tables were not patched
+                // before, which is why magic/rare/set/unique gear kept its level req.
+                if (!s.ItemLevelReqs)
+                {
+                    if (file.Equals("weapons.txt",     StringComparison.OrdinalIgnoreCase) ||
+                        file.Equals("armor.txt",       StringComparison.OrdinalIgnoreCase) ||
+                        file.Equals("misc.txt",        StringComparison.OrdinalIgnoreCase) ||
+                        file.Equals("MagicPrefix.txt", StringComparison.OrdinalIgnoreCase) ||
+                        file.Equals("MagicSuffix.txt", StringComparison.OrdinalIgnoreCase))
+                        SetColumn(lines, "levelreq", "0");
+                    if (file.Equals("SetItems.txt",    StringComparison.OrdinalIgnoreCase) ||
+                        file.Equals("UniqueItems.txt", StringComparison.OrdinalIgnoreCase))
+                        SetColumn(lines, "lvl req", "0");
+                }
+
+                // #2b — Item STATS requirements (Strength / Dexterity). OFF (false) =
+                // remove: every item equips regardless of STR/DEX. Base-item tables only
+                // (affixes don't add str/dex requirements).
+                if (!s.ItemStatsReqs &&
                     (file.Equals("weapons.txt", StringComparison.OrdinalIgnoreCase) ||
                      file.Equals("armor.txt",   StringComparison.OrdinalIgnoreCase) ||
                      file.Equals("misc.txt",    StringComparison.OrdinalIgnoreCase)))
                 {
-                    SetColumn(lines, "levelreq", "0");
-                    SetColumn(lines, "reqstr",   "0");
-                    SetColumn(lines, "reqdex",   "0");
+                    SetColumn(lines, "reqstr", "0");
+                    SetColumn(lines, "reqdex", "0");
                 }
 
                 // #3 — Shop shuffle. Permute which vendor stocks each GEAR item

@@ -79,7 +79,14 @@ public sealed class D2RandomizerSettings
 
     // ── Requirements ──────────────────────────────────────────────────────
     public bool SkillLevelReqs { get; set; } = true;
+    /// ON (default) = vanilla level requirements kept. OFF = remove EVERY item's
+    /// LEVEL requirement (base + magic/rare affix + set/unique), so any character
+    /// can equip anything regardless of level. 2.x: split from the old combined
+    /// "ItemLevelReqs" so level and stat reqs can be toggled independently.
     public bool ItemLevelReqs  { get; set; } = true;
+    /// ON (default) = vanilla strength/dexterity requirements kept. OFF = remove
+    /// every item's STR/DEX requirement.
+    public bool ItemStatsReqs  { get; set; } = true;
 
     // ── XP ────────────────────────────────────────────────────────────────
     public int XPMultiplier { get; set; } = 1;   // 1..10
@@ -297,6 +304,7 @@ public sealed class D2RandomizerSettings
 
         yield return new("SkillLevelReqs",       B(SkillLevelReqs));
         yield return new("ItemLevelReqs",        B(ItemLevelReqs));
+        yield return new("ItemStatsReqs",        B(ItemStatsReqs));
 
         yield return new("XPMultiplier",         XPMultiplier.ToString(CultureInfo.InvariantCulture));
 
@@ -405,6 +413,7 @@ public sealed class D2RandomizerSettings
 
         d.SkillLevelReqs = Bl("SkillLevelReqs", d.SkillLevelReqs);
         d.ItemLevelReqs  = Bl("ItemLevelReqs",  d.ItemLevelReqs);
+        d.ItemStatsReqs  = Bl("ItemStatsReqs",  d.ItemStatsReqs);
 
         d.XPMultiplier = Math.Clamp(I("XPMultiplier", d.XPMultiplier), 1, 10);
 
@@ -489,6 +498,7 @@ public sealed class D2RandomizerSettings
         d.ShopShuffle        = B("shop_shuffle", d.ShopShuffle);
         d.SkillLevelReqs     = B("skill_level_reqs", d.SkillLevelReqs);
         d.ItemLevelReqs      = B("item_level_reqs", d.ItemLevelReqs);
+        d.ItemStatsReqs      = B("item_stats_reqs", d.ItemStatsReqs);
         // 2.x one-chest: per-seed stash isolation, set in the player's YAML.
         d.StashIsolated      = B("stash_isolated", d.StashIsolated);
         // 2.x — Monster Revive Trap (AP reads monster_trap from ap_settings.dat;

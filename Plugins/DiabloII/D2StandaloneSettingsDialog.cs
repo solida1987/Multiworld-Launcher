@@ -406,8 +406,13 @@ internal sealed class D2StandaloneSettingsDialog : Window
             v => _s.XPMultiplier = v, suffix: "×"));
         host.Children.Add(Check("Skill level requirements",
             _s.SkillLevelReqs, v => _s.SkillLevelReqs = v));
-        host.Children.Add(Check("Item level / stat requirements",
-            _s.ItemLevelReqs, v => _s.ItemLevelReqs = v));
+        // 2.x — split into two honest, independent toggles. Presented as
+        // "Disable …" (checked = remove) so the checkbox matches what it does;
+        // the backend ItemLevelReqs/ItemStatsReqs stay ON=keep, so we invert here.
+        host.Children.Add(Check("Disable item level requirements (equip any item at any level)",
+            !_s.ItemLevelReqs, v => _s.ItemLevelReqs = !v));
+        host.Children.Add(Check("Disable item stat requirements (ignore strength / dexterity)",
+            !_s.ItemStatsReqs, v => _s.ItemStatsReqs = !v));
     }
 
     private void BuildShuffles(Panel host)
@@ -725,7 +730,7 @@ internal sealed class D2StandaloneSettingsDialog : Window
         MonsterShuffle = s.MonsterShuffle, SuperUniqueShuffle = s.SuperUniqueShuffle,
         ActBossShuffle = s.ActBossShuffle,
         ShopShuffle = s.ShopShuffle, EntranceShuffle = s.EntranceShuffle,
-        SkillLevelReqs = s.SkillLevelReqs, ItemLevelReqs = s.ItemLevelReqs,
+        SkillLevelReqs = s.SkillLevelReqs, ItemLevelReqs = s.ItemLevelReqs, ItemStatsReqs = s.ItemStatsReqs,
         XPMultiplier = s.XPMultiplier,
         ClassFilter = s.ClassFilter, ClsAmazon = s.ClsAmazon,
         ClsSorceress = s.ClsSorceress, ClsNecromancer = s.ClsNecromancer,
