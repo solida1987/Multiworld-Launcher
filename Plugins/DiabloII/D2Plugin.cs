@@ -768,8 +768,25 @@ public sealed class D2Plugin : IGamePlugin
 
     public async Task<bool> VerifyInstallAsync(CancellationToken ct = default)
     {
-        // Fast size-only check, same design as V1's VerifyInstallationAsync.
-        // SHA256 was tested in V1 but rejected — 5-15 s for ~355 files.
+        // Thin wrapper over the detailed scan so the bool gate and the per-file
+        // report can never diverge. null (can't determine) / empty (healthy) = OK.
+        var problems = await ScanInstallProblemsAsync(ct);
+        return problems == null || problems.Count == 0;
+    }
+
+    /// One install-integrity problem: a manifest-listed file that is missing or the
+    /// wrong size, with a human-readable reason.
+    public readonly record struct InstallProblem(string RelPath, string Reason);
+
+    /// Detailed integrity scan. Returns EVERY manifest-listed file (after the same
+    /// exclusion sets the fast verify uses) that is missing or the wrong size, each
+    /// with a reason — so the launcher can tell the user EXACTLY what is wrong
+    /// instead of a vague "some files may be missing". Returns an empty list when
+    /// the install is healthy, and <c>null</c> when integrity cannot be determined
+    /// (offline + no cached manifest); callers MUST NOT treat null as a failure.
+    /// Fast size-only check (SHA256 over ~355 files was 5-15 s in V1 — rejected).
+    public async Task<List<InstallProblem>?> ScanInstallProblemsAsync(CancellationToken ct = default)
+    {
         string manifestPath = Path.Combine(GameDirectory, "game_manifest.json");
         string? manifestJson = null;
 
@@ -792,18 +809,21 @@ public sealed class D2Plugin : IGamePlugin
                     try { await File.WriteAllTextAsync(manifestPath, manifestJson, ct); } catch { }
                 }
             }
-            catch { return true; } // offline — don't block launch
+            catch { return null; } // offline — cannot determine
         }
 
-        if (manifestJson == null) return true;
+        if (manifestJson == null) return null;
 
+        var problems = new List<InstallProblem>();
         try
         {
             using var doc = JsonDocument.Parse(manifestJson);
-            if (!doc.RootElement.TryGetProperty("files", out var files)) return true;
+            if (!doc.RootElement.TryGetProperty("files", out var files)) return problems;
 
             foreach (var entry in files.EnumerateArray())
             {
+                ct.ThrowIfCancellationRequested();
+
                 string path = entry.GetProperty("path").GetString() ?? "";
                 if (path.Length == 0) continue;
 
@@ -812,17 +832,74 @@ public sealed class D2Plugin : IGamePlugin
                 if (LAUNCHER_MANAGED_FILES.Contains(fileName)) continue;
 
                 string localPath = Path.Combine(GameDirectory, path.Replace('/', '\\'));
-                if (!File.Exists(localPath)) return false;
+                if (!File.Exists(localPath)) { problems.Add(new InstallProblem(path, "missing")); continue; }
 
                 if (USER_EDITABLE_FILES.Contains(fileName)) continue; // present = valid
 
                 long expectedSize = 0;
                 if (entry.TryGetProperty("size", out var sizeEl)) expectedSize = sizeEl.GetInt64();
-                if (expectedSize > 0 && new FileInfo(localPath).Length != expectedSize) return false;
+                if (expectedSize > 0)
+                {
+                    long actual = new FileInfo(localPath).Length;
+                    if (actual != expectedSize)
+                        problems.Add(new InstallProblem(
+                            path, $"wrong size: {actual:n0} bytes, expected {expectedSize:n0}"));
+                }
             }
-            return true;
         }
-        catch { return true; }
+        catch (OperationCanceledException) { throw; }
+        catch { return null; } // malformed manifest — don't block launch
+        return problems;
+    }
+
+    /// Re-download the release package and extract ONLY the given files (paths
+    /// relative to <see cref="GameDirectory"/>, exactly as they appear in the
+    /// manifest). Individual game files are not standalone release assets — they
+    /// live inside game_package.zip — so a one-file repair still pulls the package
+    /// (same source a fresh install uses) and extracts just the wanted entries.
+    /// Returns the files restored and the files that could NOT be restored because
+    /// they are absent from the package. THROWS if the package itself cannot be
+    /// downloaded (offline / server unreachable) so the caller can report that case
+    /// distinctly from "file not in package".
+    public async Task<(List<string> Restored, List<string> NotInPackage)> RepairFilesAsync(
+        IEnumerable<string> relPaths,
+        IProgress<(int, string)> progress,
+        CancellationToken ct = default)
+    {
+        var wanted = new HashSet<string>(
+            relPaths.Select(p => p.Replace('\\', '/')), StringComparer.OrdinalIgnoreCase);
+        var restored = new List<string>();
+        if (wanted.Count == 0) return (restored, new List<string>());
+
+        string? tag = await FetchLatestTagAsync(ct)
+            ?? throw new InvalidOperationException(
+                "Could not reach the download server — check your internet connection.");
+        string packageUrl = DownloadUrl(tag, "game_package.zip");
+
+        string tempZip = Path.Combine(Path.GetTempPath(), "d2arch_verify_repair.zip");
+        try
+        {
+            await DownloadZipWithRetryAsync(packageUrl, tempZip, 0, 90, progress, ct);
+            ct.ThrowIfCancellationRequested();
+
+            using var zip = ZipFile.OpenRead(tempZip);
+            foreach (var entry in zip.Entries)
+            {
+                if (string.IsNullOrEmpty(entry.Name)) continue;
+                string norm = entry.FullName.Replace('\\', '/');
+                if (!wanted.Contains(norm)) continue;
+                string dest = Path.Combine(GameDirectory, entry.FullName.Replace('/', '\\'));
+                string? dir = Path.GetDirectoryName(dest);
+                if (dir != null) Directory.CreateDirectory(dir);
+                entry.ExtractToFile(dest, overwrite: true);
+                restored.Add(norm);
+                wanted.Remove(norm);
+            }
+            progress.Report((100, $"Restored {restored.Count} file(s)."));
+        }
+        finally { try { File.Delete(tempZip); } catch { } }
+
+        return (restored, wanted.ToList()); // leftover = not present in the package
     }
 
     // ── Launch ────────────────────────────────────────────────────────────────

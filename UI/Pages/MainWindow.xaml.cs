@@ -7198,8 +7198,13 @@ public partial class MainWindow : Window
         {
             SetStatus("Verifying install...");
             AppendLog("[Verify] Checking install integrity...");
-            bool vOk = await plugin.VerifyInstallAsync();
-            AppendLog(vOk ? "[Verify] OK." : "[Verify] WARNING: some files may be missing. Consider re-installing.");
+            if (plugin is Plugins.DiabloII.D2Plugin d2Verify)
+                await VerifyAndRepairD2Async(d2Verify, CancellationToken.None);
+            else
+            {
+                bool vOk = await plugin.VerifyInstallAsync();
+                AppendLog(vOk ? "[Verify] OK." : "[Verify] WARNING: some files may be missing. Consider re-installing.");
+            }
 
             await plugin.LaunchStandaloneAsync();
 
@@ -8125,6 +8130,77 @@ public partial class MainWindow : Window
         }
     }
 
+    /// D2-specific install verify with a detailed per-file report and an automatic
+    /// download-repair pass. Replaces the vague "[Verify] WARNING: some files may
+    /// be missing" with the EXACT files at fault (name + reason), then tries to
+    /// re-download them from the release package, and only falls back to a warning
+    /// if that download fails. Never blocks launch — a broken install still tries
+    /// to start, but the player (and we) now see precisely what is wrong.
+    private async Task VerifyAndRepairD2Async(Plugins.DiabloII.D2Plugin d2, CancellationToken ct)
+    {
+        List<Plugins.DiabloII.D2Plugin.InstallProblem>? problems;
+        try { problems = await d2.ScanInstallProblemsAsync(ct); }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            AppendLog("[Verify] Could not check install integrity: " + ex.Message);
+            return; // never block launch on a verify error
+        }
+
+        if (problems == null)
+        {
+            AppendLog("[Verify] Skipped — offline and no local manifest to check against.");
+            return;
+        }
+        if (problems.Count == 0)
+        {
+            AppendLog("[Verify] OK — all files present and correct size.");
+            return;
+        }
+
+        // Name EXACTLY what is wrong, file by file.
+        AppendLog($"[Verify] WARNING: {problems.Count} file(s) need attention:");
+        foreach (var prob in problems)
+            AppendLog($"   • {prob.RelPath}  ({prob.Reason})");
+
+        // Before just warning, check whether they can be downloaded and repair.
+        AppendLog("[Verify] Checking whether these files can be downloaded...");
+        SetStatus("Repairing install — downloading...");
+        var progress = new Progress<(int Pct, string Msg)>(t =>
+        {
+            ProgressBar.Value = t.Pct;
+            SetStatus("Repairing — " + t.Msg);
+        });
+        try
+        {
+            var (restored, notInPackage) = await d2.RepairFilesAsync(
+                problems.Select(pr => pr.RelPath), progress, ct);
+
+            foreach (var f in restored) AppendLog("[Verify] Repaired: " + f);
+
+            if (notInPackage.Count == 0)
+            {
+                AppendLog($"[Verify] OK — repaired {restored.Count} file(s).");
+                SetStatus("Install repaired.");
+            }
+            else
+            {
+                foreach (var f in notInPackage)
+                    AppendLog($"[Verify] Could NOT repair: {f} (not present in the release package).");
+                AppendLog("[Verify] Some files could not be repaired automatically — please re-install from the launcher.");
+                SetStatus("Install incomplete — see log.");
+            }
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            // Download/server failure — reported distinctly from "file not in package".
+            AppendLog("[Verify] Could NOT download the replacement files: " + ex.Message);
+            AppendLog("[Verify] Check your internet connection; if it persists, re-install from the launcher.");
+            SetStatus("Could not download repair files.");
+        }
+    }
+
     /// True when a launch exception means Windows Defender (or another AV) blocked
     /// the mod exe as a virus/PUA false positive — Win32 error 225 (ERROR_VIRUS_
     /// INFECTED) or a localized "virus / unwanted software" message.
@@ -8553,9 +8629,14 @@ public partial class MainWindow : Window
             var playToken = _playCts?.Token ?? CancellationToken.None;
             SetStatus("Verifying install...");
             AppendLog("[Verify] Checking install integrity...");
-            bool ok = await plugin.VerifyInstallAsync(playToken);
-            AppendLog(ok ? "[Verify] OK — all files present and correct size."
-                        : "[Verify] WARNING: some files may be missing or corrupted. Consider re-installing.");
+            if (plugin is Plugins.DiabloII.D2Plugin d2VerifyPlay)
+                await VerifyAndRepairD2Async(d2VerifyPlay, playToken);
+            else
+            {
+                bool ok = await plugin.VerifyInstallAsync(playToken);
+                AppendLog(ok ? "[Verify] OK — all files present and correct size."
+                            : "[Verify] WARNING: some files may be missing or corrupted. Consider re-installing.");
+            }
 
             // Slot-data hand-off: write ap_settings.dat BEFORE the game starts
             // so characters created this session bake the multiworld seed's
