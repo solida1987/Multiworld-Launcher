@@ -344,6 +344,8 @@ internal sealed class D2StandaloneSettingsDialog : Window
             _s.ZoneLocking, v => _s.ZoneLocking = v));
         host.Children.Add(Check("Isolate stash to this seed (off = global, shared across all games)",
             _s.StashIsolated, v => _s.StashIsolated = v));
+        host.Children.Add(Check("Monster Revive Trap (kill a trapped monster → 8 hostile copies spawn)",
+            _s.MonsterTrap, v => _s.MonsterTrap = v));
     }
 
     /// A readable segmented selector (row of buttons, the selected one

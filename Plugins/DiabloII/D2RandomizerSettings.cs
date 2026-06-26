@@ -39,6 +39,12 @@ public sealed class D2RandomizerSettings
     /// StashIsolated; the seed key comes from SeedKey (AP) / ShuffleSeed (standalone).
     public bool StashIsolated { get; set; } = true;
 
+    /// 2.x — Monster Revive Trap. ON = a small number of monsters per game become
+    /// "trapped"; killing one spawns 8 hostile copies of it at the death spot ~1s
+    /// later. The mod reads [settings] MonsterTrap (standalone) / monster_trap
+    /// (AP slot_data). OFF by default.
+    public bool MonsterTrap { get; set; } = false;
+
     // ── Quest / progression check categories ──────────────────────────────
     public bool QuestHunting         { get; set; } = true;
     public bool QuestKillZones       { get; set; } = true;
@@ -257,6 +263,7 @@ public sealed class D2RandomizerSettings
         yield return new("ZoneLocking",          B(ZoneLocking));
 
         yield return new("StashIsolated",        B(StashIsolated));
+        yield return new("MonsterTrap",          B(MonsterTrap));
 
         yield return new("QuestHunting",         B(QuestHunting));
         yield return new("QuestKillZones",       B(QuestKillZones));
@@ -369,6 +376,7 @@ public sealed class D2RandomizerSettings
         d.ZoneLocking  = Bl("ZoneLocking",  d.ZoneLocking);
 
         d.StashIsolated = Bl("StashIsolated", d.StashIsolated);
+        d.MonsterTrap   = Bl("MonsterTrap",   d.MonsterTrap);
 
         d.QuestHunting         = Bl("QuestHunting",         d.QuestHunting);
         d.QuestKillZones       = Bl("QuestKillZones",       d.QuestKillZones);
@@ -483,6 +491,9 @@ public sealed class D2RandomizerSettings
         d.ItemLevelReqs      = B("item_level_reqs", d.ItemLevelReqs);
         // 2.x one-chest: per-seed stash isolation, set in the player's YAML.
         d.StashIsolated      = B("stash_isolated", d.StashIsolated);
+        // 2.x — Monster Revive Trap (AP reads monster_trap from ap_settings.dat;
+        // mirrored here for completeness).
+        d.MonsterTrap        = B("monster_trap",   d.MonsterTrap);
         return d;
     }
 }
