@@ -402,8 +402,17 @@ internal sealed class D2StandaloneSettingsDialog : Window
             v => _s.SkillPoolSize = v));
         host.Children.Add(Slider("Starting skills", 0, 20, _s.StartingSkills,
             v => _s.StartingSkills = v));
-        host.Children.Add(Slider("XP multiplier", 1, 10, _s.XPMultiplier,
-            v => _s.XPMultiplier = v, suffix: "×"));
+        host.Children.Add(Slider("XP bonus (0 = normal, +100%/step)", 0, 100, _s.XPMultiplier,
+            v => _s.XPMultiplier = v, suffix: "× extra"));
+        host.Children.Add(Hint("Each gold/XP reward rolls a random amount between its min and max."));
+        host.Children.Add(Slider("Gold reward — minimum", 1, 1000000, _s.GoldRewardMin,
+            v => _s.GoldRewardMin = v));
+        host.Children.Add(Slider("Gold reward — maximum", 1, 1000000, _s.GoldRewardMax,
+            v => _s.GoldRewardMax = v));
+        host.Children.Add(Slider("XP reward — minimum", 1, 1000000, _s.XpRewardMin,
+            v => _s.XpRewardMin = v));
+        host.Children.Add(Slider("XP reward — maximum", 1, 1000000, _s.XpRewardMax,
+            v => _s.XpRewardMax = v));
         host.Children.Add(Check("Skill level requirements",
             _s.SkillLevelReqs, v => _s.SkillLevelReqs = v));
         // 2.x — split into two honest, independent toggles. Presented as

@@ -89,7 +89,13 @@ public sealed class D2RandomizerSettings
     public bool ItemStatsReqs  { get; set; } = true;
 
     // ── XP ────────────────────────────────────────────────────────────────
-    public int XPMultiplier { get; set; } = 1;   // 1..10
+    public int XPMultiplier { get; set; } = 0;   // 0..100: 0 = standard XP, each +1 = +100%
+
+    // ── Reward amounts (each gold/XP reward rolls a random value in [min,max]) ──
+    public int GoldRewardMin { get; set; } = 100;
+    public int GoldRewardMax { get; set; } = 10000;
+    public int XpRewardMin   { get; set; } = 100;
+    public int XpRewardMax   { get; set; } = 250000;
 
     // ── Class filter (which classes the skill pool may draw from) ─────────
     public bool ClassFilter    { get; set; } = false;
@@ -307,6 +313,10 @@ public sealed class D2RandomizerSettings
         yield return new("ItemStatsReqs",        B(ItemStatsReqs));
 
         yield return new("XPMultiplier",         XPMultiplier.ToString(CultureInfo.InvariantCulture));
+        yield return new("GoldRewardMin",        GoldRewardMin.ToString(CultureInfo.InvariantCulture));
+        yield return new("GoldRewardMax",        GoldRewardMax.ToString(CultureInfo.InvariantCulture));
+        yield return new("XpRewardMin",          XpRewardMin.ToString(CultureInfo.InvariantCulture));
+        yield return new("XpRewardMax",          XpRewardMax.ToString(CultureInfo.InvariantCulture));
 
         yield return new("ClassFilter",          B(ClassFilter));
         yield return new("ClsAmazon",            B(ClsAmazon));
@@ -415,7 +425,13 @@ public sealed class D2RandomizerSettings
         d.ItemLevelReqs  = Bl("ItemLevelReqs",  d.ItemLevelReqs);
         d.ItemStatsReqs  = Bl("ItemStatsReqs",  d.ItemStatsReqs);
 
-        d.XPMultiplier = Math.Clamp(I("XPMultiplier", d.XPMultiplier), 1, 10);
+        d.XPMultiplier = Math.Clamp(I("XPMultiplier", d.XPMultiplier), 0, 100);
+        d.GoldRewardMin = Math.Clamp(I("GoldRewardMin", d.GoldRewardMin), 1, 1000000);
+        d.GoldRewardMax = Math.Clamp(I("GoldRewardMax", d.GoldRewardMax), 1, 1000000);
+        d.XpRewardMin   = Math.Clamp(I("XpRewardMin",   d.XpRewardMin),   1, 1000000);
+        d.XpRewardMax   = Math.Clamp(I("XpRewardMax",   d.XpRewardMax),   1, 1000000);
+        if (d.GoldRewardMax < d.GoldRewardMin) d.GoldRewardMax = d.GoldRewardMin;
+        if (d.XpRewardMax   < d.XpRewardMin)   d.XpRewardMax   = d.XpRewardMin;
 
         d.ClassFilter    = Bl("ClassFilter",    d.ClassFilter);
         d.ClsAmazon      = Bl("ClsAmazon",      d.ClsAmazon);
