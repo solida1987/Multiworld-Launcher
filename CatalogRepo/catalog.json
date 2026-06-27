@@ -56,6 +56,57 @@
       "install_guide": "## Diablo II: Lord of Destruction â€” Install Guide\n\n### Requirements\n- You own Diablo II: Lord of Destruction\n- Windows 10 or 11\n\n### Steps\n1. Click **Install** â€” the launcher downloads the full game package automatically.\n2. Enter your AP server address and slot name.\n3. Click **Play**."
     },
     {
+      "id": "diablo2_archipelago_experimental",
+      "display_name": "Diablo II: LoD (Experimental)",
+      "author": "Marco / Solida Games",
+      "category": "Action RPG",
+      "description": "EXPERIMENTAL build of the Diablo II Archipelago mod — for aggressive testing of new and unstable features. Installs separately from the stable game (its own folder) and may break. Not recommended for a real playthrough.",
+      "ap_world_name": "Diablo II Archipelago Experimental",
+      "plugin_type": "native",
+      "emulator": null,
+      "thumbnail_url": "Assets/Thumbs/diablo2_archipelago_thumb.png",
+      "video_url": null,
+      "screenshot_urls": [],
+      "install_url": "https://github.com/solida1987/Diablo-II-Archipelago-experimental/releases/latest",
+      "news_url": "https://api.github.com/repos/solida1987/Diablo-II-Archipelago-experimental/releases",
+      "tags": [
+        "action-rpg",
+        "singleplayer",
+        "modded",
+        "experimental"
+      ],
+      "min_launcher_version": "2.8.2",
+      "status": "available",
+      "platforms": [
+        "PC"
+      ],
+      "free": false,
+      "requires_rom": false,
+      "hint_game": false,
+      "install_strategy": "direct_download",
+      "credits": [
+        {
+          "role": "Original game",
+          "name": "Blizzard Entertainment",
+          "url": "https://blizzard.com"
+        },
+        {
+          "role": "AP world & mod",
+          "name": "Marco / Solida Games",
+          "url": "https://github.com/solida1987/Diablo-II-Archipelago"
+        }
+      ],
+      "links": {
+        "ap_github": "https://github.com/solida1987/Diablo-II-Archipelago-experimental"
+      },
+      "subcategory": "",
+      "est_playtime_min": 240,
+      "player_count": "1â€“8",
+      "steam_app_id": 0,
+      "purchase_url": "https://us.battle.net/shop/en/product/diablo-ii",
+      "install_guide": "## Diablo II: Lord of Destruction â€” Install Guide\n\n### Requirements\n- You own Diablo II: Lord of Destruction\n- Windows 10 or 11\n\n### Steps\n1. Click **Install** â€” the launcher downloads the full game package automatically.\n2. Enter your AP server address and slot name.\n3. Click **Play**."
+    },
+    {
       "id": "openttd_archipelago",
       "display_name": "OpenTTD Archipelago",
       "author": "Marco / Solida Games",

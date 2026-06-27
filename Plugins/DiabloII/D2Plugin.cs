@@ -50,9 +50,10 @@ public sealed class D2Plugin : IGamePlugin
 {
     // ── Identity ──────────────────────────────────────────────────────────────
 
-    public string GameId      => "diablo2_archipelago";
-    public string DisplayName => "Diablo II: Lord of Destruction";
-    public string Subtitle    => "Randomiser Mod";
+    public string GameId      => Experimental ? "diablo2_archipelago_experimental" : "diablo2_archipelago";
+    public string DisplayName => Experimental ? "Diablo II: LoD (Experimental)"   : "Diablo II: Lord of Destruction";
+    public string Subtitle    => Experimental ? "Randomiser Mod — Experimental"   : "Randomiser Mod";
+    // Icon reuses the stable art for both channels (no separate experimental icon).
     public string IconPath    => Path.Combine(AppContext.BaseDirectory, "Assets", "diablo2_archipelago.png");
 
     // ── Version state ─────────────────────────────────────────────────────────
@@ -187,18 +188,25 @@ public sealed class D2Plugin : IGamePlugin
     }
 
     private const string GITHUB_OWNER    = "solida1987";
-    private const string GITHUB_REPO     = "Diablo-II-Archipelago";
+
+    /// 2.8.2 — EXPERIMENTAL channel. When true, this plugin instance is the
+    /// experimental build: it installs from the experimental repo into its own
+    /// separate folder (Games/diablo2_archipelago_experimental) and shows as its
+    /// own entry, fully isolated from the stable install. Set via the object
+    /// initializer on the second registration in App.xaml.cs. Default = stable.
+    public bool Experimental { get; init; } = false;
+
+    private string GitHubRepo => Experimental
+        ? "Diablo-II-Archipelago-experimental"
+        : "Diablo-II-Archipelago";
 
     // We resolve the latest tag via the releases/latest REDIRECT (302 → tag URL)
     // instead of the GitHub REST API. This avoids the 60 req/hour unauthenticated
     // rate limit entirely — redirect responses are served by GitHub's CDN and are
-    // not counted against the API quota.
-    private const string GH_LATEST_PAGE  =
-        "https://github.com/solida1987/Diablo-II-Archipelago/releases/latest";
-    private const string GH_DOWNLOAD_BASE =
-        "https://github.com/solida1987/Diablo-II-Archipelago/releases/download";
-    private const string GH_RELEASES_API =
-        "https://api.github.com/repos/solida1987/Diablo-II-Archipelago/releases";
+    // not counted against the API quota. Channel-aware (stable vs experimental repo).
+    private string GH_LATEST_PAGE   => $"https://github.com/{GITHUB_OWNER}/{GitHubRepo}/releases/latest";
+    private string GH_DOWNLOAD_BASE => $"https://github.com/{GITHUB_OWNER}/{GitHubRepo}/releases/download";
+    private string GH_RELEASES_API  => $"https://api.github.com/repos/{GITHUB_OWNER}/{GitHubRepo}/releases";
 
     // ── File skip lists (mirrors V1 GameDownloader.cs — must stay in sync) ────
     //
@@ -378,7 +386,8 @@ public sealed class D2Plugin : IGamePlugin
     }
 
     /// Build a direct CDN download URL for a known asset filename.
-    private static string DownloadUrl(string tag, string filename)
+    /// Instance method (was static) — GH_DOWNLOAD_BASE is now channel-aware.
+    private string DownloadUrl(string tag, string filename)
         => $"{GH_DOWNLOAD_BASE}/{tag}/{filename}";
 
     public async Task CheckForUpdateAsync(CancellationToken ct = default)
@@ -1818,8 +1827,8 @@ public sealed class D2Plugin : IGamePlugin
 
         foreach (var (label, url) in new[]
         {
-            ("GitHub Repository ↗",    "https://github.com/solida1987/Diablo-II-Archipelago"),
-            ("GitHub Releases ↗",      "https://github.com/solida1987/Diablo-II-Archipelago/releases"),
+            ("GitHub Repository ↗",    $"https://github.com/{GITHUB_OWNER}/{GitHubRepo}"),
+            ("GitHub Releases ↗",      $"https://github.com/{GITHUB_OWNER}/{GitHubRepo}/releases"),
             ("Archipelago Official ↗", "https://archipelago.gg"),
         })
         {

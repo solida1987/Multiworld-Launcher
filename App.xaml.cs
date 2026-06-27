@@ -65,6 +65,17 @@ public partial class App : Application
             OriginalD2Directory = settings.DiabloIIPath,
         });
 
+        // 2.8.2 — EXPERIMENTAL build as a SEPARATE installable entry. Distinct
+        // GameId → its own folder (Games/diablo2_archipelago_experimental) and its
+        // own GitHub repo (Diablo-II-Archipelago-experimental). Fully isolated from
+        // the stable install above; for aggressive testing only.
+        GameRegistry.Register(new D2Plugin
+        {
+            Experimental        = true,
+            GameDirectory       = SettingsStore.DefaultGamePath("diablo2_archipelago_experimental"),
+            OriginalD2Directory = settings.DiabloIIPath,
+        });
+
         GameRegistry.Register(new OpenTTDPlugin
         {
             // Defaults to Games/OpenTTD next to the launcher exe.
