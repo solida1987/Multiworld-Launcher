@@ -9900,9 +9900,19 @@ public partial class MainWindow : Window
         try { if (stopGame != null) await stopGame.StopAsync(); } catch { }
         try { await CleanupSessionAsync(); } catch { }
 
-        _trayIcon.Dispose();
+        try { _trayIcon.Dispose(); } catch { }
         _shutdownComplete = true;
-        Close();
+
+        // The window can already be tearing down if app shutdown was initiated
+        // elsewhere (OS logoff, Application.Shutdown, tray "Exit") WHILE our async
+        // teardown was awaiting above — calling Close() then throws
+        // "...while a Window is closing". That's a benign race: the window is
+        // already on its way out, which is exactly the end state we wanted. This
+        // method is fire-and-forget (OnClosing can't await), so any throw here
+        // becomes an unobserved task exception that the finalizer rethrows and
+        // crashes the process on exit. Swallow it.
+        try { Close(); }
+        catch (InvalidOperationException) { /* window already closing — done */ }
     }
 
     // ── Tray helpers ─────────────────────────────────────────────────────────
