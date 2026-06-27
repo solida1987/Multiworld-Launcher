@@ -506,11 +506,15 @@ public static class D2DataFiles
             if (KeepEmptyArenas.Any(a => nm.Equals(a, StringComparison.OrdinalIgnoreCase)))
                 continue;                                   // boss/event set-pieces: leave as-is
 
-            // 1) Force the largest ("Hell") size across all difficulties.
-            int bx = Math.Max(IntOr0(c, sx), Math.Max(IntOr0(c, sxn), IntOr0(c, sxh)));
-            int by = Math.Max(IntOr0(c, sy), Math.Max(IntOr0(c, syn), IntOr0(c, syh)));
-            if (bx > 0) { Set(c, sx, bx.ToString()); Set(c, sxn, bx.ToString()); Set(c, sxh, bx.ToString()); }
-            if (by > 0) { Set(c, sy, by.ToString()); Set(c, syn, by.ToString()); Set(c, syh, by.ToString()); }
+            // 2.8.1 (Fix 3) — DO NOT force map size. Earlier versions forced
+            // every area to its largest ("Hell") size on all difficulties to
+            // combat empty floors. That backfired: D2 places a roughly fixed
+            // monster count per area, so a Normal/NM area blown up to Hell
+            // dimensions spreads those monsters paper-thin — the tester saw
+            // Tower Cellar / Catacombs nearly empty with only the fixed
+            // champion/elite packs spawning. Native per-difficulty sizes keep
+            // the density math sane; the donor-pool copy + density floor below
+            // are what actually prevent empty dungeons (without inflating maps).
 
             bool populated = mon1 >= 0 && mon1 < c.Length && !string.IsNullOrWhiteSpace(c[mon1]);
 
