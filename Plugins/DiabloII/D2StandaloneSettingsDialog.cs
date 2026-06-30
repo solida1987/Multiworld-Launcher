@@ -344,8 +344,6 @@ internal sealed class D2StandaloneSettingsDialog : Window
             _s.ZoneLocking, v => _s.ZoneLocking = v));
         host.Children.Add(Check("Isolate stash to this seed (off = global, shared across all games)",
             _s.StashIsolated, v => _s.StashIsolated = v));
-        host.Children.Add(Check("Monster Revive Trap (kill a trapped monster → 8 hostile copies spawn)",
-            _s.MonsterTrap, v => _s.MonsterTrap = v));
     }
 
     /// A readable segmented selector (row of buttons, the selected one
@@ -441,6 +439,8 @@ internal sealed class D2StandaloneSettingsDialog : Window
         host.Children.Add(Section("FILLER WEIGHTS"));
         host.Children.Add(Hint("Relative chance of each filler when a check isn't progression."));
         host.Children.Add(Check("Traps enabled", _s.TrapsEnabled, v => _s.TrapsEnabled = v));
+        host.Children.Add(Check("Monster Revive Trap (kill a trapped monster → 8 hostile copies spawn)",
+            _s.MonsterTrap, v => _s.MonsterTrap = v));
         host.Children.Add(Slider("Trap weight",       0, 100, _s.TrapPct,     v => _s.TrapPct = v,     suffix: "%"));
         host.Children.Add(Slider("Gold weight",       0, 100, _s.GoldPct,     v => _s.GoldPct = v,     suffix: "%"));
         host.Children.Add(Slider("Stat points weight",  0, 100, _s.StatPtsPct,  v => _s.StatPtsPct = v,  suffix: "%"));
@@ -461,8 +461,6 @@ internal sealed class D2StandaloneSettingsDialog : Window
         host.Children.Add(Check("Barbarian",  _s.ClsBarbarian,   v => _s.ClsBarbarian = v));
         host.Children.Add(Check("Druid",      _s.ClsDruid,       v => _s.ClsDruid = v));
         host.Children.Add(Check("Assassin",   _s.ClsAssassin,    v => _s.ClsAssassin = v));
-        host.Children.Add(Check("I play an Assassin (tune Assassin balance)",
-            _s.IPlayAssassin, v => _s.IPlayAssassin = v));
     }
 
     private void BuildBonusChecks(Panel host)
@@ -728,24 +726,25 @@ internal sealed class D2StandaloneSettingsDialog : Window
     private static D2RandomizerSettings Clone(D2RandomizerSettings s) => new()
     {
         Seed = s.Seed, Goal = s.Goal,
-        SkillHunting = s.SkillHunting, ZoneLocking = s.ZoneLocking,
+        SkillHunting = s.SkillHunting, ZoneLocking = s.ZoneLocking, StashIsolated = s.StashIsolated,
         QuestHunting = s.QuestHunting, QuestKillZones = s.QuestKillZones,
         QuestExploration = s.QuestExploration, QuestWaypoints = s.QuestWaypoints,
         QuestLevelMilestones = s.QuestLevelMilestones,
         SkillPoolSize = s.SkillPoolSize, StartingSkills = s.StartingSkills,
         TrapsEnabled = s.TrapsEnabled, TrapPct = s.TrapPct, GoldPct = s.GoldPct,
         StatPtsPct = s.StatPtsPct, SkillPtsPct = s.SkillPtsPct,
-        ResetPtsPct = s.ResetPtsPct, LootPct = s.LootPct,
+        ResetPtsPct = s.ResetPtsPct, LootPct = s.LootPct, MonsterTrap = s.MonsterTrap,
         MonsterShuffle = s.MonsterShuffle, SuperUniqueShuffle = s.SuperUniqueShuffle,
         ActBossShuffle = s.ActBossShuffle,
         ShopShuffle = s.ShopShuffle, EntranceShuffle = s.EntranceShuffle,
         SkillLevelReqs = s.SkillLevelReqs, ItemLevelReqs = s.ItemLevelReqs, ItemStatsReqs = s.ItemStatsReqs,
         XPMultiplier = s.XPMultiplier,
+        GoldRewardMin = s.GoldRewardMin, GoldRewardMax = s.GoldRewardMax,
+        XpRewardMin = s.XpRewardMin, XpRewardMax = s.XpRewardMax,
         ClassFilter = s.ClassFilter, ClsAmazon = s.ClsAmazon,
         ClsSorceress = s.ClsSorceress, ClsNecromancer = s.ClsNecromancer,
         ClsPaladin = s.ClsPaladin, ClsBarbarian = s.ClsBarbarian,
         ClsDruid = s.ClsDruid, ClsAssassin = s.ClsAssassin,
-        IPlayAssassin = s.IPlayAssassin,
         CheckShrines = s.CheckShrines, CheckUrns = s.CheckUrns,
         CheckBarrels = s.CheckBarrels, CheckChests = s.CheckChests,
         CheckSetPickups = s.CheckSetPickups, CheckGoldMilestones = s.CheckGoldMilestones,

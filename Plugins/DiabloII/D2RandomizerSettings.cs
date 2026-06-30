@@ -106,7 +106,6 @@ public sealed class D2RandomizerSettings
     public bool ClsBarbarian   { get; set; } = true;
     public bool ClsDruid       { get; set; } = true;
     public bool ClsAssassin    { get; set; } = true;
-    public bool IPlayAssassin  { get; set; } = false;
 
     // ── Bonus check categories (1.9.0) ────────────────────────────────────
     public bool CheckShrines        { get; set; } = false;
@@ -326,7 +325,6 @@ public sealed class D2RandomizerSettings
         yield return new("ClsBarbarian",         B(ClsBarbarian));
         yield return new("ClsDruid",             B(ClsDruid));
         yield return new("ClsAssassin",          B(ClsAssassin));
-        yield return new("IPlayAssassin",        B(IPlayAssassin));
 
         yield return new("CheckShrines",         B(CheckShrines));
         yield return new("CheckUrns",            B(CheckUrns));
@@ -441,7 +439,6 @@ public sealed class D2RandomizerSettings
         d.ClsBarbarian   = Bl("ClsBarbarian",   d.ClsBarbarian);
         d.ClsDruid       = Bl("ClsDruid",       d.ClsDruid);
         d.ClsAssassin    = Bl("ClsAssassin",    d.ClsAssassin);
-        d.IPlayAssassin  = Bl("IPlayAssassin",  d.IPlayAssassin);
 
         d.CheckShrines        = Bl("CheckShrines",        d.CheckShrines);
         d.CheckUrns           = Bl("CheckUrns",           d.CheckUrns);
