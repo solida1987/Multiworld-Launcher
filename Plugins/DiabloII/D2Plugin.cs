@@ -1000,6 +1000,18 @@ public sealed class D2Plugin : IGamePlugin
                     "install again.");
             }
 
+            // The copies above are the player's own untouched libraries, and
+            // Diablo II will not load a modded install as they stand. Apply the
+            // mod's byte edits to them here; the game cannot start without it.
+            progress.Report((99, "Applying engine patches..."));
+            var patchProblems = D2EnginePatch.Apply(GameDirectory);
+            if (patchProblems.Count > 0)
+                throw new InvalidOperationException(
+                    "Could not apply the engine patches:\n\n" +
+                    string.Join("\n", patchProblems) +
+                    "\n\nThe mod cannot run without them. This normally means the " +
+                    "Diablo II installation the files came from is not 1.10f.");
+
             progress.Report((99, "Writing version..."));
             WriteVersionDat(actualTag);
 
@@ -1162,6 +1174,11 @@ public sealed class D2Plugin : IGamePlugin
         // Heal: ensure the original Blizzard data files are present (an update to
         // an existing install should already have them; best-effort re-copy here).
         CopyOriginalD2Files();
+
+        // …and that the engine patches are still in place. A file that was
+        // re-copied from the player's installation comes back unpatched, and the
+        // game refuses to start without them.
+        D2EnginePatch.Apply(GameDirectory);
 
         // Only now that the ZIP extracted cleanly do we stamp the new version —
         // a failed ZIP download throws above, so a broken update never stamps
