@@ -24,11 +24,11 @@ The launcher ships nothing belonging to Blizzard. It copies the game data *and* 
 
 ### Antivirus & Windows SmartScreen
 
-Some antivirus tools and Windows SmartScreen may flag **`Multiworld Launcher.exe`** the first time you run it. **This is a false positive.** The launcher is a brand-new application that Windows doesn't recognise yet, and unrecognised, unsigned programs are flagged by default until they build up reputation — regardless of what they actually contain. It is safe to run.
+Because the launcher is currently unsigned, Windows SmartScreen or some antivirus products may display a warning the first time you run it. Unrecognised, unsigned programs are flagged by default until they build up reputation.
 
-This is being addressed on two fronts: the application has been submitted to Microsoft for review, and Windows SmartScreen builds trust automatically as more people download and run it, so the warning clears on its own over time. *(A commercial code-signing certificate would remove the warning instantly, but it carries a significant recurring cost, so we're pursuing the free Microsoft review and reputation route first.)*
+The launcher's full source code is in this repository for inspection, and the executable has been submitted to Microsoft for review. SmartScreen reputation also builds over time as more people download it. *(A code-signing certificate would remove the warning immediately, but carries a significant recurring cost.)*
 
-**To run it:** on the SmartScreen prompt click **"More info"** → **"Run anyway"**. If your antivirus quarantines the file, restore it or add an exception.
+How you respond to a warning from your own security software is your decision — please make it based on the source code and on your own judgement.
 
 ### Self-update
 On launch, the launcher checks for a newer version of itself and updates automatically when one is available — you always stay current without re-downloading by hand. Game updates are offered separately as an optional button, so updating the game never blocks you from playing.
@@ -37,7 +37,7 @@ On launch, the launcher checks for a newer version of itself and updates automat
 
 ## Using the launcher
 
-1. **Install** Diablo II Archipelago — the launcher downloads the mod and sets it up around your own copy of Diablo II's game data.
+1. **Install** Diablo II Archipelago — the launcher downloads the mod and installs it, using the required game files from your own verified Diablo II 1.10f installation.
 2. **Play**, one of two ways:
    - **AP Play** — enter your Archipelago room's server address, slot name and password, then launch already connected to the multiworld.
    - **Standalone** — play solo with your own randomizer settings.
