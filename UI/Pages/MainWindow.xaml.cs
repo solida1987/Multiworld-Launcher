@@ -3514,23 +3514,9 @@ public partial class MainWindow : Window
                 CatalogPanel.Children.Add(BuildCatalogCard(e));
         }
 
-        // --- AP Ecosystem Tools ---
-        if (_catalogTools?.Count > 0)
-        {
-            IEnumerable<CatalogTool> tools = string.IsNullOrWhiteSpace(query)
-                ? (IEnumerable<CatalogTool>)_catalogTools
-                : _catalogTools.Where(t =>
-                    t.Name.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-                    t.Description.Contains(query, StringComparison.OrdinalIgnoreCase));
-
-            var toolList = tools.ToList();
-            if (toolList.Count > 0)
-            {
-                CatalogPanel.Children.Add(BuildSectionHeader($"AP Ecosystem Tools  ({toolList.Count})"));
-                foreach (var tool in toolList)
-                    CatalogPanel.Children.Add(BuildToolCard(tool));
-            }
-        }
+        // Browse lists this launcher's own games and nothing else. It used to
+        // end with a directory of third-party Archipelago tools, which this
+        // launcher neither ships nor supports.
     }
 
     // --- Capability presentation (shared by Browse cards + detail page) ---

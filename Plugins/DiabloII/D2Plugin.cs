@@ -2521,11 +2521,12 @@ public sealed class D2Plugin : IGamePlugin
     public string   ApWorldName    => "Diablo II Archipelago";
     public string   ThemeAccentColor => "#7A1010";   // blood-red
     // State-aware (RefreshHeaderBadges rebuilds when requirement state changes):
-    // the "Requires D2: LoD" badge disappears once the user has pointed the
-    // launcher at a valid original Diablo II: LoD install — the requirement is
-    // then satisfied, leaving only the green "✓ Installed" badge.
+    // the badge disappears once the user has pointed the launcher at a valid
+    // original install — the requirement is then satisfied, leaving only the
+    // green "✓ Installed" badge. It names the patch level because that is the
+    // part people get wrong: any other version fails to install.
     public string[] GameBadges =>
-        IsOriginalD2Configured ? Array.Empty<string>() : new[] { "Requires D2: LoD" };
+        IsOriginalD2Configured ? Array.Empty<string>() : new[] { "Requires D2: LoD 1.10f" };
 
     public async Task<NewsItem[]> GetNewsAsync(CancellationToken ct = default)
     {
