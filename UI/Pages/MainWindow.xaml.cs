@@ -3392,70 +3392,12 @@ public partial class MainWindow : Window
             }
             else
             {
+                // Browse shows exactly what the hosted catalog carries. The old
+                // background merges (the archipelago.gg datapackage and the
+                // bundled community_games.txt) added a card for every game the
+                // AP server knows — this launcher only carries Diablo II, so
+                // nothing may be merged in beyond the catalog itself.
                 RenderCatalog(_catalogEntries, TxtCatalogSearch.Text);
-
-                // Background: merge in official AP games + community_games.txt.
-                // Non-blocking — catalog updates in-place when the fetches complete.
-                var bgCts = _mainWindowCts;
-                _ = Task.Run(async () =>
-                {
-                    // Step 1: official AP.gg games
-                    var merged = await GameCatalog.MergeWithOfficialApGamesAsync(_catalogEntries);
-
-                    // Step 2: community games from the bundled games.txt
-                    string communityPath = Path.Combine(AppContext.BaseDirectory,
-                        "CatalogRepo", "community_games.txt");
-                    if (File.Exists(communityPath))
-                    {
-                        try
-                        {
-                            string text        = await File.ReadAllTextAsync(communityPath);
-                            var communityResult = GameCatalog.ParseCommunityGamesText(text);
-
-                            // Merge: community entries not already present.
-                            // Dedup on DisplayName, ApWorldName, AND a normalized slug of each
-                            // (lowercase + alphanumeric-only) so that punctuation/accent
-                            // differences ("Diablo II Archipelago" vs "Diablo II: Lord of
-                            // Destruction", "Pokémon" vs "Pokemon") don't produce duplicates.
-                            static string Slug(string s) => System.Text.RegularExpressions.Regex
-                                .Replace(s.ToLowerInvariant().Normalize(
-                                    System.Text.NormalizationForm.FormD), @"[^a-z0-9]", "");
-
-                            var existingNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                            var existingSlugs = new HashSet<string>(StringComparer.Ordinal);
-                            foreach (var e in merged)
-                            {
-                                if (!string.IsNullOrEmpty(e.ApWorldName)) { existingNames.Add(e.ApWorldName); existingSlugs.Add(Slug(e.ApWorldName)); }
-                                if (!string.IsNullOrEmpty(e.DisplayName))  { existingNames.Add(e.DisplayName);  existingSlugs.Add(Slug(e.DisplayName)); }
-                            }
-                            var newEntries = communityResult.Games
-                                .Where(e => !existingNames.Contains(e.ApWorldName ?? "")
-                                         && !existingNames.Contains(e.DisplayName ?? "")
-                                         && !existingSlugs.Contains(Slug(e.ApWorldName ?? ""))
-                                         && !existingSlugs.Contains(Slug(e.DisplayName ?? "")))
-                                .ToList();
-                            if (newEntries.Count > 0)
-                                merged = merged.Concat(newEntries)
-                                    .OrderBy(e => e.DisplayName, StringComparer.OrdinalIgnoreCase)
-                                    .ToList();
-                        }
-                        catch { /* community_games.txt parse failure is non-fatal */ }
-                    }
-
-                    if (merged.Count > _catalogEntries.Count && !bgCts.IsCancellationRequested)
-                    {
-                        // Re-apply the official list over the freshly merged set
-                        // (the AP datapackage + community merges set their own
-                        // is_official, which official_games.txt must override).
-                        var flagged = GameCatalog.ApplyOfficialList(merged);
-                        Dispatcher.Invoke(() =>
-                        {
-                            _catalogEntries = flagged;
-                            LogOfficialCoverage();
-                            RenderCatalog(_catalogEntries, TxtCatalogSearch.Text);
-                        });
-                    }
-                }, bgCts.Token);
             }
         }
         catch (Exception ex)
