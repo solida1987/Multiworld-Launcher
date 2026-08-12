@@ -71,6 +71,12 @@ public static class ContentCleanup
             string cat = Path.Combine(baseDir, "CatalogRepo", "thumbnails");
             removed += TryDeleteTree(cat);
 
+            // 4) Diablo II keeps its save path in the registry, and launching
+            //    the mod points it at the mod's own save folder. Left behind,
+            //    it sends a plain Diablo II install looking for saves inside a
+            //    folder that may no longer exist, and the game fails to start.
+            removed += ClearD2RegistryResidue();
+
             Directory.CreateDirectory(Path.GetDirectoryName(stamp)!);
             File.WriteAllText(stamp, StampValue);
             System.Diagnostics.Debug.WriteLine(
@@ -81,6 +87,41 @@ public static class ContentCleanup
             // A failed sweep must never stop the launcher; it retries on the
             // next start because the stamp was not written.
         }
+    }
+
+    // Points Diablo II's registry save path back at its own installation and
+    // drops the launcher's own key, but only when the recorded path leads into
+    // this launcher's folder — a player who set their own save path keeps it.
+    private static int ClearD2RegistryResidue()
+    {
+        const string sub = @"SOFTWARE\Blizzard Entertainment\Diablo II";
+        int changed = 0;
+        try
+        {
+            using var key = Microsoft.Win32.Registry.CurrentUser
+                .OpenSubKey(sub, writable: true);
+            if (key == null) return 0;
+
+            string baseDir = AppContext.BaseDirectory.TrimEnd('\\');
+            string? install = key.GetValue("InstallPath") as string;
+
+            foreach (string name in new[] { "Save Path", "NewSavePath" })
+            {
+                if (key.GetValue(name) is not string v || v.Length == 0) continue;
+                if (!v.StartsWith(baseDir, StringComparison.OrdinalIgnoreCase)) continue;
+                if (string.IsNullOrEmpty(install)) { key.DeleteValue(name, false); }
+                else { key.SetValue(name, Path.Combine(install, "save") + "\\"); }
+                changed++;
+            }
+
+            if (key.GetValue("LauncherPath") != null)
+            {
+                key.DeleteValue("LauncherPath", false);
+                changed++;
+            }
+        }
+        catch { }
+        return changed;
     }
 
     // Deletes .png files in ONE directory (not subdirectories) whose name does

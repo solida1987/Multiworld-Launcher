@@ -247,7 +247,10 @@ public sealed class D2Plugin : IGamePlugin
         "D2gfx.dll", "D2Glide.dll", "D2Lang.dll", "D2Launch.dll",
         "D2MCPClient.dll", "D2Multi.dll", "D2Net.dll", "D2sound.dll",
         "D2Win.dll", "Diablo II.exe", "Fog.dll", "Game.exe",
-        "Patch_D2.mpq", "Storm.dll", "default.key",
+        "Patch_D2.mpq", "Storm.dll",
+        // default.key is deliberately absent: it holds the player's key
+        // bindings and the game writes it on first run, so a fresh
+        // installation does not have one to copy.
     };
 
     // Exact byte sizes of the 1.10f engine files. The mod hooks fixed addresses
@@ -268,18 +271,49 @@ public sealed class D2Plugin : IGamePlugin
         ["D2MCPClient.dll"] = 49220,    ["D2Multi.dll"]      = 155712,
         ["D2Net.dll"]       = 53310,    ["D2sound.dll"]      = 86080,
         ["D2Win.dll"]       = 151614,   ["Diablo II.exe"]    = 36864,
-        ["Fog.dll"]         = 188476,   ["Game.exe"]         = 90112,
+        ["Fog.dll"]         = 188476,
         ["Patch_D2.mpq"]    = 1997247,  ["Storm.dll"]        = 266302,
-        ["default.key"]     = 1146,
     };
 
-    // True when the file is a 1.10f engine file whose size is exactly right.
+    // Game.exe is checked by VERSION, not by size, and deliberately so.
+    //
+    // Diablo II ships Game.exe wrapped in copy protection, and several launchers
+    // and version switchers keep a build with that wrapper removed, so a working
+    // 1.10f installation may legitimately contain either one — they are the same
+    // program at different sizes. Which one sits in the player's own folder is
+    // their business: this launcher supplies no Game.exe, modifies none, and
+    // recommends none. It only needs to know the patch level is 1.10f, and the
+    // version resource says that in both cases.
+    private const int GAME_EXE_MAJOR = 1, GAME_EXE_MINOR = 0,
+                      GAME_EXE_BUILD = 10, GAME_EXE_REVISION = 39;
+
+    private static bool IsGameExe110f(string path)
+    {
+        try
+        {
+            var v = System.Diagnostics.FileVersionInfo.GetVersionInfo(path);
+            return v.FileMajorPart   == GAME_EXE_MAJOR
+                && v.FileMinorPart   == GAME_EXE_MINOR
+                && v.FileBuildPart   == GAME_EXE_BUILD
+                && v.FilePrivatePart == GAME_EXE_REVISION;
+        }
+        catch { return false; }
+    }
+
+    // True when the file is an engine file at the 1.10f patch level.
     private static bool Is110fFile(string path, string name)
     {
+        if (name.Equals("Game.exe", StringComparison.OrdinalIgnoreCase))
+            return File.Exists(path) && IsGameExe110f(path);
         if (!D2_110F_SIZES.TryGetValue(name, out long want)) return false;
         try { return new FileInfo(path).Length == want; }
         catch { return false; }
     }
+
+    // Every file the launcher copies out of the player's own installation and
+    // then verifies as 1.10f — the size-checked ones plus Game.exe.
+    private static IEnumerable<string> EngineFiles()
+        => D2_110F_SIZES.Keys.Concat(new[] { "Game.exe" });
 
     // User-editable config files: present-is-valid; never clobber even if size differs.
     private static readonly HashSet<string> USER_EDITABLE_FILES =
@@ -344,8 +378,9 @@ public sealed class D2Plugin : IGamePlugin
                    "Classic Diablo II + LoD (the one containing d2data.mpq).";
 
         // The game data itself (MPQs and their helpers).
+        var engine = new HashSet<string>(EngineFiles(), StringComparer.OrdinalIgnoreCase);
         var missingData = ORIGINAL_D2_FILES
-            .Where(f => !D2_110F_SIZES.ContainsKey(f))
+            .Where(f => !engine.Contains(f))
             .Where(f => !File.Exists(Path.Combine(folder, f)))
             .ToList();
         if (missingData.Count > 0)
@@ -358,12 +393,12 @@ public sealed class D2Plugin : IGamePlugin
         // version problem rather than a list of file names: on 1.14 the separate
         // DLLs do not exist at all, which would otherwise print twenty names and
         // explain nothing.
-        var wrongVersion = D2_110F_SIZES.Keys
+        var wrongVersion = EngineFiles()
             .Where(f => !Is110fFile(Path.Combine(folder, f), f))
             .ToList();
         if (wrongVersion.Count > 0)
             return "That Diablo II installation is not patch 1.10f, which this mod " +
-                   "requires (" + wrongVersion.Count + " of " + D2_110F_SIZES.Count +
+                   "requires (" + wrongVersion.Count + " of " + EngineFiles().Count() +
                    " engine files are missing or from a different version).\n\n" +
                    "The mod hooks fixed addresses inside the 1.10f engine, so 1.13c " +
                    "and 1.14 will start and then crash. Diablo II 1.14 also merges " +
@@ -375,28 +410,27 @@ public sealed class D2Plugin : IGamePlugin
         return null;
     }
 
-    // L5 (T11) — a 1.10f Game.exe is exactly 90112 bytes. When the file in the
-    // live install folder is a retail 1.13c/1.14 binary the game crashes on
-    // start in a way that looks like an antivirus block (T9), so check it at
-    // launch and say what is actually wrong.
-    private const long EXPECTED_GAME_EXE_SIZE = 90112;
-
-    // Returns a targeted error message when GameDirectory\Game.exe is present but
-    // is NOT the mod's 1.10f engine (wrong Diablo II version in the live folder),
-    // otherwise null. Never blocks on a missing file (callers handle that) or a
-    // transient read error.
+    // L5 (T11) — when the Game.exe in the live install folder is a retail
+    // 1.13c/1.14 binary the game crashes on start in a way that looks like an
+    // antivirus block (T9), so check the patch level at launch and say what is
+    // actually wrong.
+    //
+    // Returns a targeted error message when GameDirectory\Game.exe is present
+    // but is not 1.10f, otherwise null. Never blocks on a missing file (callers
+    // handle that) or a transient read error.
     public string? ValidateEngineVersion()
     {
         if (string.IsNullOrEmpty(GameDirectory)) return null;
         string gameExe = Path.Combine(GameDirectory, "Game.exe");
         if (!File.Exists(gameExe)) return null;   // existence is a separate check
-        long size;
-        try { size = new FileInfo(gameExe).Length; }
+        if (IsGameExe110f(gameExe)) return null;
+
+        string found;
+        try { found = System.Diagnostics.FileVersionInfo.GetVersionInfo(gameExe).FileVersion ?? "unknown"; }
         catch { return null; }                     // don't block launch on transient IO
-        if (size == EXPECTED_GAME_EXE_SIZE) return null;
         return
-            "The Game.exe in your install folder is not the Archipelago mod's engine " +
-            $"(it is {size:N0} bytes; the mod's 1.10f engine is {EXPECTED_GAME_EXE_SIZE:N0} bytes).\n\n" +
+            $"The Game.exe in your install folder is version {found}, but this mod " +
+            "requires Diablo II 1.10f.\n\n" +
             "This almost always means the mod was installed into an existing Diablo II " +
             "1.13c/1.14 folder, so a retail Game.exe is launched instead of the 1.10f one " +
             "— it crashes on start and can look like an antivirus block.\n\n" +
@@ -585,12 +619,14 @@ public sealed class D2Plugin : IGamePlugin
         {
             string dst = Path.Combine(GameDirectory, file);
 
+            bool isEngine = D2_110F_SIZES.ContainsKey(file)
+                         || file.Equals("Game.exe", StringComparison.OrdinalIgnoreCase);
+
             // Already in place and correct: leave it alone. This is what makes
             // the update path safe — an engine file that is already the right
             // 1.10f build must never be replaced from a source folder that may
             // have been patched to a newer version since installation.
-            if (File.Exists(dst) &&
-                (!D2_110F_SIZES.ContainsKey(file) || Is110fFile(dst, file)))
+            if (File.Exists(dst) && (!isEngine || Is110fFile(dst, file)))
                 continue;
 
             if (!haveSource) { missing.Add(file); continue; }
@@ -598,9 +634,9 @@ public sealed class D2Plugin : IGamePlugin
             string src = Path.Combine(OriginalD2Directory, file);
             if (!File.Exists(src)) { missing.Add(file); continue; }
 
-            // An engine file of the wrong size is the wrong patch level; copying
-            // it would produce an install that starts and then crashes.
-            if (D2_110F_SIZES.ContainsKey(file) && !Is110fFile(src, file))
+            // An engine file at the wrong patch level would produce an install
+            // that starts and then crashes, so refuse it rather than copy it.
+            if (isEngine && !Is110fFile(src, file))
             {
                 missing.Add(file);
                 continue;
@@ -949,7 +985,8 @@ public sealed class D2Plugin : IGamePlugin
             var missingOriginals = CopyOriginalD2Files();
             if (missingOriginals.Count > 0)
             {
-                bool engineProblem = missingOriginals.Any(D2_110F_SIZES.ContainsKey);
+                var engineSet = new HashSet<string>(EngineFiles(), StringComparer.OrdinalIgnoreCase);
+                bool engineProblem = missingOriginals.Any(engineSet.Contains);
                 throw new InvalidOperationException(
                     "Could not copy these original Diablo II files from your installation: " +
                     string.Join(", ", missingOriginals) + ".\n\n" +
