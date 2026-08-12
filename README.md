@@ -16,7 +16,11 @@ No separate runtime is required — everything needed is bundled.
 
 ### Requirements
 - Windows 10 / 11
-- A legally-owned copy of Diablo II: Lord of Destruction (the launcher copies the game data from your own installation)
+- A legally-owned installation of Diablo II: Lord of Destruction, **patched to 1.10f**
+
+The launcher ships nothing belonging to Blizzard. It copies the game data *and* the 1.10f engine out of your own installation, verifying each engine file by exact size — the mod hooks fixed addresses inside 1.10f and cannot run on 1.13c or 1.14.
+
+**Getting to 1.10f.** This project does not distribute Blizzard's patches and does not link to any source for them; obtaining the patch is up to you. The process is: install Classic Diablo II + Lord of Destruction from your own copy into its own folder (keep it separate from a 1.14 installation), apply the 1.10f patch there, then check that `Game.exe` is about 90 KB and that `D2Client.dll`, `D2Game.dll`, `D2Common.dll` and `Storm.dll` sit next to it. If those files are missing, the folder is still 1.14 — under 1.14 they are merged into the main executable.
 
 ### Antivirus & Windows SmartScreen
 
