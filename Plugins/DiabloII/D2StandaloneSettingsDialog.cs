@@ -38,11 +38,22 @@ internal sealed class D2StandaloneSettingsDialog : Window
     // Set on Start (new seed) or when a seed is loaded; null = cancelled.
     private D2StandaloneLaunchChoice? _choice;
 
-    private D2StandaloneSettingsDialog(D2RandomizerSettings initial, D2SeedLibrary lib)
+    // Which channel opened this dialog. Settings that only the experimental
+    // mod understands are hidden for the stable game: showing a switch the
+    // installed DLL ignores is worse than not offering it, because the player
+    // cannot tell the difference between "off" and "not implemented here".
+    private readonly bool _experimental;
+
+    // Guard for experimental-only rows: `if (ExpOnly) panel.Children.Add(...)`.
+    private bool ExpOnly => _experimental;
+
+    private D2StandaloneSettingsDialog(D2RandomizerSettings initial, D2SeedLibrary lib,
+                                       bool experimental)
     {
         // Work on a copy so a Cancel leaves the caller's object untouched.
         _s   = Clone(initial);
         _lib = lib;
+        _experimental = experimental;
 
         Title  = "Diablo II — Standalone Randomizer";
         Width  = 880;
@@ -139,9 +150,10 @@ internal sealed class D2StandaloneSettingsDialog : Window
     // Show the dialog modally.
     // existing one), or null if the user cancelled.
     public static D2StandaloneLaunchChoice? ShowAndGet(
-        Window? owner, D2RandomizerSettings initial, D2SeedLibrary lib)
+        Window? owner, D2RandomizerSettings initial, D2SeedLibrary lib,
+        bool experimental = false)
     {
-        var dlg = new D2StandaloneSettingsDialog(initial, lib);
+        var dlg = new D2StandaloneSettingsDialog(initial, lib, experimental);
         if (owner != null && !ReferenceEquals(owner, dlg)) dlg.Owner = owner;
         else dlg.WindowStartupLocation = WindowStartupLocation.CenterScreen;
         return dlg.ShowDialog() == true ? dlg._choice : null;
@@ -342,6 +354,20 @@ internal sealed class D2StandaloneSettingsDialog : Window
             _s.SkillHunting, v => _s.SkillHunting = v));
         host.Children.Add(Check("Zone Locking (unlock areas via checks)",
             _s.ZoneLocking, v => _s.ZoneLocking = v));
+
+        // Kept here for parity with the Archipelago options, and deliberately
+        // disabled: a standalone game has no other worlds to send keys to, so
+        // a working checkbox would be a promise the mode cannot keep. Showing
+        // it greyed out explains the setting exists without pretending it does
+        // anything here.
+        var keysElsewhere = Check(
+            "Allow gate keys in other players' worlds  (Archipelago only)",
+            false, _ => { });
+        keysElsewhere.IsEnabled = false;
+        keysElsewhere.ToolTip =
+            "Only meaningful in a multiworld. Standalone has just your own "
+            + "game, so your keys are always in it.";
+        host.Children.Add(keysElsewhere);
         host.Children.Add(Check("Isolate stash to this seed (off = global, shared across all games)",
             _s.StashIsolated, v => _s.StashIsolated = v));
     }
@@ -411,11 +437,18 @@ internal sealed class D2StandaloneSettingsDialog : Window
             v => _s.StartingSkills = v));
         host.Children.Add(Hint("Starting skills are always tier 1 — the ten lowest-row " +
             "skills of each class — so a run opens on something you can actually use."));
-        host.Children.Add(Check("Add the experimental spell pack",
-            _s.ExperimentalSpells, v => _s.ExperimentalSpells = v));
-        host.Children.Add(Hint("Brand-new skills built for this mod — new summons, monster " +
-            "abilities, traps and auras. The whole pack is added ON TOP of the pool size " +
-            "above, so a pool of 60 plus this box = 60 normal skills and every new one."));
+        // Experimental line only. The extra spells exist solely in the
+        // experimental mod — the stable DLL has no code for them at all, so
+        // ticking this box there did precisely nothing while looking like a
+        // real choice (Marco saw it on the stable game and reported it).
+        if (ExpOnly)
+        {
+            host.Children.Add(Check("Add the experimental spell pack",
+                _s.ExperimentalSpells, v => _s.ExperimentalSpells = v));
+            host.Children.Add(Hint("Brand-new skills built for this mod — new summons, monster " +
+                "abilities, traps and auras. The whole pack is added ON TOP of the pool size " +
+                "above, so a pool of 60 plus this box = 60 normal skills and every new one."));
+        }
         host.Children.Add(Slider("XP bonus (0 = normal, +100%/step)", 0, 100, _s.XPMultiplier,
             v => _s.XPMultiplier = v, suffix: "× extra"));
         // the four gold/XP reward-amount sliders are gone.

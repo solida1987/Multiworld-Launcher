@@ -6,7 +6,8 @@ namespace LauncherV2.Plugins.DiabloII;
 
 public sealed record D2YamlOption(
     string Key, string Kind, string Display, string Help, string Group,
-    int Default, int Min, int Max, (int Value, string Label)[] Choices);
+    int Default, int Min, int Max, (int Value, string Label)[] Choices,
+    bool ExpOnly = false);
 
 public static class D2YamlOptions
 {
@@ -15,6 +16,7 @@ public static class D2YamlOptions
     {
         new("skill_hunting", "toggle", "Skill Hunting", "Enable Skill Hunting. When ON, skills are added to the AP item pool as useful items — quests unlock skills from the randomized pool. Can be combined with Zone Locking (both ON = hybrid mode).", "Game Mode", 1, 0, 0, System.Array.Empty<(int, string)>()),
         new("zone_locking", "toggle", "Zone Locking", "Enable Zone Locking. When ON, the game is gated by 18 semi-random boss-kill gates per difficulty (4 per act, 2 for Act 4). Each gate boss drop sends a check; receiving the gate key opens the next region. Can be combined with Skill Hunting (both ON = hybrid mode).", "Game Mode", 0, 0, 0, System.Array.Empty<(int, string)>()),
+        new("gate_keys_in_other_worlds", "toggle", "Gate Keys In Other Worlds", "Allow your zone-gate keys to be placed in other players' worlds. OFF (default): every Progressive Act Key stays in your own world, so the only thing standing between you and a locked region is your own play. This is the safe setting for a group where people play at different times — a key sitting in somebody else's game can leave you unable to reach an act boss until they get around to finding it.", "Game Mode", 0, 0, 0, System.Array.Empty<(int, string)>()),
         new("goal", "choice", "Goal", "Determines what condition you must satisfy to win. Full Normal:     beat Baal on Normal. Full Nightmare:  beat Baal on Normal AND Nightmare. Full Hell:       beat Baal on Normal, Nightmare, AND Hell. Gold Collection: simple lifetime-gold goal. Win when your character's lifetime gold reaches the value set in 'Collection: Gold Target'. No other constraints. Custom:          build your own win condit", "Goal & Win Condition", 0, 0, 0, new[]{ (0, "Full Normal"), (1, "Full Nightmare"), (2, "Full Hell"), (3, "Gold Collection"), (4, "Custom") }),
         new("collection_gold_target", "range", "Gold Collection: Target", "[Goal=Gold Collection only] Lifetime-gold threshold the character must reach to win. Lifetime-gold counter on the F1 Collection page is monotonic (never decreases) and tracks gold pickup + quest rewards (excludes vendor sales). 0 = trivially complete (don't pick Gold Collection in that case — pick a real Goal instead).", "Goal & Win Condition", 1000000, 0, 100000000, System.Array.Empty<(int, string)>()),
         new("custom_goal_gold_target", "range", "Custom Goal: Gold Target", "[Goal=Custom only] Optional lifetime-gold threshold added on top of every other selected Custom Goal target. 0 = no gold requirement. Same monotonic lifetime gold counter the Gold Collection goal uses (pickup + quest rewards, excludes vendor sales).", "Goal & Win Condition", 0, 0, 100000000, System.Array.Empty<(int, string)>()),
@@ -191,5 +193,6 @@ public static class D2YamlOptions
         new("custom_goal_all_cube_recipes", "toggle", "[Custom] All Cube Recipes", "[Goal=Custom] Win requires completing 135 successful cube transmutes. Requires check_cube_recipes=true.", "Custom Goal — Bulk Object/Check Targets (when Goal=Custom)", 0, 0, 0, System.Array.Empty<(int, string)>()),
         new("death_link", "toggle", "Death Link", "", "Multiworld", 0, 0, 0, System.Array.Empty<(int, string)>()),
         new("tiered_filler_depth", "toggle", "Tiered Filler Depth", "Place tiered rewards at a depth that matches their tier. With this ON, high runes, perfect gems, grand charms and the large stat/skill point items are reserved before the general fill and put into the later acts and difficulties, while their low-tier counterparts go early. With it OFF they are placed like any other filler, which means a Vex rune is exactly as likely in Blood Moor as in Hell Act 5.", "Other", 1, 0, 0, System.Array.Empty<(int, string)>()),
+        new("experimental_spell_pool", "toggle", "Add the experimental spell pack", "Add the experimental spell pack to the skill pool. 283 skills built for this mod on top of the 210 vanilla ones: monster and boss abilities, summons that keep their own spells, traps you place, a super-aura, and a large set of reshaped projectiles. The pack is ALL-OR-NOTHING and sits ON TOP of the normal skills — it does not take their place. Nothing in it gates progression, so these are placed as", "Other", 0, 0, 0, System.Array.Empty<(int, string)>(), true),
     };
 }
