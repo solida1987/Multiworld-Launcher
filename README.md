@@ -57,4 +57,27 @@ On launch, the launcher checks for a newer version of itself and updates automat
 
 ## License
 
-The launcher is provided for use with Diablo II Archipelago and requires a legally-owned copy of Diablo II: Lord of Destruction.
+The launcher's own source code is licensed under Apache-2.0 (see `LICENSE`).
+It is distributed together with several independent open-source components,
+each of which stays under its own licence — the full list, with authors and
+sources, is in `THIRD-PARTY-NOTICES.md`, and the complete licence texts are in
+`licenses/`.
+
+The launcher requires a legally-owned copy of Diablo II: Lord of Destruction.
+No game files are distributed with it.
+
+### Logo
+
+The Multiworld Launcher logo is an **adapted work** based on the Archipelago
+logo — the ring of spheres is the original, the skull and flames are the
+adaptation.
+
+> The Archipelago logo © 2022 by Krista Corkos and Christopher Wilson is
+> licensed under [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/).
+> This logo is a modified version of that work and is licensed under the same
+> terms.
+
+The logo is therefore **not** covered by this project's Apache-2.0 licence.
+CC BY-NC 4.0 permits non-commercial use only, and this launcher is free: no
+payment, subscription, advertising or paid tier. Neither Archipelago nor the
+original artists endorse or are affiliated with this project.

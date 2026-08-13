@@ -78,6 +78,37 @@ A library for reading and writing MPQ archives, used by the mod's tooling.
 
 ---
 
+## Artwork
+
+### Archipelago logo — CC BY-NC 4.0
+
+**What it is.** The launcher's own logo — the ring of coloured spheres with a
+skull at its centre, wreathed in green flame — is an **adapted work** built on
+the Archipelago logo. The arrangement of spheres is the original; the skull,
+the flames and the colour treatment are the adaptation.
+
+**Original.** The Archipelago logo © 2022 by Krista Corkos and Christopher
+Wilson, licensed under Creative Commons Attribution-NonCommercial 4.0
+International (CC BY-NC 4.0).
+
+- Licence: https://creativecommons.org/licenses/by-nc/4.0/
+- Archipelago: https://archipelago.gg/
+
+**Where it appears.** `Assets/app.ico` (the executable's icon),
+`Assets/logo.png`, `Assets/_generic.png` and `Assets/Thumbs/_generic_thumb.png`
+(shown for a game that has no artwork of its own yet).
+
+**What that licence requires of this project.**
+
+- The logo is **not** covered by this project's Apache-2.0 licence. It stays
+  under CC BY-NC 4.0, and the adaptation inherits that licence.
+- **NonCommercial.** The launcher is distributed free of charge, with no
+  payment, subscription, advertising or paid tier. Should that ever change,
+  the logo has to be replaced or separate permission obtained from the rights
+  holders — CC BY-NC does not allow commercial use.
+- Neither Archipelago nor the original artists endorse, sponsor or are
+  affiliated with this launcher.
+
 ## How these components relate to this project's own code
 
 The mod's own library, `D2Archipelago.dll`, imports only from the Windows
