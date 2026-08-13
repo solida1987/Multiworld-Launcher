@@ -123,9 +123,15 @@ public partial class App : Application
                 updateApplied = true;   // App.Shutdown() called inside DownloadAndApplyAsync
             }
         }
-        catch
+        catch (Exception ex)
         {
-            // Silent: network or SHA mismatch → fall through and open the main window.
+            // Fall through and open the main window on the current version --
+            // a failed update must never stop the launcher from starting.
+            // But say so somewhere: this used to be a bare catch that
+            // discarded the reason, so an update that quietly did nothing
+            // was indistinguishable from one that was never offered.
+            Core.LauncherUpdater.LogStep(
+                $"update abandoned: {ex.GetType().Name}: {ex.Message}");
             splash.SetUpdateStatus("");
         }
 
