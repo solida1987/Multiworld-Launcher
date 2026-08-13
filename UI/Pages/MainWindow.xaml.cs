@@ -1721,10 +1721,10 @@ public partial class MainWindow : Window
                 TxtOverviewCreditsApAuthor.Visibility = Visibility.Collapsed;
             }
 
-            string? apLogic = LauncherV2.Core.GameCredits.GetApLogic(plugin.GameId);
-            if (apLogic != null)
+            var extraCredit = LauncherV2.Core.GameCredits.GetExtraCredit(plugin.GameId);
+            if (extraCredit.HasValue)
             {
-                TxtOverviewCreditsApLogic.Text       = $"AP logic by: {apLogic}";
+                TxtOverviewCreditsApLogic.Text       = $"{extraCredit.Value.Role}: {extraCredit.Value.Name}";
                 TxtOverviewCreditsApLogic.Visibility = Visibility.Visible;
             }
             else
@@ -1739,9 +1739,82 @@ public partial class MainWindow : Window
             TxtOverviewCreditsApLogic.Visibility  = Visibility.Collapsed;
         }
 
+        // --- Known issues ---
+        RefreshOverviewKnownIssues(plugin);
+
         // --- Teasers ---
         RefreshOverviewAchievements(plugin, fg, muted, gold);
         RefreshOverviewNewsTeaser(plugin);
+    }
+
+    // Builds the amber "known issue" card for the selected game. The card is
+    // hidden entirely when a game has no notes, so games without entries look
+    // exactly as they did before.
+    private void RefreshOverviewKnownIssues(IGamePlugin plugin)
+    {
+        PanelOverviewKnownIssues.Children.Clear();
+
+        var issues = LauncherV2.Core.GameKnownIssues.Get(plugin.GameId);
+        if (issues.Count == 0)
+        {
+            BorderOverviewKnownIssues.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        bool first = true;
+        foreach (var issue in issues)
+        {
+            var block = new StackPanel { Margin = new Thickness(0, first ? 0 : 14, 0, 0) };
+
+            block.Children.Add(new TextBlock
+            {
+                Text                    = issue.Symptom,
+                FontSize                = 12,
+                FontWeight              = FontWeights.SemiBold,
+                Foreground              = new SolidColorBrush(Color.FromRgb(0xF4, 0xE4, 0xC0)),
+                TextWrapping            = TextWrapping.Wrap,
+                LineHeight              = 18,
+                LineStackingStrategy    = LineStackingStrategy.BlockLineHeight,
+            });
+
+            block.Children.Add(new TextBlock
+            {
+                Text                    = issue.Cause,
+                FontSize                = 12,
+                Foreground              = new SolidColorBrush(Color.FromRgb(0xC9, 0xB8, 0x95)),
+                TextWrapping            = TextWrapping.Wrap,
+                LineHeight              = 18,
+                LineStackingStrategy    = LineStackingStrategy.BlockLineHeight,
+                Margin                  = new Thickness(0, 6, 0, 0),
+            });
+
+            // The fix is the only line most players need, so it gets its own
+            // bordered strip rather than being a third paragraph they skim past.
+            block.Children.Add(new Border
+            {
+                Background      = new SolidColorBrush(Color.FromRgb(0x33, 0x27, 0x14)),
+                BorderBrush     = new SolidColorBrush(Color.FromRgb(0xF0, 0xC2, 0x4E)),
+                BorderThickness = new Thickness(3, 0, 0, 0),
+                CornerRadius    = new CornerRadius(2),
+                Padding         = new Thickness(12, 9, 12, 9),
+                Margin          = new Thickness(0, 10, 0, 0),
+                Child = new TextBlock
+                {
+                    Text                 = "How to fix it:  " + issue.Fix,
+                    FontSize             = 12,
+                    FontWeight           = FontWeights.SemiBold,
+                    Foreground           = new SolidColorBrush(Color.FromRgb(0xF0, 0xC2, 0x4E)),
+                    TextWrapping         = TextWrapping.Wrap,
+                    LineHeight           = 18,
+                    LineStackingStrategy = LineStackingStrategy.BlockLineHeight,
+                },
+            });
+
+            PanelOverviewKnownIssues.Children.Add(block);
+            first = false;
+        }
+
+        BorderOverviewKnownIssues.Visibility = Visibility.Visible;
     }
 
     // First non-null, non-empty string of the candidates (action-bar links).
@@ -1916,7 +1989,12 @@ public partial class MainWindow : Window
                this, SafeGameDir(_selectedPlugin));
 
     private void BtnOverviewMakeYaml_Click(object sender, RoutedEventArgs e)
-        => LauncherV2.Plugins.DiabloII.D2YamlDialog.ShowFor(this);
+        // Pass the channel: the experimental apworld knows options the stable
+        // one does not, and offering those under the stable game would write a
+        // YAML its apworld rejects at generation time.
+        => LauncherV2.Plugins.DiabloII.D2YamlDialog.ShowFor(
+               this,
+               _selectedPlugin?.GameId == "diablo2_archipelago_experimental");
 
     // Gather every log worth having into one zip and let the player choose
     // where it lands. The automatic report drops on the Desktop, which is
@@ -8505,6 +8583,50 @@ public partial class MainWindow : Window
              : $"Slot {slot}";
     }
 
+    // --- D2 location id → name ---
+    // The apworld builds every location id the same way:
+    //     id = 42000 + quest_id + 1000 * difficulty
+    // so the mapping inverts cleanly, and D2LogicTables already carries
+    // name → quest_id. Building the reverse once beats shipping a second
+    // generated table that could drift away from the first.
+    private const long D2LocationBase = 42000;
+    private static Dictionary<int, string>? _d2QuestToName;
+
+    private void EnsureD2LocationNameMap()
+    {
+        if (_d2QuestToName != null) return;
+        var map = new Dictionary<int, string>();
+        foreach (var kv in Plugins.DiabloII.D2LogicTables.LocationQuest)
+        {
+            // The table holds all three difficulties under decorated names
+            // ("... (Nightmare)"); the plain one is the canonical label.
+            if (kv.Key.EndsWith(")", StringComparison.Ordinal) &&
+                (kv.Key.Contains("(Nightmare)", StringComparison.Ordinal) ||
+                 kv.Key.Contains("(Hell)", StringComparison.Ordinal)))
+                continue;
+            map[kv.Value] = kv.Key;
+        }
+        _d2QuestToName = map;
+    }
+
+    private string? D2ResolveLocationName(long locationId)
+    {
+        EnsureD2LocationNameMap();
+        long n = locationId - D2LocationBase;
+        if (n < 0) return null;
+        int diff = (int)(n / 1000);
+        int quest = (int)(n % 1000);
+        if (diff < 0 || diff > 2) return null;
+        if (_d2QuestToName == null ||
+            !_d2QuestToName.TryGetValue(quest, out string? name)) return null;
+        return diff switch
+        {
+            1 => name + " (Nightmare)",
+            2 => name + " (Hell)",
+            _ => name,
+        };
+    }
+
     // Status-bar 💡 hint text.
     // the ACTUAL point price of one hint — never the raw hint_cost percentage.
     private string FormatHintPoints(int pts)
@@ -9378,6 +9500,8 @@ public partial class MainWindow : Window
         // --- D2-specific pipe v2 extensions (assignment-style = idempotent) ---
         if (plugin is Plugins.DiabloII.D2Plugin d2)
         {
+            EnsureD2LocationNameMap();
+
             // ITEM v2 sender names — the player map is UI-thread-only, so
             // resolve via the dispatcher (items arrive on the AP receive loop).
             d2.ResolvePlayerName = slot => Dispatcher.Invoke(() => ResolveApPlayerName(slot));
@@ -9397,6 +9521,37 @@ public partial class MainWindow : Window
             // precollected STARTING SKILLS) reach the DLL.
             // earlier because the pipe wasn't connected yet.
             d2.RequestApResync = () => _apClient?.SyncAsync() ?? Task.CompletedTask;
+
+            // --- Gate-key locator ---
+            // Lets the in-game tracker name the place a missing act key is
+            // sitting, instead of the player reading a spoiler file.
+            // create_as_hint stays 0: a free scout, never the player's points.
+            d2.RequestLocationScouts = ids =>
+                _apClient?.LocationScoutsAsync(ids, createAsHint: 0)
+                ?? Task.CompletedTask;
+
+            d2.GetOwnSlot = () => _apClient?.Slot ?? -1;
+
+            d2.GetCheckedLocations = () => Dispatcher.Invoke(
+                () => _locationTracker.GetCheckedIdSet().ToArray());
+
+            // Only unchecked locations can still be holding a key, so scouting
+            // the rest would be wasted traffic and a bigger self-spoiler.
+            d2.GetUncheckedLocations = () => Dispatcher.Invoke(() =>
+            {
+                var done = _locationTracker.GetCheckedIdSet();
+                return _locationTracker.GetAllIds()
+                                       .Where(id => !done.Contains(id))
+                                       .ToArray();
+            });
+
+            d2.ResolveLocationName = D2ResolveLocationName;
+
+            if (_apClient != null)
+            {
+                _apClient.LocationInfoReceived -= d2.OnLocationInfo;
+                _apClient.LocationInfoReceived += d2.OnLocationInfo;
+            }
 
             // Standalone "Received" — NAMED handler, -= before += (the old
             // inline lambda could never be unsubscribed, so N launches stacked

@@ -12,15 +12,21 @@ public static class GameCredits
     public static (string GameDev, string? ApAuthor)? Get(string gameId)
         => _registry.TryGetValue(gameId, out var c) ? c : null;
 
-    // Extra contributors who help with the Archipelago LOGIC (regions/rules) for
-    // a game, shown as a separate credit line.
-    public static string? GetApLogic(string gameId)
-        => _apLogic.TryGetValue(gameId, out var c) ? c : null;
+    // Extra contributors, shown as their own highlighted credit line. The role
+    // travels with the name so a contributor can be credited for whatever they
+    // actually did, rather than everyone sharing one hardcoded label.
+    public static (string Role, string Name)? GetExtraCredit(string gameId)
+        => _extraCredit.TryGetValue(gameId, out var c) ? c : null;
 
-    private static readonly Dictionary<string, string> _apLogic = new()
+    private static readonly Dictionary<string, (string Role, string Name)>
+        _extraCredit = new()
     {
-        { "diablo2_archipelago",            "ꓘicka & Zoë" },
-        { "diablo_ii_lord_of_destruction",  "ꓘicka & Zoë" },
+        { "diablo2_archipelago",
+            ("Evil minion bookkeeping & answer man", "Maegis") },
+        { "diablo2_archipelago_experimental",
+            ("Evil minion bookkeeping & answer man", "Maegis") },
+        { "diablo_ii_lord_of_destruction",
+            ("Evil minion bookkeeping & answer man", "Maegis") },
     };
 
     private static readonly Dictionary<string, (string GameDev, string? ApAuthor)>

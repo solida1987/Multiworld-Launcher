@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
@@ -178,6 +178,34 @@ public sealed class D2Plugin : IGamePlugin
     // pipe wasn't connected yet.
     // items are harmless. Assignment-style for idempotent per-launch re-wiring.
     public Func<Task>? RequestApResync { get; set; }
+
+    // --- Gate-key locator wiring (set by the UI layer, which owns ApClient) ---
+
+    // Scout our own locations. create_as_hint stays 0 on the far side: this is
+    // a free lookup, it must never spend the player's hint points behind their
+    // back.
+    public Func<long[], Task>? RequestLocationScouts { get; set; }
+
+    // AP location id → readable name, from the datapackage.
+    public Func<long, string?>? ResolveLocationName { get; set; }
+
+    // Locations we have NOT sent yet — the only ones that can still hold a key.
+    public Func<long[]>? GetUncheckedLocations { get; set; }
+
+    // Locations already sent, so a key we have collected is not offered again.
+    public Func<long[]>? GetCheckedLocations { get; set; }
+
+    // Our own AP player slot, to tell our keys from other people's.
+    public Func<int>? GetOwnSlot { get; set; }
+
+    // How many copies of each progressive act key have arrived. Counted from
+    // the item stream rather than asked for, because the server replays that
+    // stream from index 0 on every reconnect — so the count is self-healing.
+    private readonly Dictionary<long, int> _gateKeyCopies = new();
+
+    // Last scout reply, kept so a later item delivery can recompute without
+    // asking the server again.
+    private ApNetworkItem[] _scoutedOwnLocations = Array.Empty<ApNetworkItem>();
 
     // --- GitHub API ---
 
@@ -1690,7 +1718,8 @@ public sealed class D2Plugin : IGamePlugin
         // chosen options) or LOADS a previous one.
         var lib = new D2SeedLibrary(GameDirectory);
         var choice = D2StandaloneSettingsDialog.ShowAndGet(
-            Application.Current?.MainWindow, ReadStandaloneSettings(), lib);
+            Application.Current?.MainWindow, ReadStandaloneSettings(), lib,
+            Experimental);   // experimental-only rows stay out of the stable dialog
         if (choice == null)
             throw new OperationCanceledException("Standalone launch cancelled.");
 
@@ -1810,6 +1839,21 @@ public sealed class D2Plugin : IGamePlugin
         // seeds since the plugin was constructed) before reading it.
         EnsureApIndexForCurrentSeed();
 
+        // Count act keys BEFORE any of the early returns below. Those returns
+        // are about whether the GAME is ready to be written to, which has
+        // nothing to do with what the server has granted us — and the tracker
+        // must know the true count even while the pipe is down.
+        if (items is { Length: > 0 })
+        {
+            if (index == 0) _gateKeyCopies.Clear();     // full replay, recount
+            foreach (var it in items)
+            {
+                if (!D2GateKeyLocator.IsGateKey(it.ItemId)) continue;
+                _gateKeyCopies.TryGetValue(it.ItemId, out int n);
+                _gateKeyCopies[it.ItemId] = n + 1;
+            }
+        }
+
         // AP resume contract: the server replays the FULL item history from
         // index 0 on every connect/Sync.
         // received and deliver only the remainder — a blanket
@@ -1888,12 +1932,76 @@ public sealed class D2Plugin : IGamePlugin
                 ? "STATE:CONNECTED"
                 : "STATE:DISCONNECTED");
 
+        if (state == ApConnectionState.Connected && _sessionIsAp)
+        {
+            // Drop anything we learned about the previous room first. A
+            // placement is only true for the seed it came from, and a leftover
+            // line would send the player to a location holding something else.
+            _scoutedOwnLocations = Array.Empty<ApNetworkItem>();
+            _ = WritePipeLineAsync("KEYLOC:RESET");
+            _ = ScoutForGateKeysAsync();
+        }
+
         try
         {
             string flagPath = Path.Combine(GameDirectory, "Archipelago", "ap_connected.flag");
             File.WriteAllText(flagPath, state == ApConnectionState.Connected ? "1" : "0");
         }
         catch { }
+    }
+
+    // --- Gate-key locator ---
+
+    // Called by the UI layer when a LocationScouts reply lands.
+    public void OnLocationInfo(ApNetworkItem[] items)
+    {
+        _scoutedOwnLocations = items ?? Array.Empty<ApNetworkItem>();
+        _ = PushGateKeyHintsAsync();
+    }
+
+    // Runs after a scout reply and after each item batch: collecting a key
+    // moves the answer on to the act's next gate, so the tracker would
+    // otherwise keep naming a location the player already emptied.
+    private async Task PushGateKeyHintsAsync()
+    {
+        if (!_sessionIsAp) return;
+        if (_pipe?.IsConnected != true) return;
+        if (ResolveLocationName is null || GetOwnSlot is null) return;
+
+        List<GateKeyHint> hints;
+        try
+        {
+            hints = D2GateKeyLocator.Build(
+                _gateKeyCopies,
+                _scoutedOwnLocations,
+                GetCheckedLocations?.Invoke() ?? Array.Empty<long>(),
+                GetOwnSlot(),
+                ResolveLocationName);
+        }
+        catch
+        {
+            return;   // a broken lookup must never take the pipe down
+        }
+
+        foreach (var h in hints)
+        {
+            string where = SanitizePipeField(h.Where);
+            if (!await WritePipeLineAsync($"KEYLOC:{h.Difficulty}|{h.Slot}|{where}"))
+                break;
+        }
+    }
+
+    // Ask the server what sits at every location we have not sent yet.
+    // Only those can still be holding a key, so scouting the rest would be
+    // noise — and a smaller scout is a smaller self-spoiler.
+    private async Task ScoutForGateKeysAsync()
+    {
+        if (RequestLocationScouts is null || GetUncheckedLocations is null) return;
+        long[] ids;
+        try { ids = GetUncheckedLocations() ?? Array.Empty<long>(); }
+        catch { return; }
+        if (ids.Length == 0) return;
+        try { await RequestLocationScouts(ids); } catch { }
     }
 
     // --- Named pipe receive loop ---

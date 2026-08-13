@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -34,8 +34,19 @@ internal sealed class D2YamlDialog : Window
     private static readonly Brush Gold  = new SolidColorBrush(Color.FromRgb(0xC8, 0xA2, 0x4B));
     private static readonly Brush Panel = new SolidColorBrush(Color.FromRgb(0x1A, 0x17, 0x14));
 
-    private D2YamlDialog()
+    // Which channel this dialog was opened for. Options that only the
+    // experimental apworld knows are hidden for the stable game — offering
+    // them there would produce a YAML the player's apworld rejects at
+    // generation time, with an error that helps nobody.
+    private readonly bool _experimental;
+
+    // Stable sees only stable's options; experimental sees everything.
+    private System.Collections.Generic.IEnumerable<D2YamlOption> VisibleOptions
+        => D2YamlOptions.All.Where(o => _experimental || !o.ExpOnly);
+
+    private D2YamlDialog(bool experimental)
     {
+        _experimental = experimental;
         // "YAML" by name everywhere: it is the word every Archipelago player and
         // host actually uses ("send me your YAML"), so calling it a "settings
         // file" here just made people unsure whether this was the right button.
@@ -92,7 +103,7 @@ internal sealed class D2YamlDialog : Window
 
         // the options themselves, grouped exactly as the apworld groups them
         var stack = new StackPanel();
-        foreach (var group in D2YamlOptions.All.GroupBy(o => o.Group))
+        foreach (var group in VisibleOptions.GroupBy(o => o.Group))
         {
             // The long tails (32 sets, 33 runes, 54 custom-goal toggles) start
             // closed: they are all "on" by default and most players never look.
@@ -210,7 +221,7 @@ internal sealed class D2YamlDialog : Window
         // Two settings every AP file carries; the apworld does not declare them.
         sb.Append("  progression_balancing: normal\n");
         sb.Append("  accessibility: full\n");
-        foreach (var o in D2YamlOptions.All)
+        foreach (var o in VisibleOptions)
         {
             if (!_read.TryGetValue(o.Key, out var read)) continue;
             object v = read();
@@ -260,9 +271,9 @@ internal sealed class D2YamlDialog : Window
         return s;
     }
 
-    public static void ShowFor(Window? owner)
+    public static void ShowFor(Window? owner, bool experimental = false)
     {
-        var d = new D2YamlDialog();
+        var d = new D2YamlDialog(experimental);
         if (owner != null) d.Owner = owner;
         d.ShowDialog();
     }

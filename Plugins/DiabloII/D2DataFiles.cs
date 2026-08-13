@@ -42,7 +42,12 @@ public static class D2DataFiles
           // reach the AFFIX-derived level reqs (magic/rare) and set/unique reqs, not
           // just the base-item levelreq in weapons/armor/misc.
           // rare gear kept its required level even with the toggle on.
-          "MagicPrefix.txt", "MagicSuffix.txt", "SetItems.txt", "UniqueItems.txt" };
+          // UniqueItems2.txt was missing entirely, so its "LevelReq" column
+          // survived every "remove level requirements" run. Found by scanning
+          // all excel files for a level-requirement column rather than
+          // trusting this list to be complete.
+          "MagicPrefix.txt", "MagicSuffix.txt", "SetItems.txt", "UniqueItems.txt",
+          "UniqueItems2.txt" };
 
     // True when the file name is one of the randomizer-managed excel tables
     // (the ones the pristine-backup/restore cycle owns).
@@ -273,7 +278,30 @@ public static class D2DataFiles
                     if (file.Equals("SetItems.txt",    StringComparison.OrdinalIgnoreCase) ||
                         file.Equals("UniqueItems.txt", StringComparison.OrdinalIgnoreCase))
                         SetColumn(lines, "lvl req", "0");
+                    // UniqueItems2.txt spells it "LevelReq" and was simply never
+                    // in the list — found by scanning every excel file for a
+                    // level-requirement column instead of trusting the list.
+                    if (file.Equals("UniqueItems2.txt", StringComparison.OrdinalIgnoreCase))
+                        SetColumn(lines, "LevelReq", "0");
                 }
+
+                // Bigger quivers. Vanilla holds 350 arrows and 250 bolts, which
+                // is a lot of trips to a vendor.
+                //
+                // 511 is not an arbitrary choice and not a compromise we picked
+                // — it is the engine's own ceiling. D2Common clamps stack size
+                // to 511 in four separate places (the quantity field the save
+                // format gives an item is 9 bits), so a table saying 9999 would
+                // simply be ignored and the number on the item would still stop
+                // there. Asking for more than this needs a save-format change,
+                // not a data edit.
+                //
+                // Patched here rather than only in the shipped table because
+                // the pristine backup an existing install already took still
+                // holds the old numbers, and that copy is what gets restored.
+                if (file.Equals("misc.txt", StringComparison.OrdinalIgnoreCase))
+                    SetCellWhere(lines, "code", new[] { "aqv", "cqv" },
+                                 "maxstack", "511");
 
                 // #2b — Item STATS requirements (Strength / Dexterity).
                 // remove: every item equips regardless of STR/DEX.
@@ -365,6 +393,40 @@ public static class D2DataFiles
     // only touch a row when it actually has that column, so column counts stay
     // intact and malformed/terminator rows are left untouched.
     // </summary>
+    // Like SetColumn, but only for rows whose <paramref name="keyCol"/> matches
+    // one of <paramref name="keyValues"/>. SetColumn writes every row, which is
+    // right for "remove all level requirements" and wrong for anything aimed at
+    // a handful of items.
+    private static void SetCellWhere(List<string> lines, string keyCol,
+                                     string[] keyValues, string targetCol,
+                                     string value)
+    {
+        if (lines.Count == 0) return;
+        string[] header = lines[0].Split('\t');
+        int keyIdx = -1, tgtIdx = -1;
+        for (int i = 0; i < header.Length; i++)
+        {
+            string h = header[i].Trim();
+            if (h.Equals(keyCol, StringComparison.OrdinalIgnoreCase)) keyIdx = i;
+            if (h.Equals(targetCol, StringComparison.OrdinalIgnoreCase)) tgtIdx = i;
+        }
+        if (keyIdx < 0 || tgtIdx < 0) return;
+
+        for (int r = 1; r < lines.Count; r++)
+        {
+            if (lines[r].Length == 0) continue;
+            string[] cells = lines[r].Split('\t');
+            if (cells.Length <= keyIdx || cells.Length <= tgtIdx) continue;
+            bool match = false;
+            foreach (string k in keyValues)
+                if (cells[keyIdx].Trim().Equals(k, StringComparison.OrdinalIgnoreCase))
+                { match = true; break; }
+            if (!match || cells[tgtIdx] == value) continue;
+            cells[tgtIdx] = value;
+            lines[r] = string.Join('\t', cells);
+        }
+    }
+
     private static void SetColumn(List<string> lines, string colName, string value)
     {
         if (lines.Count == 0) return;
@@ -393,12 +455,27 @@ public static class D2DataFiles
     // filters out non-vendor "...Min" columns and is robust to D2's spelling quirks
     // (we don't touch the typo'd <c>MagicLvl</c> column at all).
     // </summary>
-    private static List<(int min, int max, int mmin, int mmax)> FindVendorGroups(string[] header)
+    // Which act each vendor stands in. A shopper only ever has their CURRENT
+    // act's vendors, so a permutation that ignores this can move every basic
+    // weapon out of Act 1 entirely — Maegis started a run with no bow for sale
+    // anywhere he could reach. Drehya is Anya's internal name; Cain sells
+    // nothing but keeps stocking columns, so he rides along with his act.
+    private static readonly Dictionary<string, int> VendorAct =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Charsi"] = 1, ["Gheed"] = 1, ["Akara"] = 1,
+            ["Fara"] = 2, ["Lysander"] = 2, ["Drognan"] = 2, ["Elzix"] = 2,
+            ["Hralti"] = 3, ["Alkor"] = 3, ["Ormus"] = 3, ["Asheara"] = 3,
+            ["Cain"] = 3, ["Halbu"] = 4, ["Jamella"] = 4,
+            ["Larzuk"] = 5, ["Drehya"] = 5, ["Malah"] = 5,
+        };
+
+    private static List<(int min, int max, int mmin, int mmax, int act)> FindVendorGroups(string[] header)
     {
         var idx = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         for (int i = 0; i < header.Length; i++) idx[header[i].Trim()] = i;
 
-        var groups = new List<(int, int, int, int)>();
+        var groups = new List<(int, int, int, int, int)>();
         foreach (var raw in header)
         {
             string c = raw.Trim();
@@ -407,7 +484,7 @@ public static class D2DataFiles
             string p = c.Substring(0, c.Length - 3);     // vendor prefix
             if (idx.TryGetValue(p + "Min", out int mi) && idx.TryGetValue(p + "Max", out int ma) &&
                 idx.TryGetValue(p + "MagicMin", out int mmi) && idx.TryGetValue(p + "MagicMax", out int mma))
-                groups.Add((mi, ma, mmi, mma));
+                groups.Add((mi, ma, mmi, mma, VendorAct.TryGetValue(p, out int a) ? a : 0));
         }
         return groups;
     }
@@ -450,8 +527,21 @@ public static class D2DataFiles
                 IsClassSpecificItemType(cells[typeCol]))
                 continue;
 
+            // Permute WITHIN each act, never across. An item stocked in Act 1
+            // stays stocked somewhere in Act 1 — you just have to find out
+            // which of the three sells it now, which is the fun part. Across
+            // acts it was not a shuffle but a deletion: the item left the only
+            // town the player could reach.
             var t = groups.Select(g => (cells[g.min], cells[g.max], cells[g.mmin], cells[g.mmax])).ToArray();
-            for (int i = t.Length - 1; i > 0; i--) { int j = rng.Next(i + 1); (t[i], t[j]) = (t[j], t[i]); }
+            foreach (var actGroup in Enumerable.Range(0, groups.Count).GroupBy(gi => groups[gi].act))
+            {
+                var members = actGroup.ToArray();
+                for (int i = members.Length - 1; i > 0; i--)
+                {
+                    int j = rng.Next(i + 1);
+                    (t[members[i]], t[members[j]]) = (t[members[j]], t[members[i]]);
+                }
+            }
             for (int gi = 0; gi < groups.Count; gi++)
             {
                 cells[groups[gi].min]  = t[gi].Item1;
@@ -723,12 +813,30 @@ public static class D2DataFiles
         static string ActKey(string nm)
         { int d = nm.IndexOf(" - ", StringComparison.Ordinal); return d > 0 ? nm.Substring(0, d) : ""; }
 
-        var byAct = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase);
+        // Band by the area's MONSTER LEVEL, not just its act.
+        //
+        // Act-only banding was still far too loose: Act 1 spans MonLvl 1-28 and
+        // Act 5 spans 24-43, so Blood Moor (level 1) could receive the Pit's or
+        // the Cow Level's capsule — a level-1 character meeting level-28
+        // monsters with full native HP ("10% hit on first enemy of Blood Moor",
+        // Maegis). Measured over the 120 shuffleable rows, a width of 5 keeps
+        // EVERY row shuffleable (12 buckets, none left alone) while cutting the
+        // worst in-band level jump from 42 to 4. Rows whose MonLvl cannot be
+        // read fall back to act-only, which is the old behaviour.
+        const int MON_LEVEL_BAND = 5;
+        int monLvlCol = idx.TryGetValue("MonLvl1", out int mlv) ? mlv : -1;
+
+        var byAct = new Dictionary<(string Act, int Band), List<int>>();
         for (int i = 0; i < rows.Count; i++)
         {
-            string nm = nameCol < byRow[rows[i]].Length ? byRow[rows[i]][nameCol] : "";
-            string act = ActKey(nm);
-            if (!byAct.TryGetValue(act, out var list)) { list = new List<int>(); byAct[act] = list; }
+            string[] rc = byRow[rows[i]];
+            string nm = nameCol < rc.Length ? rc[nameCol] : "";
+            int band = 0;
+            if (monLvlCol >= 0 && monLvlCol < rc.Length &&
+                int.TryParse(rc[monLvlCol], out int lvl) && lvl > 0)
+                band = lvl / MON_LEVEL_BAND;
+            var key = (ActKey(nm), band);
+            if (!byAct.TryGetValue(key, out var list)) { list = new List<int>(); byAct[key] = list; }
             list.Add(i);                       // index into rows/caps
         }
 
@@ -784,20 +892,45 @@ public static class D2DataFiles
             ["Leatherarm"]           = "Creeping Feature",
             ["Web Mage the Burning"] = "Sszark the Burning",
             ["Siege Boss"]           = "Shenk the Overseer",
+
+            // Measured 2026-08-11: eight more rows carry a hunt whose LOCATION
+            // name is the short form, so the lookup missed and they fell into
+            // the catch-all bucket — losing their act band, which is exactly
+            // the "Act 2 key behind Act 5" class of unwinnable seed this
+            // banding exists to prevent. They span all five acts.
+            ["Bonebreak"]                 = "Bonebreaker",
+            ["Bloodwitch the Wild"]       = "Bloodwitch",
+            ["Coldworm the Burrower"]     = "Coldworm",
+            ["Ancient Kaa the Soulless"]  = "Ancient Kaa",
+            ["Sarina the Battlemaid"]     = "Sarina",
+            ["Riftwraith the Cannibal"]   = "Riftwraith",
+            ["Infector of Souls"]         = "Infector",
+            ["Grand Vizier of Chaos"]     = "Grand Vizier",
         };
+
+    // What the band lookup concluded about a row. The old code collapsed the
+    // bottom two into one nullable and then treated BOTH as "free to swap",
+    // which is only true for NoHunt — an Unresolved row may well carry a hunt
+    // we simply failed to name, and shuffling it breaks AP's reachability.
+    private enum HuntBand { Banded, NoHunt, Unresolved }
 
     // Which (act, gate region) a super-unique's hunt check belongs to, via the
     // generated tables: "Hunt: &lt;name&gt;" -> quest id -> area -> region.
     // Null when the name has no hunt check or the area is unmapped — those
     // rows are pinned rather than guessed at.
-    private static (int Act, int Region)? HuntRegionFor(string suName)
+    private static HuntBand HuntRegionFor(string suName, out (int Act, int Region) band)
     {
-        if (string.IsNullOrWhiteSpace(suName)) return null;
+        band = default;
+        if (string.IsNullOrWhiteSpace(suName)) return HuntBand.Unresolved;
         string display = SuNameAliases.TryGetValue(suName, out var alias) ? alias : suName;
         if (!D2LogicTables.LocationQuest.TryGetValue("Hunt: " + display, out int qid))
-            return null;
-        if (!D2LogicTables.QuestZone.TryGetValue(qid, out int area)) return null;
-        return D2LogicTables.ZoneRegion.TryGetValue(area, out var ar) ? ar : null;
+            return HuntBand.NoHunt;      // genuinely carries no Archipelago logic
+        // Has a hunt but we cannot place it: pin, never shuffle. (Pindleskin
+        // hits this — its area 121 has no region entry.)
+        if (!D2LogicTables.QuestZone.TryGetValue(qid, out int area)) return HuntBand.Unresolved;
+        if (!D2LogicTables.ZoneRegion.TryGetValue(area, out var ar)) return HuntBand.Unresolved;
+        band = ar;
+        return HuntBand.Banded;
     }
 
     private static void ShuffleBosses(List<string> lines, long seed)
@@ -840,6 +973,18 @@ public static class D2DataFiles
                 suName.Equals("Shenk the Overseer", StringComparison.OrdinalIgnoreCase))
                 continue;
 
+            // 3. The three Ancients. Engine-quest bosses in exactly the same
+            // sense as the three above: their AI is bound to the Mountain Top
+            // altar and the quest state, so anywhere else it has nothing to
+            // bind to. They are also Rarity 0 / unspawnable by the normal
+            // population code, which is why the MONSTER shuffle already keeps
+            // "Act 5 - Mountain Top" in KeepEmptyArenas — the boss shuffle
+            // never got the matching guard. Field report (Maegis): Ancient
+            // Kaa's spot spawned three extra "Ancient" super-uniques (a
+            // super-unique's minions inherit its Class) with broken AI.
+            if (suName.StartsWith("Ancient Barbarian", StringComparison.OrdinalIgnoreCase))
+                continue;
+
             rows.Add(r);
             byRow[r] = c;
         }
@@ -870,9 +1015,30 @@ public static class D2DataFiles
         // identity, which is what keeping them in their own bucket guarantees.
         // Pinning them instead would have cut the shuffle from 64 rows to 27
         // and made the option barely worth having.
+        // Three outcomes, three fates — the old `?? (0,0)` collapsed the last
+        // two and let an unnameable hunt roam across all five acts.
         var bucketOf = new Dictionary<int, (int Act, int Region)>();
+        var unresolved = new List<string>();
         foreach (int r in rows)
-            bucketOf[r] = HuntRegionFor(byRow[r][0].Trim()) ?? (0, 0);
+        {
+            string nm = byRow[r][0].Trim();
+            switch (HuntRegionFor(nm, out var band))
+            {
+                case HuntBand.Banded:
+                    bucketOf[r] = band;                 // stays behind its own gates
+                    break;
+                case HuntBand.NoHunt:
+                    bucketOf[r] = (0, 0);               // no AP logic: free to swap with its own kind
+                    break;
+                default:
+                    unresolved.Add(nm);                 // absent from bucketOf => pinned below
+                    break;
+            }
+        }
+        if (unresolved.Count > 0)
+            System.Diagnostics.Debug.WriteLine(
+                $"[D2] boss shuffle: pinned {unresolved.Count} unresolvable row(s): " +
+                string.Join(", ", unresolved));
 
         var rng = new Random(unchecked((int)(seed ^ (seed >> 32))));
         int moved = 0, pinned = 0;

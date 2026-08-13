@@ -1340,9 +1340,30 @@
                                                        Visibility="Collapsed"/>
                                             <TextBlock x:Name="TxtOverviewCreditsApLogic"
                                                        FontSize="11"
-                                                       Foreground="{StaticResource BrushMuted}"
-                                                       Margin="0,2,0,0"
+                                                       FontWeight="SemiBold"
+                                                       Foreground="#E8B44A"
+                                                       Margin="0,4,0,0"
+                                                       TextWrapping="Wrap"
                                                        Visibility="Collapsed"/>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <!--  Known issues card — only shown when the selected game has notes  -->
+                                    <Border x:Name="BorderOverviewKnownIssues"
+                                            Margin="24,18,24,0"
+                                            Background="#241B10"
+                                            BorderBrush="#8A6A22"
+                                            BorderThickness="1"
+                                            CornerRadius="4"
+                                            Padding="20,16"
+                                            Visibility="Collapsed">
+                                        <StackPanel>
+                                            <TextBlock Text="⚠  KNOWN ISSUE"
+                                                       FontSize="10"
+                                                       FontWeight="Bold"
+                                                       Foreground="#F0C24E"
+                                                       Margin="0,0,0,10"/>
+                                            <StackPanel x:Name="PanelOverviewKnownIssues"/>
                                         </StackPanel>
                                     </Border>
 
