@@ -34,18 +34,25 @@ public static class GameKnownIssues
     public static IReadOnlyList<KnownIssue> Get(string gameId)
         => _registry.TryGetValue(gameId, out var list) ? list : System.Array.Empty<KnownIssue>();
 
-    // Diablo II 1.10's Act 2 waypoint bug. Reported repeatedly and mistaken for
-    // a randomiser fault every time, because it looks exactly like lost save
-    // data: the waypoints you already activated stop appearing on the map.
-    // It is vanilla behaviour — the game hides the Act 2 waypoint set while
-    // Jerhyn's palace dialogue is pending, and talking to him releases them.
+    // The vanishing waypoint menu. Reported repeatedly and mistaken for lost
+    // save data every time: every act tab except Act 1 drops out of the
+    // waypoint menu at once. The waypoint bits themselves are never lost —
+    // what goes stale is the game client's copy of the quest records, which
+    // is what the menu gates its act tabs on. Any quest-bearing NPC dialogue
+    // makes the game resend them, which is why talking to one or two town
+    // NPCs (Jerhyn was just the traditional pick) always brought everything
+    // back. As of v3.7.4 / EX-1.1.12 the randomiser resends them itself on
+    // every area change and every ten seconds, so the menu should no longer
+    // be able to go stale — the card stays as a fallback in case it ever
+    // still happens.
     private static readonly KnownIssue WaypointsVanish = new(
-        "Your waypoints disappear and cannot be used — the ones you already " +
-        "activated stop showing up on the map.",
-        "This is a bug in Diablo II 1.10 itself, not in the randomiser. Nothing " +
-        "has been lost from your save.",
-        "Talk to Jerhyn. He stands outside the palace in Lut Gholein (the Act 2 " +
-        "town). Speaking to him brings the waypoints straight back.");
+        "Your waypoints disappear from the waypoint menu — every act except " +
+        "Act 1 goes missing at once, including waypoints you already activated.",
+        "Nothing has been lost from your save. The game's menu loses track of " +
+        "which acts you have reached; the game version from v3.7.4 / EX-1.1.12 " +
+        "onwards refreshes this automatically, so you should rarely see it.",
+        "If it still happens: talk to one or two town NPCs — any of them, in " +
+        "any act. The menu comes straight back with every act intact.");
 
     private static readonly Dictionary<string, KnownIssue[]> _registry = new()
     {
