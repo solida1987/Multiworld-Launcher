@@ -286,6 +286,18 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
 
+        // Home-page logo. Loaded from disk the same way the hero art is,
+        // rather than as an embedded resource, because Assets ship beside
+        // the executable as content.
+        try
+        {
+            string logo = Path.Combine(AppContext.BaseDirectory,
+                                       "Assets", "logo.png");
+            if (File.Exists(logo) && LoadCachedBitmap(logo) is { } bmp)
+                ImgHomeLogo.Source = bmp;
+        }
+        catch { /* cosmetic only - never block startup on the logo */ }
+
         // Log document: one paragraph, padded like the old TextBlock had.
         TxtLog.Document = new FlowDocument(_logParagraph)
         {
@@ -3697,6 +3709,16 @@ public partial class MainWindow : Window
             string probe = Path.Combine(AppContext.BaseDirectory,
                 "Assets", "Thumbs", $"{entry.Id}_thumb.png");
             if (File.Exists(probe)) thumbSource = probe;
+
+            // Nothing of its own: fall back to the launcher's own logo
+            // rather than a lettered box. A game we have not drawn art
+            // for yet should still look like part of the launcher.
+            if (string.IsNullOrEmpty(thumbSource))
+            {
+                string generic = Path.Combine(AppContext.BaseDirectory,
+                    "Assets", "Thumbs", "_generic_thumb.png");
+                if (File.Exists(generic)) thumbSource = generic;
+            }
         }
 
         var thumbBorder = new Border

@@ -806,6 +806,11 @@
                         <StackPanel x:Name="HomeGetStartedSection"
                                     HorizontalAlignment="Center"
                                     MaxWidth="420">
+                            <Image x:Name="ImgHomeLogo"
+                                   Width="120" Height="120"
+                                   Margin="0,0,0,10"
+                                   HorizontalAlignment="Center"
+                                   RenderOptions.BitmapScalingMode="HighQuality"/>
                             <TextBlock Text="GETTING STARTED"
                                        FontSize="10"
                                        FontWeight="Bold"
@@ -909,6 +914,21 @@
                                 HorizontalAlignment="Center"
                                 Margin="0,20,0,0"
                                 Click="BtnBrowse_Click"/>
+
+                        <!--  Logo attribution. CC BY-NC 4.0 asks that the credit
+                              travel with the work, and a launcher showing the logo
+                              on its front page should say where it came from on the
+                              same page.  -->
+                        <TextBlock HorizontalAlignment="Center"
+                                   TextAlignment="Center"
+                                   TextWrapping="Wrap"
+                                   MaxWidth="460"
+                                   FontSize="10"
+                                   Foreground="{StaticResource BrushMuted}"
+                                   Opacity="0.55"
+                                   Margin="0,26,0,4">
+                            <Run Text="Logo adapted from the Archipelago logo, © 2022 Krista Corkos and Christopher Wilson, licensed CC BY-NC 4.0. Modified. Not endorsed by or affiliated with Archipelago."/>
+                        </TextBlock>
 
                     </StackPanel>
                 </ScrollViewer>

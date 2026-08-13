@@ -21,6 +21,17 @@ grants any right over them:
   DSOAL ................. LGPL-2.1         (c) Chris Robinson (kcat)
   SFmpqapi .............. BSD 2-clause     (c) 2002-2010 ShadowFlare
 
+The launcher's logo is likewise NOT covered by the Apache License. It is an
+adaptation of the Archipelago logo:
+
+  Archipelago logo ...... CC BY-NC 4.0     (c) 2022 Krista Corkos
+                                                    and Christopher Wilson
+
+The adaptation adds a skull and flames to the original arrangement of
+spheres. Because CC BY-NC 4.0 forbids commercial use, the logo may only
+travel with a launcher that stays free of charge. Neither Archipelago nor
+the original artists endorse this project.
+
 Each component is described in full -- what it does, which files it provides,
 its author and its source -- in THIRD-PARTY-NOTICES.md. The complete text of
 every licence is in the licenses/ directory.
