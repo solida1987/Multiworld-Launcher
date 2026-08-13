@@ -2304,6 +2304,82 @@ public sealed class D2Plugin : IGamePlugin
     // the session rather than whatever was true when the tab was opened.
     public void RefreshMapActionContext() => ApplyApActionContext();
 
+    // --- Optional add-ons the player installs themselves ---
+
+    /// <summary>One optional component and what we can see of it on disk.</summary>
+    /// <param name="Installed">Its files are in the game folder.</param>
+    /// <param name="Active">Installed AND able to actually do anything. These
+    /// differ for SGD2FreeRes, which nothing in this mod loads — D2GL does,
+    /// through <c>load_dlls_late</c> in d2gl.ini. Present without D2GL it just
+    /// sits there, and reporting that as "installed" would send someone hunting
+    /// for a bug that is really a missing second download.</param>
+    public readonly record struct OptionalAddon(
+        string Name, string Adds, string Url,
+        bool Installed, bool Active, string Status, string? Advice);
+
+    // Marker files. Each is the file that has to be there for the component to
+    // do its job, not merely a file from the same download: glide3x.dll is what
+    // -3dfx loads, so its absence is exactly why we must not pass -3dfx.
+    private const string GlideMarker   = "glide3x.dll";
+    private const string FreeResMarker = "SGD2FreeRes.dll";
+    private const string DsoalMarker   = "dsound.dll";
+
+    /// <summary>
+    /// Look in the game folder and report which optional add-ons are there.
+    ///
+    /// Nothing is cached: the whole point is that the player drops files in
+    /// while the launcher is open, so every call re-reads the disk.
+    /// </summary>
+    public IReadOnlyList<OptionalAddon> DetectOptionalAddons()
+    {
+        bool Has(string file) =>
+            !string.IsNullOrEmpty(GameDirectory) &&
+            File.Exists(Path.Combine(GameDirectory, file));
+
+        bool glide   = Has(GlideMarker);
+        bool freeRes = Has(FreeResMarker);
+        bool dsoal   = Has(DsoalMarker) && Has("dsoal-aldrv.dll");
+
+        var list = new List<OptionalAddon>
+        {
+            new("D2GL", "HD rendering, widescreen, filtering, higher frame rates",
+                "https://github.com/bayaraa/d2gl",
+                glide, glide,
+                glide ? "Installed — the game launches with the Glide renderer"
+                      : "Not installed — the game runs on DirectDraw at the original size",
+                glide ? null
+                      : "Download it and copy its files into the game folder."),
+
+            new("SGD2FreeRes", "Unlocks resolutions the original game does not offer",
+                "https://github.com/mir-diablo-ii-tools/SlashGaming-Diablo-II-Free-Resolution",
+                freeRes, freeRes && glide,
+                !freeRes ? "Not installed — original resolution only"
+                : glide  ? "Installed"
+                         : "Installed but inactive — nothing is loading it",
+                !freeRes ? "Download it and copy its files into the game folder."
+                : glide  ? null
+                         : "D2GL is what loads SGD2FreeRes. Install D2GL as well and this starts working."),
+
+            new("DSOAL", "Restores the original 3D positional audio",
+                "https://github.com/kcat/dsoal",
+                dsoal, dsoal,
+                dsoal ? "Installed" : "Not installed — standard audio",
+                dsoal ? null
+                      : "Download it and copy its files into the game folder."),
+        };
+        return list;
+    }
+
+    /// <summary>One line per add-on, for the Play tab log at launch.</summary>
+    public IEnumerable<string> DescribeOptionalAddons()
+    {
+        foreach (var a in DetectOptionalAddons())
+        {
+            string mark = a.Active ? "installed" : a.Installed ? "inactive " : "not found";
+            yield return $"   [{mark}]  {a.Name,-12} {a.Status}";
+        }
+    }
+
     // --- Settings UI ---
 
     public UIElement? CreateSettingsPanel()
@@ -2414,6 +2490,104 @@ public sealed class D2Plugin : IGamePlugin
             FontSize = 12, Foreground = muted, Margin = new Thickness(0, 0, 0, 16),
         });
 
+        // --- Section: Optional add-ons ---
+        // These are not shipped with the mod (GPL/AGPL/LGPL), so the player
+        // installs them by hand. That makes "did it work?" a real question, and
+        // the launcher is the only thing in a position to answer it: it reads
+        // the same folder the game will read, at the same moment.
+        panel.Children.Add(new TextBlock
+        {
+            Text = "OPTIONAL ADD-ONS", FontSize = 10, FontWeight = FontWeights.SemiBold,
+            Foreground = muted, Margin = new Thickness(0, 0, 0, 8),
+        });
+        panel.Children.Add(new TextBlock
+        {
+            Text = "These are made by other people and are not included with the mod — " +
+                   "you download them yourself and copy them into the game folder. " +
+                   "Everything below is optional; the game runs without all three.",
+            FontSize = 11, Foreground = muted, TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 0, 0, 8),
+        });
+
+        var addonList = new StackPanel { Margin = new Thickness(0, 0, 0, 8) };
+        panel.Children.Add(addonList);
+
+        // Rebuilt rather than created once: the player alt-tabs out, drops the
+        // files in and comes back, and the panel has to be telling the truth
+        // when they do.
+        void RebuildAddonRows()
+        {
+            addonList.Children.Clear();
+            foreach (var addon in DetectOptionalAddons())
+            {
+                var okBrush   = new SolidColorBrush(Color.FromRgb(0x5C, 0xC8, 0x7A));
+                var warnBrush = new SolidColorBrush(Color.FromRgb(0xD8, 0xA8, 0x3C));
+                var dot = addon.Active ? "●" : addon.Installed ? "▲" : "○";
+
+                var row = new StackPanel { Margin = new Thickness(0, 0, 0, 8) };
+                var head = new StackPanel { Orientation = Orientation.Horizontal };
+                head.Children.Add(new TextBlock
+                {
+                    Text = dot, FontSize = 12, Width = 16,
+                    Foreground = addon.Active ? okBrush : addon.Installed ? warnBrush : muted,
+                });
+                head.Children.Add(new TextBlock
+                {
+                    Text = addon.Name, FontSize = 12, FontWeight = FontWeights.SemiBold,
+                    Foreground = fg, Width = 110,
+                });
+                head.Children.Add(new TextBlock
+                {
+                    Text = addon.Status, FontSize = 12,
+                    Foreground = addon.Installed && !addon.Active ? warnBrush : muted,
+                    TextWrapping = TextWrapping.Wrap, MaxWidth = 360,
+                });
+                row.Children.Add(head);
+
+                if (addon.Advice != null)
+                {
+                    var advice = new TextBlock
+                    {
+                        FontSize = 11, Foreground = muted, TextWrapping = TextWrapping.Wrap,
+                        Margin = new Thickness(16, 2, 0, 0), MaxWidth = 470,
+                    };
+                    advice.Inlines.Add(addon.Advice + "  ");
+                    var link = new System.Windows.Documents.Hyperlink(
+                        new System.Windows.Documents.Run(addon.Url))
+                    { NavigateUri = new Uri(addon.Url) };
+                    link.RequestNavigate += (_, e) =>
+                    {
+                        try
+                        {
+                            System.Diagnostics.Process.Start(new ProcessStartInfo(e.Uri.AbsoluteUri)
+                                { UseShellExecute = true });
+                        }
+                        catch (Exception ex) { Debug.WriteLine("[D2] add-on link failed: " + ex.Message); }
+                        e.Handled = true;
+                    };
+                    advice.Inlines.Add(link);
+                    row.Children.Add(advice);
+                }
+                addonList.Children.Add(row);
+            }
+        }
+        RebuildAddonRows();
+
+        var recheckBtn = new Button
+        {
+            Content             = "⟳  Check again",
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Padding             = new Thickness(10, 6, 10, 6),
+            Background          = new SolidColorBrush(Color.FromRgb(0x1A, 0x1E, 0x30)),
+            Foreground          = fg,
+            BorderBrush         = new SolidColorBrush(Color.FromRgb(0x2A, 0x30, 0x50)),
+            FontSize            = 12,
+            Cursor              = System.Windows.Input.Cursors.Hand,
+            Margin              = new Thickness(0, 0, 0, 16),
+        };
+        recheckBtn.Click += (_, _) => RebuildAddonRows();
+        panel.Children.Add(recheckBtn);
+
         // --- Section: Launch options ---
         panel.Children.Add(new TextBlock
         {
@@ -2459,6 +2633,19 @@ public sealed class D2Plugin : IGamePlugin
             FontSize = 11, Foreground = muted, TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 0, 0, 8),
         });
+        // The settings file is ours and always present, so these controls work
+        // whether or not D2GL is installed. Say so, rather than let someone
+        // change a setting and wonder why the game looks identical.
+        if (!DetectOptionalAddons().Any(a => a.Name == "D2GL" && a.Installed))
+        {
+            panel.Children.Add(new TextBlock
+            {
+                Text = "D2GL is not installed, so these settings have nothing to apply to yet. " +
+                       "They are saved and take effect the moment you install it.",
+                FontSize = 11, Foreground = new SolidColorBrush(Color.FromRgb(0xD8, 0xA8, 0x3C)),
+                TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 8),
+            });
+        }
         var gfxBtn = new Button
         {
             Content             = "🖵  Graphics settings…",
@@ -3004,14 +3191,27 @@ public sealed class D2Plugin : IGamePlugin
         }
         catch { /* non-fatal — stale rooms at worst */ }
 
-        // -3dfx selects the Glide renderer, which is what D2GL (glide3x.dll)
-        // hooks to provide the HD graphics.
-        // DirectDraw and D2GL never activates (no HD).
+        // -3dfx asks Diablo II for the Glide renderer, which only exists
+        // because D2GL supplies glide3x.dll. D2GL is GPL-3.0 and is no
+        // longer distributed with this mod -- the player installs it
+        // themselves from its author (see README.md) -- so the file may
+        // simply not be there. Asking for Glide without it leaves the game
+        // unable to start at all, with nothing on screen to explain why.
+        //
+        // So look before asking: with glide3x.dll present the renderer is
+        // Glide as before, and without it the game falls back to its own
+        // DirectDraw and still runs -- just without the HD presentation.
+        bool haveGlide = File.Exists(Path.Combine(GameDirectory, "glide3x.dll"));
+        string renderer = haveGlide ? "-3dfx " : string.Empty;
+        Debug.WriteLine(haveGlide
+            ? "[D2] Renderer: Glide (glide3x.dll found - D2GL is installed)"
+            : "[D2] Renderer: DirectDraw (no glide3x.dll - install D2GL for HD)");
+
         string extraArgs = BuildExtraLaunchArgs();
         var psi = new ProcessStartInfo
         {
             FileName         = bootstrap,
-            Arguments        = $"-3dfx -direct -txt{extraArgs}",
+            Arguments        = $"{renderer}-direct -txt{extraArgs}",
             WorkingDirectory = GameDirectory,
             UseShellExecute  = false,
             CreateNoWindow   = true,

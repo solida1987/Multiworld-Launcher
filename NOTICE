@@ -8,17 +8,14 @@ SCOPE
 -----
 The Apache License covers this project's own source code and assets only.
 
-This project is distributed together with several independent open-source
-components, each of which remains under its own licence and copyright. Those
-components are NOT licensed under the Apache License, and nothing in LICENSE
-grants any right over them:
+This project is distributed together with a small number of independent
+open-source components, each of which remains under its own licence and
+copyright. Those components are NOT licensed under the Apache License, and
+nothing in LICENSE grants any right over them:
 
   D2.Detours ............ MIT              (c) 2017 Lectem
   D2MOO ................. MIT              (c) 2020-2025 The Phrozen Keep community
   cnc-ddraw ............. MIT              (c) 2025 github.com/FunkyFr3sh
-  d2gl .................. GPL-3.0          (c) Bayaraa
-  SGD2FreeRes ........... AGPL-3.0-or-later (c) 2019-2024 Mir Drualga
-  DSOAL ................. LGPL-2.1         (c) Chris Robinson (kcat)
   SFmpqapi .............. BSD 2-clause     (c) 2002-2010 ShadowFlare
 
 The launcher's logo is likewise NOT covered by the Apache License. It is an
@@ -37,8 +34,22 @@ its author and its source -- in THIRD-PARTY-NOTICES.md. The complete text of
 every licence is in the licenses/ directory.
 
 Anyone redistributing this package must keep this file, THIRD-PARTY-NOTICES.md,
-the licenses/ directory and the components' own copyright notices intact, and
-must pass on the source availability that the GPL, AGPL and LGPL require.
+the licenses/ directory and the components' own copyright notices intact.
+
+NOT DISTRIBUTED WITH THIS PACKAGE
+---------------------------------
+Earlier versions of the Diablo II Archipelago package also contained d2gl
+(GPL-3.0), SlashGaming Diablo II Free Resolution (AGPL-3.0-or-later) and DSOAL
+(LGPL-2.1). Bundling them was a mistake: distributing a copyleft program in the
+same package as this one raises obligations that this project cannot honour,
+and the question of how far those obligations reach is not one to settle by
+guessing.
+
+They are optional graphics and sound add-ons, not part of the mod. They are no
+longer distributed, and the launcher does not download them. The game's README
+explains what each one does, where to download it from its own author, and how
+to install it -- the same way the player already supplies their own copy of
+Diablo II. The game runs without them.
 
 BLIZZARD ENTERTAINMENT
 ----------------------

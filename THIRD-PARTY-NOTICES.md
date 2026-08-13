@@ -1,6 +1,6 @@
 # Third-party notices
 
-Diablo II Archipelago is assembled from its own code plus several independent
+Diablo II Archipelago is assembled from its own code plus a few independent
 open-source projects. This file lists every one of them: what it does, which
 files it provides, who wrote it, and under what licence. The full licence text
 of each is in [`licenses/`](licenses/) so it can be read here without
@@ -13,7 +13,7 @@ only changes made to them, and the README for the 1.10f requirement.
 
 ---
 
-## Components
+## Bundled components
 
 ### D2.Detours — MIT
 Loads a mod DLL into Diablo II and redirects the game's own functions to it.
@@ -35,38 +35,13 @@ its debugger.
 - **Licence:** [`licenses/D2MOO-MIT.txt`](licenses/D2MOO-MIT.txt)
 
 ### cnc-ddraw — MIT
-A DirectDraw wrapper that lets a 2003 game render correctly on modern Windows,
-with windowed mode and scaling.
+A DirectDraw wrapper that lets a 2003 game render correctly on modern Windows.
+Only its `winmm.dll` component is shipped.
 
-- **Files:** `ddraw.dll`, `ddraw.ini`, `winmm.dll`
+- **Files:** `winmm.dll`
 - **Copyright:** © 2025 github.com/FunkyFr3sh
 - **Source:** https://github.com/FunkyFr3sh/cnc-ddraw
 - **Licence:** [`licenses/cnc-ddraw-MIT.txt`](licenses/cnc-ddraw-MIT.txt)
-
-### d2gl — GPL-3.0
-A Glide-to-OpenGL renderer that provides the HD graphics option.
-
-- **Files:** `glide3x.dll`, `d2gl.mpq`, `d2gl.ini`, `d2gl.json`
-- **Copyright:** © Bayaraa
-- **Source:** https://github.com/bayaraa/d2gl
-- **Licence:** [`licenses/d2gl-GPL-3.0.txt`](licenses/d2gl-GPL-3.0.txt)
-
-### SlashGaming Diablo II Free Resolution (SGD2FreeRes) — AGPL-3.0-or-later
-Unlocks resolutions the original game does not offer.
-
-- **Files:** `SGD2FreeRes.dll`, `SGD2FreeRes.mpq`, `SGD2FreeResolution.json`
-- **Copyright:** © 2019–2024 Mir Drualga
-- **Source:** https://github.com/mir-diablo-ii-tools/SlashGaming-Diablo-II-Free-Resolution
-- **Licence:** [`licenses/SGD2FreeRes-AGPL-3.0.txt`](licenses/SGD2FreeRes-AGPL-3.0.txt)
-
-### DSOAL — LGPL-2.1
-Restores the hardware-accelerated 3D audio the original game was written for,
-through OpenAL. Shipped unmodified.
-
-- **Files:** `dsound.dll`, `dsoal-aldrv.dll`
-- **Copyright:** © Chris Robinson (kcat)
-- **Source:** https://github.com/kcat/dsoal
-- **Licence:** [`licenses/DSOAL-LGPL-2.1.txt`](licenses/DSOAL-LGPL-2.1.txt)
 
 ### SFmpqapi — BSD-style (2-clause)
 A library for reading and writing MPQ archives, used by the mod's tooling.
@@ -75,6 +50,47 @@ A library for reading and writing MPQ archives, used by the mod's tooling.
 - **Copyright:** © 2002–2010 ShadowFlare
 - **Source:** https://github.com/ShadowFlare/SFmpqapi
 - **Licence:** [`licenses/SFmpqapi-terms.txt`](licenses/SFmpqapi-terms.txt)
+
+---
+
+## Not distributed — installed by the player
+
+Three optional add-ons used to be included in this package. They no longer are.
+
+| Component | Licence | What it does |
+|---|---|---|
+| [d2gl](https://github.com/bayaraa/d2gl) | GPL-3.0 | Glide-to-OpenGL renderer — the HD graphics option |
+| [SGD2FreeRes](https://github.com/mir-diablo-ii-tools/SlashGaming-Diablo-II-Free-Resolution) | AGPL-3.0-or-later | Unlocks resolutions the original game does not offer |
+| [DSOAL](https://github.com/kcat/dsoal) | LGPL-2.1 | Restores the hardware-accelerated 3D audio the game was written for |
+
+Bundling them was a mistake, and it is worth being plain about why rather than
+quietly dropping them.
+
+Each of these is an independent program that Diablo II loads in its own right.
+None of them is linked into this project's code: the mod's own library,
+`D2Archipelago.dll`, imports only from the Windows system libraries
+`KERNEL32`, `USER32`, `ADVAPI32` and `XINPUT9_1_0`. That argument — that they
+are separate works merely shipped side by side — is a real one, and it is the
+argument this project was relying on.
+
+But it is an argument, not a fact, and the GPL family defines *propagation*
+broadly enough that reasonable people read the boundary differently. Putting a
+GPL-3.0 renderer, an AGPL-3.0 resolution patch and an LGPL-2.1 audio driver
+into the same download as this project asks a licence question that nobody
+here can answer with certainty, and the cost of being wrong falls on the
+people who wrote those components.
+
+So the question is no longer asked. They are add-ons, not part of the mod, and
+the mod runs without all three. The README explains what each does, links to
+its author's own releases, and describes where the files go — the same way the
+player already supplies their own copy of Diablo II. Downloading a program and
+running it on your own machine carries none of these obligations;
+redistributing it is what does.
+
+The settings files `d2gl.ini`, `d2gl.json` and `SGD2FreeResolution.json` are
+still included. Those are this project's own tuned configuration for those
+tools, not the tools themselves, and they simply sit unused until the matching
+component is installed.
 
 ---
 
@@ -109,22 +125,18 @@ International (CC BY-NC 4.0).
 - Neither Archipelago nor the original artists endorse, sponsor or are
   affiliated with this launcher.
 
-## How these components relate to this project's own code
+---
 
-The mod's own library, `D2Archipelago.dll`, imports only from the Windows
-system libraries `KERNEL32`, `USER32`, `ADVAPI32` and `XINPUT9_1_0`. It does
-not link against d2gl, SGD2FreeRes, DSOAL or any other component listed above.
+## How the bundled components relate to this project's own code
 
-Each of those is an independent program that Diablo II loads in its own right —
-a renderer, an audio driver, a resolution patch — and each keeps its own
-licence. They are distributed alongside this project rather than built into it,
-and the licence on this project's own code applies only to that code, never to
-them.
+The four components listed under **Bundled components** are all under
+permissive licences (MIT and BSD 2-clause) that impose no condition beyond
+keeping the copyright notice and licence text — which this file and the
+`licenses/` directory do.
 
 Anyone redistributing this package must keep this file, the `licenses/` folder,
-and the components' own copyright notices intact, and must pass on the source
-availability the GPL, AGPL and LGPL require. The source of every component is
-linked above.
+and the components' own copyright notices intact. The source of every component
+is linked above.
 
 ---
 
