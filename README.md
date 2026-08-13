@@ -81,3 +81,33 @@ The logo is therefore **not** covered by this project's Apache-2.0 licence.
 CC BY-NC 4.0 permits non-commercial use only, and this launcher is free: no
 payment, subscription, advertising or paid tier. Neither Archipelago nor the
 original artists endorse or are affiliated with this project.
+
+## AI Usage Disclosure
+
+AI-assisted tools are used throughout parts of this project as productivity
+tools.
+
+This includes, but is not limited to:
+
+- Artwork and other visual assets
+- Translation between Danish and English
+- Discord messages and community communication
+- Patch notes, documentation and release notes
+- Source-code comments and other explanatory text
+- General text editing, rewriting and formatting
+
+AI tools may also be used as part of the overall development workflow.
+Regardless of what tools are used during development, I remain responsible for
+the project, its implementation, testing, releases and any code that is
+distributed.
+
+My native language is Danish, so AI is particularly useful for quickly
+converting what I want to say into readable English instead of spending a large
+amount of development time translating and rewriting everything manually.
+
+AI-generated or AI-assisted visual assets may also be used where appropriate. I
+am not an artist, and these tools allow me to create artwork for areas of the
+project that would otherwise have little or no custom artwork.
+
+This disclosure is here so there is no ambiguity about the use of AI-assisted
+tools in the project.

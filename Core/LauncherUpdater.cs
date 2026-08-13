@@ -28,6 +28,32 @@ namespace LauncherV2.Core;
 
 public sealed class LauncherUpdater
 {
+    // --- Step log ---
+
+    // Every stage of an update writes one line here. This exists because
+    // an update once failed on a tester's machine and left nothing behind
+    // to say why: the package downloaded, the hash verified, the archive
+    // extracted and the script was written -- and then nothing happened,
+    // with the launcher still on the old version. Every step could be
+    // reproduced by hand afterwards, which is the least useful kind of
+    // evidence. The batch script only ever recorded one failure mode, and
+    // App.xaml.cs swallowed every exception without a word.
+    private static readonly string LogPath = Path.Combine(
+        Path.GetTempPath(), "multiworld_launcher_update.log");
+
+    private static void Step(string message)
+    {
+        try
+        {
+            File.AppendAllText(LogPath,
+                $"{DateTime.Now:yyyy-MM-dd HH:mm:ss}  {message}{Environment.NewLine}");
+        }
+        catch { /* logging must never break the update */ }
+    }
+
+    // Public so the caller can record why it gave up.
+    public static void LogStep(string message) => Step(message);
+
     // --- Configuration ---
 
     // URL of the remote launcher_version.txt (two lines: version + sha256).
@@ -108,6 +134,12 @@ public sealed class LauncherUpdater
         string zipPath = Path.Combine(tempDir, "launcher_package.zip");
 
         // --- Download ---
+        Step($"update {CurrentVersion} -> {LatestVersion}: starting download");
+
+        // HttpClient.Timeout covers getting the response headers, not
+        // reading the body, so a connection that stalls mid-download waits
+        // forever and the splash sits on a frozen percentage with nothing
+        // to cancel it. Give each read its own deadline instead.
         using (var http = new HttpClient())
         {
             http.DefaultRequestHeaders.UserAgent.ParseAdd("ArchipelagoLauncher/2");
@@ -122,14 +154,28 @@ public sealed class LauncherUpdater
             byte[] buf      = new byte[81920];
             long   received = 0;
             int    read;
-            while ((read = await src.ReadAsync(buf, ct)) > 0)
+            while (true)
             {
+                using var stall = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                stall.CancelAfter(TimeSpan.FromSeconds(60));
+                try { read = await src.ReadAsync(buf, stall.Token); }
+                catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                {
+                    Step($"download STALLED after {received:N0} of {total} bytes");
+                    throw new IOException(
+                        "The download stopped responding. Check your connection "
+                        + "and try the update again.");
+                }
+                if (read <= 0) break;
+
                 await dest.WriteAsync(buf.AsMemory(0, read), ct);
                 received += read;
                 if (total.HasValue && total.Value > 0)
                     DownloadProgress?.Invoke((int)(received * 100 / total.Value));
             }
+
             DownloadProgress?.Invoke(100);
+            Step($"download complete: {received:N0} bytes");
         }
 
         // --- SHA256 verify ---
@@ -141,6 +187,7 @@ public sealed class LauncherUpdater
                 "No update checksum is available — run the update check again, "
                 + "then retry the install.");
         string actualHash = ComputeSha256(zipPath);
+        Step("sha256 verified");
         if (!actualHash.Equals(LatestSha256, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException(
                 $"SHA256 mismatch — download may be corrupt.\n" +
@@ -151,6 +198,7 @@ public sealed class LauncherUpdater
         string extractDir = Path.Combine(tempDir, "extracted");
         if (Directory.Exists(extractDir)) Directory.Delete(extractDir, true);
         ZipFile.ExtractToDirectory(zipPath, extractDir);
+        Step("archive extracted");
 
         string currentExe = System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName
                             ?? Path.Combine(AppContext.BaseDirectory, "Multiworld Launcher.exe");
@@ -184,12 +232,27 @@ public sealed class LauncherUpdater
         await File.WriteAllTextAsync(batPath, batContent, Encoding.ASCII, ct);
 
         // --- Launch script and exit ---
-        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+        Step($"launching update script: {batPath}");
+        try
         {
-            FileName        = batPath,
-            UseShellExecute = true,
-            WindowStyle     = System.Diagnostics.ProcessWindowStyle.Minimized,
-        });
+            var proc = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName        = batPath,
+                UseShellExecute = true,
+                WindowStyle     = System.Diagnostics.ProcessWindowStyle.Minimized,
+            });
+            Step(proc == null
+                ? "update script did NOT start (Process.Start returned null)"
+                : $"update script started, pid {proc.Id}");
+        }
+        catch (Exception ex)
+        {
+            // Do not shut down over a script that never started -- that
+            // would close the launcher and leave the user on the old
+            // version with no window and no explanation.
+            Step($"update script FAILED to start: {ex.GetType().Name}: {ex.Message}");
+            throw;
+        }
 
         // Exit the application — the batch script will restart it.
         // Shutdown() must run on the dispatcher thread; this method may be
