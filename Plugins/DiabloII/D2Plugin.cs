@@ -2430,92 +2430,183 @@ public sealed class D2Plugin : IGamePlugin
         }
     }
 
-    /// <summary>Null when nothing needs saying, otherwise the note to show.</summary>
-    public string? DiscProtectionNotice()
-    {
-        if (string.IsNullOrEmpty(GameDirectory)) return null;
-        string exe = Path.Combine(GameDirectory, "Game.exe");
-        if (!File.Exists(exe) || !HasDiscProtection(exe)) return null;
-        return "Your Game.exe is the original disc-protected build, so Diablo II " +
-               "will ask for the CD when it starts. Keep your disc in the drive. " +
-               "This launcher does not modify Game.exe.";
-    }
 
     // --- Optional add-ons the player installs themselves ---
 
-    /// <summary>One optional component and what we can see of it on disk.</summary>
-    /// <param name="Installed">Its files are in the game folder.</param>
-    /// <param name="Active">Installed AND able to actually do anything. These
-    /// differ for SGD2FreeRes, which nothing in this mod loads — D2GL does,
-    /// through <c>load_dlls_late</c> in d2gl.ini. Present without D2GL it just
-    /// sits there, and reporting that as "installed" would send someone hunting
-    /// for a bug that is really a missing second download.</param>
-    public readonly record struct OptionalAddon(
-        string Name, string Adds, string Url,
-        bool Installed, bool Active, string Status, string? Advice);
+    /// <summary>Is a CD/DVD drive ready — a real disc or a mounted image?</summary>
+    private static bool DiscPresent()
+    {
+        try
+        {
+            return DriveInfo.GetDrives().Any(d => d.DriveType == DriveType.CDRom && d.IsReady);
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine("[D2] drive scan failed: " + ex.Message);
+            return true;   // cannot tell: never block a launch on a failed check
+        }
+    }
 
-    // Marker files. Each is the file that has to be there for the component to
-    // do its job, not merely a file from the same download: glide3x.dll is what
-    // -3dfx loads, so its absence is exactly why we must not pass -3dfx.
-    private const string GlideMarker   = "glide3x.dll";
-    private const string FreeResMarker = "SGD2FreeRes.dll";
-    private const string DsoalMarker   = "dsound.dll";
+    /// <summary>How badly the game wants a component.</summary>
+    public enum AddonNeed
+    {
+        /// <summary>The game cannot start without it.</summary>
+        Required,
+        /// <summary>The game runs fine; this only makes it nicer.</summary>
+        Optional,
+    }
+
+    /// <summary>One component and what we can see of it on disk.</summary>
+    /// <param name="Installed">Its files are in the mod's game folder.</param>
+    /// <param name="Active">Installed AND able to do anything. The two differ
+    /// for SGD2FreeRes, which nothing in this mod loads -- D2GL does, through
+    /// load_dlls_late in d2gl.ini. Present without D2GL it just sits there, and
+    /// calling that "installed" sends someone hunting for a bug that is really
+    /// a missing second download.</param>
+    /// <param name="InOriginal">Not here, but present in the player's own
+    /// Diablo II folder, so we can bring it across instead of asking them to
+    /// download something they already own.</param>
+    public readonly record struct AddonStatus(
+        string Name, string Adds, string Url, AddonNeed Need,
+        bool Installed, bool Active, bool InOriginal,
+        string Status, string? Advice);
+
+    // The files that prove a component is there. First entry is the one that
+    // has to exist; the rest travel with it and are copied when found.
+    private static readonly (string Name, string[] Files)[] AddonFiles =
+    {
+        ("D2GL",        new[] { "glide3x.dll", "ddraw.dll", "d2gl.mpq" }),
+        ("SGD2FreeRes", new[] { "SGD2FreeRes.dll", "SGD2FreeRes.mpq" }),
+        ("DSOAL",       new[] { "dsound.dll", "dsoal-aldrv.dll", "alsoft.ini" }),
+    };
+
+    private bool InGameDir(string f) =>
+        !string.IsNullOrEmpty(GameDirectory) && File.Exists(Path.Combine(GameDirectory, f));
+
+    private bool InOriginalDir(string f) =>
+        !string.IsNullOrEmpty(OriginalD2Directory) &&
+        File.Exists(Path.Combine(OriginalD2Directory, f));
 
     /// <summary>
-    /// Look in the game folder and report which optional add-ons are there.
-    ///
-    /// Nothing is cached: the whole point is that the player drops files in
-    /// while the launcher is open, so every call re-reads the disk.
+    /// Copy a component across from the player's own Diablo II folder.
+    /// Anyone who has played 1.10 on a modern machine probably already has
+    /// some of these; asking them to download what they own is pointless.
     /// </summary>
-    public IReadOnlyList<OptionalAddon> DetectOptionalAddons()
+    public bool TryAdoptFromOriginal(string addonName)
     {
-        bool Has(string file) =>
-            !string.IsNullOrEmpty(GameDirectory) &&
-            File.Exists(Path.Combine(GameDirectory, file));
+        var entry = AddonFiles.FirstOrDefault(a => a.Name == addonName);
+        if (entry.Files == null || string.IsNullOrEmpty(OriginalD2Directory)) return false;
+        if (!InOriginalDir(entry.Files[0])) return false;
 
-        bool glide   = Has(GlideMarker);
-        bool freeRes = Has(FreeResMarker);
-        bool dsoal   = Has(DsoalMarker) && Has("dsoal-aldrv.dll");
-
-        var list = new List<OptionalAddon>
+        bool any = false;
+        try
         {
-            new("D2GL", "HD rendering, widescreen, filtering, higher frame rates",
-                "https://github.com/bayaraa/d2gl",
-                glide, glide,
-                glide ? "Installed — the game launches with the Glide renderer"
-                      : "Not installed — the game runs on DirectDraw at the original size",
-                glide ? null
-                      : "Download it and copy its files into the game folder."),
+            Directory.CreateDirectory(GameDirectory);
+            foreach (string f in entry.Files)
+            {
+                string src = Path.Combine(OriginalD2Directory, f);
+                string dst = Path.Combine(GameDirectory, f);
+                if (File.Exists(src) && !File.Exists(dst))
+                {
+                    File.Copy(src, dst);
+                    any = true;
+                }
+            }
+            if (any) Debug.WriteLine("[D2] " + addonName + " adopted from the player's own D2 folder");
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine("[D2] could not adopt " + addonName + ": " + ex.Message);
+        }
+        return any;
+    }
 
-            new("SGD2FreeRes", "Unlocks resolutions the original game does not offer",
-                "https://github.com/mir-diablo-ii-tools/SlashGaming-Diablo-II-Free-Resolution",
-                freeRes, freeRes && glide,
-                !freeRes ? "Not installed — original resolution only"
-                : glide  ? "Installed"
-                         : "Installed but inactive — nothing is loading it",
-                !freeRes ? "Download it and copy its files into the game folder."
-                : glide  ? null
-                         : "D2GL is what loads SGD2FreeRes. Install D2GL as well and this starts working."),
+    /// <summary>
+    /// Every component, required first. Nothing is cached -- the whole point is
+    /// that the player drops files in while the launcher is open.
+    /// </summary>
+    public IReadOnlyList<AddonStatus> DetectAddons()
+    {
+        var list = new List<AddonStatus>();
 
-            new("DSOAL", "Restores the original 3D positional audio",
-                "https://github.com/kcat/dsoal",
-                dsoal, dsoal,
-                dsoal ? "Installed" : "Not installed — standard audio",
-                dsoal ? null
-                      : "Download it and copy its files into the game folder."),
-        };
+        // Required: something has to stand in for DirectDraw. Either cnc-ddraw's
+        // ddraw.dll or D2GL's -- both are wrappers, so either satisfies this.
+        bool renderer = InGameDir(RendererFile);
+        bool rendererInOriginal = !renderer && InOriginalDir(RendererFile);
+        list.Add(new AddonStatus(
+            "DirectDraw wrapper",
+            "Required — the 1.10f engine cannot open a window on modern Windows without one",
+            RendererDownloadUrl, AddonNeed.Required,
+            renderer, renderer, rendererInOriginal,
+            renderer        ? "Installed"
+          : rendererInOriginal ? "Found in your own Diablo II folder — will be copied across"
+                          : "MISSING — the game cannot start",
+            renderer ? null
+                     : "Install cnc-ddraw, or D2GL below (its ddraw.dll is a wrapper too)."));
+
+        // The disc. Only asked when the player's own Game.exe still carries its
+        // copy protection -- if theirs does not, the question never arises and
+        // the badge is simply green. A mounted ISO shows up as a CD-ROM drive
+        // exactly like a physical disc, so both count.
+        string exe = string.IsNullOrEmpty(GameDirectory)
+            ? "" : Path.Combine(GameDirectory, "Game.exe");
+        bool needsDisc = !string.IsNullOrEmpty(exe) && File.Exists(exe) && HasDiscProtection(exe);
+        bool discReady = !needsDisc || DiscPresent();
+        list.Add(new AddonStatus(
+            "Game disc", "Diablo II asks for the disc when the executable is disc-protected",
+            "", AddonNeed.Required,
+            discReady, discReady, false,
+            !needsDisc  ? "Not needed"
+          : discReady   ? "Disc detected"
+                        : "MISSING — put your Diablo II disc in the drive, or mount the image",
+            discReady ? null
+                      : "Your Game.exe is the original disc-protected build, so Diablo II "
+                      + "will ask for the CD. Insert the disc or mount your image and press Play again."));
+
+        bool glide = InGameDir("glide3x.dll");
+        list.Add(new AddonStatus(
+            "D2GL", "HD rendering, widescreen, higher frame rates",
+            "https://github.com/bayaraa/d2gl/releases/latest", AddonNeed.Optional,
+            glide, glide, !glide && InOriginalDir("glide3x.dll"),
+            glide ? "Installed" : "Not installed — original size, no HD",
+            glide ? null : "Copy glide3x.dll, ddraw.dll and d2gl.mpq into the game folder."));
+
+        bool free = InGameDir("SGD2FreeRes.dll");
+        list.Add(new AddonStatus(
+            "SGD2FreeRes", "Unlocks resolutions the original game does not offer",
+            "https://github.com/mir-diablo-ii-tools/SlashGaming-Diablo-II-Free-Resolution/releases/latest",
+            AddonNeed.Optional, free, free && glide, !free && InOriginalDir("SGD2FreeRes.dll"),
+            !free ? "Not installed — original resolution only"
+          : glide ? "Installed"
+                  : "Installed but inactive — nothing is loading it",
+            !free ? "Take the \"Vanilla\" download, not \"Modders\"."
+          : glide ? null
+                  : "D2GL is what loads it. Install D2GL as well."));
+
+        bool dsoal = InGameDir("dsound.dll") && InGameDir("dsoal-aldrv.dll");
+        list.Add(new AddonStatus(
+            "DSOAL", "Restores the original 3D positional audio",
+            "https://github.com/kcat/dsoal/releases/latest", AddonNeed.Optional,
+            dsoal, dsoal, !dsoal && InOriginalDir("dsound.dll"),
+            dsoal ? "Installed" : "Not installed — standard audio",
+            dsoal ? null : "Both dsound.dll and dsoal-aldrv.dll are needed, from the Win32 folder."));
+
         return list;
     }
 
-    /// <summary>One line per add-on, for the Play tab log at launch.</summary>
-    public IEnumerable<string> DescribeOptionalAddons()
+    /// <summary>Bring across anything the player already has, then report.</summary>
+    public IReadOnlyList<AddonStatus> DetectAddonsAdopting()
     {
-        foreach (var a in DetectOptionalAddons())
-        {
-            string mark = a.Active ? "installed" : a.Installed ? "inactive " : "not found";
-            yield return $"   [{mark}]  {a.Name,-12} {a.Status}";
-        }
+        if (!InGameDir(RendererFile)) TryAdoptRendererFromOriginal();
+        foreach (var (name, files) in AddonFiles)
+            if (!InGameDir(files[0])) TryAdoptFromOriginal(name);
+        return DetectAddons();
     }
+
+    /// <summary>True when something Required is missing — Play must be blocked.</summary>
+    public bool MissingRequirement =>
+        DetectAddons().Any(a => a.Need == AddonNeed.Required && !a.Active);
+
 
     // --- Settings UI ---
 
@@ -2655,7 +2746,7 @@ public sealed class D2Plugin : IGamePlugin
         void RebuildAddonRows()
         {
             addonList.Children.Clear();
-            foreach (var addon in DetectOptionalAddons())
+            foreach (var addon in DetectAddons())
             {
                 var okBrush   = new SolidColorBrush(Color.FromRgb(0x5C, 0xC8, 0x7A));
                 var warnBrush = new SolidColorBrush(Color.FromRgb(0xD8, 0xA8, 0x3C));
@@ -2773,7 +2864,7 @@ public sealed class D2Plugin : IGamePlugin
         // The settings file is ours and always present, so these controls work
         // whether or not D2GL is installed. Say so, rather than let someone
         // change a setting and wonder why the game looks identical.
-        if (!DetectOptionalAddons().Any(a => a.Name == "D2GL" && a.Installed))
+        if (!DetectAddons().Any(a => a.Name == "D2GL" && a.Installed))
         {
             panel.Children.Add(new TextBlock
             {

@@ -1644,27 +1644,36 @@ public partial class MainWindow : Window
             }
         }
 
-        // --- Optional add-ons (Diablo II only) ---
-        // These are not shipped with the mod and are not the launcher's to
-        // install, so they never belong in `requirementsMet` — the game is
-        // ready to play without them. They get their own quiet badge purely so
-        // "did my install work?" has an answer somewhere visible.
+        // --- Component badges (Diablo II only) ---
+        //
+        // One badge per component, coloured by what it means for the player:
+        //   green  it is there
+        //   amber  missing, but the game runs anyway
+        //   red    missing, and the game will not start
+        //
+        // Anything already sitting in the player's own Diablo II folder is
+        // copied across first, so they are never asked to download what they
+        // already own.
         if (plugin is Plugins.DiabloII.D2Plugin d2Addons && plugin.IsInstalled)
         {
-            var addons = d2Addons.DetectOptionalAddons();
-            var active = addons.Where(a => a.Active).Select(a => a.Name).ToList();
-            AddOverviewBadge(
-                active.Count > 0
-                    ? "ADD-ONS: " + string.Join(", ", active).ToUpperInvariant()
-                    : "NO OPTIONAL ADD-ONS",
-                Color.FromRgb(0x8A, 0x90, 0xA8),
-                active.Count > 0
-                    ? "Optional components found in the game folder. You installed these; the launcher only detects them."
-                    : "D2GL, SGD2FreeRes and DSOAL are not installed. The game runs fine without them — see Settings for what they add.");
+            foreach (var a in d2Addons.DetectAddonsAdopting())
+            {
+                bool ok = a.Active;
+                bool blocking = !ok && a.Need == Plugins.DiabloII.D2Plugin.AddonNeed.Required;
 
-            foreach (var stuck in addons.Where(a => a.Installed && !a.Active))
-                AddOverviewBadge(stuck.Name.ToUpperInvariant() + " INACTIVE",
-                    Color.FromRgb(0xF5, 0x9E, 0x0B), stuck.Advice);
+                Color tint = ok       ? Color.FromRgb(0x22, 0xC5, 0x5E)   // green
+                           : blocking ? Color.FromRgb(0xEF, 0x44, 0x44)   // red
+                                      : Color.FromRgb(0xF5, 0x9E, 0x0B);  // amber
+
+                string mark  = ok ? "✓" : blocking ? "✕" : "!";
+                string label = mark + " " + a.Name.ToUpperInvariant();
+
+                string tip = a.Status;
+                if (a.Advice != null) tip += Environment.NewLine + Environment.NewLine + a.Advice;
+                if (a.Url.Length > 0) tip += Environment.NewLine + a.Url;
+
+                AddOverviewBadge(label, tint, tip);
+            }
         }
 
         // --- Action bar ---
@@ -1908,6 +1917,34 @@ public partial class MainWindow : Window
         BtnOverviewStandalone.IsEnabled = BtnStandalone.IsEnabled;
         BtnOverviewStandalone.ToolTip   = BtnStandalone.ToolTip
             ?? "Launch the game without an Archipelago connection";
+
+        // A missing requirement takes both buttons out of service and says so
+        // on the button itself. Letting someone press Play and then explaining
+        // in a dialog is a worse way to learn the same thing.
+        if (_selectedPlugin is Plugins.DiabloII.D2Plugin d2Req && _selectedPlugin.IsInstalled)
+        {
+            var blockers = d2Req.DetectAddons()
+                .Where(a => a.Need == Plugins.DiabloII.D2Plugin.AddonNeed.Required && !a.Active)
+                .ToList();
+            if (blockers.Count > 0)
+            {
+                string why = "Cannot launch — " + string.Join(", ", blockers.Select(b => b.Name))
+                           + Environment.NewLine + Environment.NewLine
+                           + string.Join(Environment.NewLine + Environment.NewLine,
+                                         blockers.Select(b => b.Name + ": " + b.Status
+                                             + (b.Advice != null ? Environment.NewLine + b.Advice : "")));
+                var red   = new SolidColorBrush(Color.FromRgb(0xEF, 0x44, 0x44));
+                var faint = new SolidColorBrush(Color.FromArgb(0x33, 0xEF, 0x44, 0x44));
+                foreach (var b in new[] { BtnOverviewPlay, BtnOverviewStandalone, BtnPlay, BtnStandalone })
+                {
+                    b.IsEnabled   = false;
+                    b.ToolTip     = why;
+                    b.Background  = faint;
+                    b.BorderBrush = red;
+                    b.Foreground  = red;
+                }
+            }
+        }
 
         SyncUnbugButton();
     }
@@ -9131,31 +9168,21 @@ public partial class MainWindow : Window
     private bool RendererMissingBlocksLaunch(IGamePlugin plugin)
     {
         if (plugin is not Plugins.DiabloII.D2Plugin d2) return false;
-        string? blocker = d2.RendererBlocker();
-        if (blocker == null)
-        {
-            AppendLog("[Renderer] cnc-ddraw found.");
-            return false;
-        }
+        var blockers = d2.DetectAddonsAdopting()
+            .Where(a => a.Need == Plugins.DiabloII.D2Plugin.AddonNeed.Required && !a.Active)
+            .ToList();
+        if (blockers.Count == 0) return false;
 
-        AppendLog("[Renderer] MISSING — cnc-ddraw's ddraw.dll is not in the game folder.");
-        AppendLog("[Renderer] Get it from " + Plugins.DiabloII.D2Plugin.RendererDownloadUrl);
-        SetStatus("Cannot launch — DirectDraw wrapper missing");
-
-        var res = System.Windows.MessageBox.Show(
-            blocker + Environment.NewLine + Environment.NewLine + "Open the download page now?",
-            "Diablo II needs a DirectDraw wrapper",
-            System.Windows.MessageBoxButton.YesNo,
-            System.Windows.MessageBoxImage.Warning);
-        if (res == System.Windows.MessageBoxResult.Yes)
+        // No dialog. The badges on the Overview already say this in colour, the
+        // Play buttons are already disabled, and a modal box on top of that is
+        // just one more thing to dismiss.
+        foreach (var b in blockers)
         {
-            try
-            {
-                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(
-                    Plugins.DiabloII.D2Plugin.RendererDownloadUrl) { UseShellExecute = true });
-            }
-            catch (Exception ex) { AppendLog("[Renderer] could not open the page: " + ex.Message); }
+            AppendLog("[Blocked] " + b.Name + " — " + b.Status);
+            if (b.Advice != null) AppendLog("          " + b.Advice);
+            if (b.Url.Length > 0) AppendLog("          " + b.Url);
         }
+        SetStatus("Cannot launch — " + string.Join(", ", blockers.Select(b => b.Name)));
         return true;
     }
 
@@ -9164,16 +9191,11 @@ public partial class MainWindow : Window
         // The optional add-ons are installed by hand, so the one moment the
         // player can be told whether that worked is right here, next to the
         // install check they already read.
-        AppendLog("[Add-ons] Optional components (installed by you, not by the launcher):");
-        foreach (string line in d2.DescribeOptionalAddons())
-            AppendLog(line);
-
-        // A disc-protected Game.exe will stop and ask for the CD. Say so before
-        // it happens, so it reads as the game doing its thing rather than the
-        // mod failing.
-        string? disc = d2.DiscProtectionNotice();
-        if (disc != null)
-            AppendLog("[Disc] " + disc);
+        AppendLog("[Components] What the launcher can see:");
+        foreach (var a in d2.DetectAddonsAdopting())
+            AppendLog(String.Format("   [{0}]  {1,-20} {2}",
+                a.Active ? " ok " : a.Need == Plugins.DiabloII.D2Plugin.AddonNeed.Required ? "MISS" : " -- ",
+                a.Name, a.Status));
 
         List<Plugins.DiabloII.D2Plugin.InstallProblem>? problems;
         try { problems = await d2.ScanInstallProblemsAsync(ct); }
