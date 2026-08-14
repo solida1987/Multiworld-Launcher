@@ -1902,6 +1902,15 @@ public partial class MainWindow : Window
     // Called from RefreshButtons (the single button-semantics authority),
     // from RefreshOverview, and after every direct BtnPlay mutation on the
     // launch/stop paths.
+    // The refusal text currently on the launch buttons, so the next pass can
+    // tell its own tooltip from one RefreshButtons put there.
+    private string? _launchBlockReason;
+
+    // What each launch button's IsEnabled was before a missing requirement
+    // switched it off, so unblocking restores the state machine's answer
+    // instead of guessing "true".
+    private readonly Dictionary<Button, bool> _enabledBeforeBlock = new();
+
     private void SyncOverviewPlayButton()
     {
         string label = BtnPlay.Content as string ?? "Play";
@@ -1921,30 +1930,55 @@ public partial class MainWindow : Window
         // A missing requirement takes both buttons out of service and says so
         // on the button itself. Letting someone press Play and then explaining
         // in a dialog is a worse way to learn the same thing.
+        //
+        // The red is carried by Tag="blocked", which both button templates
+        // answer (§ styles at the top of the XAML) — not by local brushes.
+        // Local brushes lose: BtnPlayStyle's disabled trigger repaints its
+        // border by name, so a locally-set Background never reaches the screen.
+        // Clearing the Tag has to happen on every pass, or the buttons stay red
+        // after the player drops the missing file in and presses Check again.
+        string? why = null;
         if (_selectedPlugin is Plugins.DiabloII.D2Plugin d2Req && _selectedPlugin.IsInstalled)
         {
             var blockers = d2Req.DetectAddons()
                 .Where(a => a.Need == Plugins.DiabloII.D2Plugin.AddonNeed.Required && !a.Active)
                 .ToList();
             if (blockers.Count > 0)
+                why = "Cannot launch — " + string.Join(", ", blockers.Select(b => b.Name))
+                    + Environment.NewLine + Environment.NewLine
+                    + string.Join(Environment.NewLine + Environment.NewLine,
+                                  blockers.Select(b => b.Name + ": " + b.Status
+                                      + (b.Advice != null ? Environment.NewLine + b.Advice : "")));
+        }
+
+        // Blocking has to be a loan, not a confiscation. RefreshButtons only
+        // ever sets IsEnabled=true on the "another game was running" path, so a
+        // button this branch switches off is off for the rest of the session
+        // unless we hand its state back ourselves.
+        foreach (var b in new[] { BtnOverviewPlay, BtnOverviewStandalone, BtnPlay, BtnStandalone })
+        {
+            bool wasBlocked = Equals(b.Tag, "blocked");
+            if (why != null)
             {
-                string why = "Cannot launch — " + string.Join(", ", blockers.Select(b => b.Name))
-                           + Environment.NewLine + Environment.NewLine
-                           + string.Join(Environment.NewLine + Environment.NewLine,
-                                         blockers.Select(b => b.Name + ": " + b.Status
-                                             + (b.Advice != null ? Environment.NewLine + b.Advice : "")));
-                var red   = new SolidColorBrush(Color.FromRgb(0xEF, 0x44, 0x44));
-                var faint = new SolidColorBrush(Color.FromArgb(0x33, 0xEF, 0x44, 0x44));
-                foreach (var b in new[] { BtnOverviewPlay, BtnOverviewStandalone, BtnPlay, BtnStandalone })
+                if (!wasBlocked) _enabledBeforeBlock[b] = b.IsEnabled;
+                b.IsEnabled = false;
+                b.ToolTip   = why;
+                b.Tag       = "blocked";
+            }
+            else if (wasBlocked)
+            {
+                b.ClearValue(TagProperty);
+                if (_enabledBeforeBlock.TryGetValue(b, out bool was))
                 {
-                    b.IsEnabled   = false;
-                    b.ToolTip     = why;
-                    b.Background  = faint;
-                    b.BorderBrush = red;
-                    b.Foreground  = red;
+                    b.IsEnabled = was;
+                    _enabledBeforeBlock.Remove(b);
                 }
+                // Only drop the tooltip if it is still OUR refusal text —
+                // RefreshButtons may already have put a real hint there.
+                if (ReferenceEquals(b.ToolTip, _launchBlockReason)) b.ToolTip = null;
             }
         }
+        _launchBlockReason = why;
 
         SyncUnbugButton();
     }

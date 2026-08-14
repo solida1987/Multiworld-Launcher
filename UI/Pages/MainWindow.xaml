@@ -48,6 +48,14 @@
                                 <Setter TargetName="Bd" Property="Background" Value="#1A2040"/>
                                 <Setter Property="Foreground" Value="#3A4060"/>
                             </Trigger>
+                            <!-- "You cannot launch, and here is why" (§9). Last,
+                                 so it beats the plain disabled grey above; a
+                                 local Background cannot do this job because the
+                                 disabled trigger paints Bd by name. -->
+                            <Trigger Property="Tag" Value="blocked">
+                                <Setter TargetName="Bd" Property="Background" Value="#33EF4444"/>
+                                <Setter Property="Foreground" Value="#EF4444"/>
+                            </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
@@ -80,6 +88,13 @@
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="Bd" Property="Background" Value="#1A2040"/>
                                 <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource BrushAccent}"/>
+                            </Trigger>
+                            <!-- Same blocked state as BtnPlayStyle, so the two
+                                 launch buttons read as one refusal. -->
+                            <Trigger Property="Tag" Value="blocked">
+                                <Setter TargetName="Bd" Property="Background" Value="#33EF4444"/>
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="#EF4444"/>
+                                <Setter Property="Foreground" Value="#EF4444"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
