@@ -10,7 +10,22 @@ application and its plugin system. It does not host, list, index or link to
 plugins, and it never downloads one for you.
 
 There is no catalogue here to browse and no list of games to choose from. This
-launcher runs the integrations you add to it, and nothing else.
+launcher runs the integrations it supports, plus whatever plugins you add
+yourself.
+
+## Supported games
+
+**Diablo II Archipelago** — [stable](https://github.com/solida1987/Diablo-II-Archipelago)
+and [experimental](https://github.com/solida1987/Diablo-II-Archipelago-experimental).
+
+Supported means the launcher and the integration are built together and
+released together, and that the launcher carries whatever code that integration
+needs. It also means the dependency runs both ways: that mod is built for this
+launcher and does not work without it.
+
+That list is mine to decide, because I write both halves. Anything else reaches
+the launcher as a plugin, on the terms below — and a plugin is not endorsed,
+supported or vouched for by this project.
 
 ---
 
