@@ -9,9 +9,8 @@ launcher loads at runtime. This repository is the launcher — the host
 application and its plugin system. It does not host, list, index or link to
 plugins, and it never downloads one for you.
 
-If you are looking for a launcher that offers a catalogue of Archipelago games,
-use the official Archipelago Launcher instead. This is a smaller thing: a host
-for integrations you already have.
+There is no catalogue here to browse and no list of games to choose from. This
+launcher runs the integrations you add to it, and nothing else.
 
 ---
 
