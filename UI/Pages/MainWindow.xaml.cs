@@ -691,7 +691,7 @@ public partial class MainWindow : Window
 
         RefreshGameNotice(plugin);
 
-        // --- ROMs tab: emulated games only (D2 / OpenTTD have no patched-ROM
+        // --- ROMs tab: emulated games only (other integrations have no patched-ROM
         // library). Toggle the tab button + populate its list. ---
         if (plugin is Plugins.Emulated.EmulatorPlugin romPlugin)
         {
@@ -727,7 +727,7 @@ public partial class MainWindow : Window
 
     // Persistent Play-tab banner for games with a launch-time gotcha the
     // player must know BEFORE sitting in a session wondering what is wrong:
-    // · ConnectsItself games (OpenTTD fork) are joined from inside the game —
+    // · ConnectsItself games are joined from inside the game —
     // the launcher only pre-fills credentials (UX-7).
     // · Emulated games whose RAM address map is unverified run fine but can
     // never send a check (UX-6) — the launch-time toast alone was missable.
@@ -3495,6 +3495,35 @@ public partial class MainWindow : Window
     }
 
     // Browse / Catalog
+
+    // "Add plugin" — the player picks a .londonplugin they downloaded
+    // themselves. Everything that matters happens in PluginInstallFlow, in the
+    // one order that is safe: inspect without running anything, ask, install,
+    // record the hash, load. This method only picks the file and reports back.
+    private void BtnAddPlugin_Click(object sender, RoutedEventArgs e)
+    {
+        var dlg = new Microsoft.Win32.OpenFileDialog
+        {
+            Title  = "Add plugin",
+            Filter = "Launcher game plugin (*.londonplugin)|*.londonplugin|All files (*.*)|*.*",
+            CheckFileExists = true,
+        };
+        if (dlg.ShowDialog(this) != true) return;
+
+        var result = Core.Plugins.PluginInstallFlow.AddFromFile(this, dlg.FileName);
+
+        // A cancelled consent dialog says nothing — the player just declined.
+        if (result.Message != null)
+        {
+            AppendLog("[Plugin] " + result.Message.Replace(Environment.NewLine, " "));
+            MessageBox.Show(this, result.Message,
+                result.Added ? "Plugin added" : "Plugin not added",
+                MessageBoxButton.OK,
+                result.Added ? MessageBoxImage.Information : MessageBoxImage.Warning);
+        }
+
+        if (result.Added) RebuildGameList();
+    }
 
     private async void BtnBrowse_Click(object sender, RoutedEventArgs e)
     {
@@ -8422,9 +8451,14 @@ public partial class MainWindow : Window
         ap.SessionConnected += (_, _) => Dispatcher.Invoke(() =>
         {
             if (_apClient != ap) return;
-            if ((_runningPlugin ?? _selectedPlugin) is Plugins.DiabloII.D2Plugin d2Sd &&
-                ap.SlotData is JsonElement sd)
-                d2Sd.WriteApSettingsFile(sd);
+            if (ap.SlotData is JsonElement sd)
+            {
+                if ((_runningPlugin ?? _selectedPlugin) is Plugins.DiabloII.D2Plugin d2Sd)
+                    d2Sd.WriteApSettingsFile(sd);
+                // The same hand-off for plugins, which the launcher cannot
+                // reach by a type check: it does not reference them.
+                (_runningPlugin ?? _selectedPlugin)?.OnSlotData(sd);
+            }
 
             // ── Upstream-update detector (§15): warn when the server's
             // datapackage checksum for this game differs from the one our
@@ -8482,6 +8516,12 @@ public partial class MainWindow : Window
                     foreach (var kv in items) _dpItemNames[kv.Key]     = kv.Value;
                     foreach (var kv in locs)  _dpLocationNames[kv.Key] = kv.Value;
                     _dpNamesReady = true;
+                    // A plugin that reports checks by name needs this table;
+                    // the launcher is the side that has it. Built-in games
+                    // report ids and ignore the call.
+                    var byName = new Dictionary<string, long>(locs.Count, StringComparer.Ordinal);
+                    foreach (var kv in locs) byName[kv.Value] = kv.Key;
+                    (_runningPlugin ?? _selectedPlugin)?.OnLocationTable(byName);
                 }
                 RenormalizeHints();                  // hints that arrived early
                 if (_dpNamesReady && _pendingHintBacklog is JsonElement parked)
@@ -8489,6 +8529,26 @@ public partial class MainWindow : Window
                     _pendingHintBacklog = null;
                     IngestHintBacklog(parked);
                 }
+            });
+        };
+
+        // ── Scout replies to a plugin that shows what a location holds ──────
+        // BeginInvoke, not a direct read: the tracker fills ItemName and
+        // ReceiverName from its own subscription to this same event, and
+        // handler order between the two is not something to rely on.
+        ap.LocationInfoReceived += _ =>
+        {
+            Dispatcher.BeginInvoke(() =>
+            {
+                if (_apClient != ap) return;
+                var plugin = _runningPlugin ?? _selectedPlugin;
+                if (plugin == null) return;
+
+                var labels = new Dictionary<long, string>();
+                foreach (var e in _locationTracker.GetAll())
+                    if (e.IsScouted)
+                        labels[e.LocationId] = $"{e.ReceiverName} — {e.ItemName}";
+                if (labels.Count > 0) plugin.OnLocationHints(labels);
             });
         };
 

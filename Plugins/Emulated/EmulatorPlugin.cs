@@ -536,7 +536,7 @@ public abstract class EmulatorPlugin : IGamePlugin
         // 4. Wait for the Lua connector to attach BOTH pipes, then start the
         //    bridge loop. If it never attaches (script disabled or errored
         //    inside BizHawk), give up after 60s — non-fatal: the game still
-        //    runs, just without AP sync (mirrors the OpenTTD plugin's
+        //    runs, just without AP sync (mirrors how a plugin that owns its
         //    connect-timeout pattern).
         Trace($"EmuHawk started (pid {emuProc.Id}) — waiting for connector");
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct, _pipeCts.Token);

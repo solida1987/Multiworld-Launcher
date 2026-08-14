@@ -59,13 +59,6 @@ public sealed class LauncherSettings
     [JsonPropertyName("defender_exclusions_done")]
     public bool DefenderExclusionsDone { get; set; } = false;
 
-    // Launch OpenTTD fullscreen (§12).
-    // into the [misc] section of the install's own data\openttd.cfg before
-    // each launch — OpenTTD has no Windows command-line fullscreen switch
-    // (-f is Unix-only dedicated-server forking).
-    [JsonPropertyName("openttd_fullscreen")]
-    public bool OpenTtdFullscreen { get; set; } = false;
-
     // Launch Ship of Harkinian fullscreen.
     // CVar into the install's own shipofharkinian.json before each launch
     // (the JSON CVar store next to soh.exe).

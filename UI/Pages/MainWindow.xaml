@@ -693,13 +693,18 @@
                                     Padding="0,7"
                                     HorizontalAlignment="Stretch"
                                     Click="BtnSession_Click"/>
-                            <Button x:Name="BtnBrowse"
+                            <!-- Loads a .londonplugin the player found and
+                                 downloaded themselves. The launcher hosts no
+                                 plugins and lists none; this button is the
+                                 whole distribution story. -->
+                            <Button x:Name="BtnAddPlugin"
                                     Grid.Column="2"
-                                    Content="Browse"
+                                    Content="Add plugin"
                                     Style="{StaticResource BtnSecondaryStyle}"
                                     Padding="0,7"
                                     HorizontalAlignment="Stretch"
-                                    Click="BtnBrowse_Click"/>
+                                    ToolTip="Load a game plugin file you downloaded (.londonplugin)"
+                                    Click="BtnAddPlugin_Click"/>
                             <Button x:Name="BtnAchievements"
                                     Grid.Column="4"
                                     Content="🏆"
@@ -1475,7 +1480,7 @@
                                 <StackPanel Margin="24,20">
 
                                     <!-- Per-game notice (UX-6/UX-7): persistent banner for games
-                                         that connect to AP themselves (OpenTTD fork) or whose
+                                         that connect to AP themselves or whose
                                          check detection is still in development (emulated games).
                                          Populated by SelectGame; collapsed for everything else. -->
                                     <Border x:Name="PanelGameNotice"

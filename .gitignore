@@ -32,3 +32,6 @@ publish_*/
 # Patch notes are release-note text, not repo content — the old ones were
 # cleaned out deliberately and kept creeping back in via `git add -A`.
 patch_notes_London-*.md
+
+# Packaging output
+dist/
