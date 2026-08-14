@@ -2304,6 +2304,86 @@ public sealed class D2Plugin : IGamePlugin
     // the session rather than whatever was true when the tab was opened.
     public void RefreshMapActionContext() => ApplyApActionContext();
 
+    // --- The DirectDraw wrapper (cnc-ddraw), supplied by the player ---
+    //
+    // Diablo II 1.10's own DirectDraw does not initialise on modern Windows: the
+    // game dies on the splash with "Error 22". Something has to stand in for it,
+    // and that something is cnc-ddraw's ddraw.dll.
+    //
+    // We do not ship it. It is MIT and we could, but this project no longer
+    // distributes anyone else's binaries -- the player installs it, the same way
+    // they supply their own Diablo II. What the launcher does instead is find it
+    // if they already have one, and refuse to launch with a clear explanation if
+    // they do not, rather than letting the game fail with a Blizzard error box
+    // that says nothing about the real cause.
+
+    public const string RendererDownloadUrl = "https://github.com/FunkyFr3sh/cnc-ddraw/releases/latest";
+    private const string RendererFile = "ddraw.dll";
+
+    /// <summary>Is a DirectDraw wrapper in place in the mod's game folder?</summary>
+    public bool HasRenderer =>
+        !string.IsNullOrEmpty(GameDirectory) &&
+        File.Exists(Path.Combine(GameDirectory, RendererFile));
+
+    /// <summary>
+    /// If the player's own Diablo II folder already has a ddraw.dll, copy it in.
+    ///
+    /// Anyone who has played 1.10 on a modern machine almost certainly already
+    /// put a wrapper there — asking them to download one they already own is
+    /// pointless friction. Returns true when a copy was made.
+    /// </summary>
+    public bool TryAdoptRendererFromOriginal()
+    {
+        if (HasRenderer) return false;
+        if (string.IsNullOrEmpty(OriginalD2Directory)) return false;
+
+        string src = Path.Combine(OriginalD2Directory, RendererFile);
+        if (!File.Exists(src)) return false;
+
+        try
+        {
+            Directory.CreateDirectory(GameDirectory);
+            File.Copy(src, Path.Combine(GameDirectory, RendererFile), overwrite: false);
+            // ddraw.ini is its settings file and is worth bringing along, but its
+            // absence is harmless — cnc-ddraw falls back to its own defaults.
+            string ini = Path.Combine(OriginalD2Directory, "ddraw.ini");
+            string iniDst = Path.Combine(GameDirectory, "ddraw.ini");
+            if (File.Exists(ini) && !File.Exists(iniDst))
+                File.Copy(ini, iniDst, overwrite: false);
+            Debug.WriteLine("[D2] Renderer adopted from the player's own D2 folder");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine("[D2] could not adopt renderer: " + ex.Message);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Null when the game can start. Otherwise the reason it cannot, written for
+    /// the player rather than for us.
+    /// </summary>
+    public string? RendererBlocker()
+    {
+        if (HasRenderer) return null;
+        if (TryAdoptRendererFromOriginal()) return null;
+
+        return
+            "Diablo II cannot start without a DirectDraw wrapper.\n\n" +
+            "The 1.10f engine is from 2003 and its own DirectDraw no longer " +
+            "initialises on Windows 10 or 11 — without a wrapper the game stops " +
+            "with \"Error 22\" before the main menu.\n\n" +
+            "This mod does not include one. Install cnc-ddraw yourself:\n\n" +
+            "1. Download cnc-ddraw from\n   " + RendererDownloadUrl + "\n" +
+            "2. Open the zip and copy ddraw.dll (and ddraw.ini if it is there)\n" +
+            "   into this folder:\n   " + GameDirectory + "\n" +
+            "3. Press Play again.\n\n" +
+            "cnc-ddraw is free and open source (MIT) by FunkyFr3sh. If your own " +
+            "Diablo II folder already has a ddraw.dll, put that one here instead " +
+            "and the launcher will find it.";
+    }
+
     // --- Copy protection on the player's own Game.exe ---
 
     /// <summary>
