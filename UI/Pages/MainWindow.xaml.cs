@@ -7992,6 +7992,8 @@ public partial class MainWindow : Window
                 AppendLog(vOk ? "[Verify] OK." : "[Verify] WARNING: some files may be missing. Consider re-installing.");
             }
 
+            if (RendererMissingBlocksLaunch(plugin)) return;
+
             await plugin.LaunchStandaloneAsync();
 
             // Exit watcher: standalone sessions never go through LaunchGameAsync,
@@ -9123,6 +9125,40 @@ public partial class MainWindow : Window
     // re-download them from the release package, and only falls back to a warning
     // if that download fails.
     // to start, but the player (and we) now see precisely what is wrong.
+    // The game cannot start without a DirectDraw wrapper, and we no longer ship
+    // one. Stop here with an explanation rather than let Diablo II throw its own
+    // "Error 22" box, which says nothing about the cause or the cure.
+    private bool RendererMissingBlocksLaunch(IGamePlugin plugin)
+    {
+        if (plugin is not Plugins.DiabloII.D2Plugin d2) return false;
+        string? blocker = d2.RendererBlocker();
+        if (blocker == null)
+        {
+            AppendLog("[Renderer] cnc-ddraw found.");
+            return false;
+        }
+
+        AppendLog("[Renderer] MISSING — cnc-ddraw's ddraw.dll is not in the game folder.");
+        AppendLog("[Renderer] Get it from " + Plugins.DiabloII.D2Plugin.RendererDownloadUrl);
+        SetStatus("Cannot launch — DirectDraw wrapper missing");
+
+        var res = System.Windows.MessageBox.Show(
+            blocker + Environment.NewLine + Environment.NewLine + "Open the download page now?",
+            "Diablo II needs a DirectDraw wrapper",
+            System.Windows.MessageBoxButton.YesNo,
+            System.Windows.MessageBoxImage.Warning);
+        if (res == System.Windows.MessageBoxResult.Yes)
+        {
+            try
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(
+                    Plugins.DiabloII.D2Plugin.RendererDownloadUrl) { UseShellExecute = true });
+            }
+            catch (Exception ex) { AppendLog("[Renderer] could not open the page: " + ex.Message); }
+        }
+        return true;
+    }
+
     private async Task VerifyAndRepairD2Async(Plugins.DiabloII.D2Plugin d2, CancellationToken ct)
     {
         // The optional add-ons are installed by hand, so the one moment the
@@ -9412,6 +9448,10 @@ public partial class MainWindow : Window
     {
         // Antivirus often quarantines D2Arch_Launcher.exe — offer repair, not a dead end.
         if (!await EnsureD2ModFilesAsync(plugin)) return;
+
+        // Checked before anything connects: there is no point joining a
+        // multiworld and then discovering the game cannot open a window.
+        if (RendererMissingBlocksLaunch(plugin)) return;
 
         bool alreadyConnected = _apClient?.State == ApConnectionState.Connected;
 
