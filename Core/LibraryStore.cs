@@ -13,7 +13,7 @@ namespace LauncherV2.Core;
 // Storage: <AppDir>/Data/library.json
 
 // LIBRARY vs REGISTRY
-// GameRegistry holds compiled-in plugins (D2, OpenTTD, …).
+// GameRegistry holds the integrations that are compiled in.
 // LibraryStore is the USER's curated list:
 // • Any plugin can be removed from view ("Remove from library").
 // • Any catalog entry can be pinned even without a plugin yet.

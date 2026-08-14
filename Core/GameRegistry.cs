@@ -41,4 +41,54 @@ public static class GameRegistry
     // Currently running plugin (at most one game at a time in V2.0.0).
     public static IGamePlugin? ActivePlugin
         => _plugins.FirstOrDefault(p => p.IsRunning);
+
+    // --- Plugins loaded from disk ---
+
+    private static readonly List<Plugins.LoadedPlugin> _loaded = new();
+
+    /// <summary>Everything that came from a .londonplugin, for the manage page.</summary>
+    public static IReadOnlyList<Plugins.LoadedPlugin> LoadedFromDisk => _loaded;
+
+    /// <summary>
+    /// Register every approved plugin in GamePlugins\. Call once at startup,
+    /// AFTER the compiled-in games — a plugin must never be able to take over
+    /// a built-in game's id by being loaded first.
+    /// </summary>
+    /// <param name="problems">
+    /// Why a plugin did not load. Surfaced in the UI: a game that silently
+    /// disappears is a support request, a game that says why is not.
+    /// </param>
+    public static void LoadFromDisk(out IReadOnlyList<string> problems)
+    {
+        var issues = new List<string>();
+        var approved = Plugins.PluginLoader.LoadApproved(out var loadIssues);
+        foreach (var lp in approved)
+        {
+            if (Find(lp.Manifest.GameId) != null)
+            {
+                issues.Add($"{lp.Manifest.DisplayName}: a game with id "
+                         + $"\"{lp.Manifest.GameId}\" is already built into the launcher");
+                lp.Unload();
+                continue;
+            }
+
+            Register(lp.Plugin);
+            _loaded.Add(lp);
+        }
+        issues.AddRange(loadIssues);
+        problems = issues;
+    }
+
+    /// <summary>Drop a disk plugin from the library — removal, or revoked trust.</summary>
+    public static bool UnloadFromDisk(string gameId)
+    {
+        var lp = _loaded.FirstOrDefault(p =>
+            string.Equals(p.Manifest.GameId, gameId, StringComparison.OrdinalIgnoreCase));
+        if (lp == null) return false;
+
+        _plugins.RemoveAll(p => string.Equals(p.GameId, gameId, StringComparison.OrdinalIgnoreCase));
+        _loaded.Remove(lp);
+        lp.Unload();
+        return true;
+    }
 }

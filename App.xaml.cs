@@ -88,6 +88,19 @@ public partial class App : Application
 
 
 
+        // ── Game plugins from disk ───────────────────────────────────────────
+        // AFTER the built-in games on purpose: Register refuses a duplicate
+        // GameId, so registering plugins last means a plugin can never take
+        // over Diablo II's id by loading first.
+        //
+        // Only plugins the player approved, and whose files still hash to what
+        // they approved, come back from here. Everything else arrives as a
+        // problem line — a game that silently vanishes is a support request, a
+        // game that says why is not.
+        GameRegistry.LoadFromDisk(out var pluginProblems);
+        foreach (string p in pluginProblems)
+            System.Diagnostics.Debug.WriteLine("[plugin] " + p);
+
         // ── Splash screen ────────────────────────────────────────────────────
         // Show splash, then reveal the main window after a short minimum delay.
         var splash = new SplashWindow();

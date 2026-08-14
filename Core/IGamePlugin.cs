@@ -102,7 +102,7 @@ public interface IGamePlugin
     bool IsWebBased => false;
 
     // True when the game ships its OWN native AP client and connects to the
-    // slot itself (e.g. the OpenTTD Archipelago fork). AP servers allow one
+    // slot itself, rather than letting the launcher hold it. AP servers allow one
     // connection per slot and kick the older one — so for these games the
     // launcher must NOT hold an ApClient session on the same slot while the
     // game runs (launcher and game would endlessly kick each other off).
@@ -151,6 +151,23 @@ public interface IGamePlugin
     // Plugins can use this to show an in-game HUD indicator (connected/disconnected).
     void OnApStateChanged(ApConnectionState state);
 
+    // Called when the server hands over this slot's slot_data.
+    // Games built into the launcher are reached by a type check; a plugin
+    // cannot be, because the launcher does not reference it. This is how the
+    // seed's own settings get to one.
+    void OnSlotData(System.Text.Json.JsonElement slotData) { }
+
+    // Called once the datapackage for this game has arrived, with the seed's
+    // location name -> AP id table.
+    // Most games report checks by id and can ignore this. A game that reports
+    // them by name, holding no id table of its own, needs somebody to resolve
+    // them — and the launcher is the side that already knows.
+    void OnLocationTable(IReadOnlyDictionary<string, long> nameToId) { }
+
+    // Called when scout replies arrive, mapping location id -> "player (game)".
+    // For games that show what a location contains before taking it.
+    void OnLocationHints(IReadOnlyDictionary<long, string> idToLabel) { }
+
     // --- Settings UI ---
 
     // Return a WPF UIElement shown in the launcher's Settings tab for this game.
@@ -187,7 +204,7 @@ public interface IGamePlugin
     string[] ScreenshotUrls { get; }
 
     // The AP world name as registered in Archipelago (used for DataPackage lookup).
-    // e.g. "Diablo II Archipelago" or "OpenTTD"
+    // The game name as Archipelago knows it, e.g. from the seed's YAML
     string ApWorldName { get; }
 
     // --- Visual identity ---

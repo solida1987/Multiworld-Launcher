@@ -17,7 +17,7 @@ namespace LauncherV2.Core;
 // WHAT IT IS
 // A JSON feed listing all AP games available to install through the launcher.
 // Can include:
-// • Marco's own games (Diablo II Archipelago, OpenTTD, future standalone games)
+// • the maintainer's own game integrations
 // • Third-party AP games (any AP world that has a plugin written for this launcher)
 // • ROM games (e.g. Pokemon — launcher provides a built-in emulator)
 
@@ -51,7 +51,7 @@ namespace LauncherV2.Core;
 // }
 
 // PLUGIN TYPES
-// native — game has a compiled plugin in this launcher (D2, OpenTTD, etc.)
+// native — game has an integration the launcher can drive directly
 // emulated — ROM game; launcher uses a built-in emulator (BizHawk for GBA/GB/SNES etc.)
 // external — AP world that this launcher can manage but delegates launch to
 // an existing AP client / game executable (for games we don't
@@ -124,7 +124,7 @@ public sealed record CatalogEntry
     // Target platforms e.g.
     [JsonPropertyName("platforms")]       public string[] Platforms       { get; init; } = Array.Empty<string>();
 
-    // True = base game is free/open-source (OpenTTD, Cave Story, web games…).
+    // True = the base game is free or open-source, so nothing needs buying first.
     [JsonPropertyName("free")]            public bool     Free            { get; init; } = false;
 
     // True = player must supply a ROM/ISO file (console games).
