@@ -2304,6 +2304,63 @@ public sealed class D2Plugin : IGamePlugin
     // the session rather than whatever was true when the tab was opened.
     public void RefreshMapActionContext() => ApplyApActionContext();
 
+    // --- Copy protection on the player's own Game.exe ---
+
+    /// <summary>
+    /// True when Game.exe is still wrapped in its original disc copy protection.
+    ///
+    /// This launcher does not remove copy protection, ship an executable with it
+    /// removed, or tell anyone where to find one — that is not ours to do. What
+    /// it can do is stop the player being confused: a protected Game.exe makes
+    /// Diablo II ask for the disc, and without a word from us that looks like
+    /// the mod is broken rather than the game doing exactly what it shipped
+    /// doing.
+    ///
+    /// Detected by SafeDisc's own PE section names. Reading section headers is
+    /// just reading the file; nothing here defeats or alters the protection.
+    /// </summary>
+    public static bool HasDiscProtection(string gameExePath)
+    {
+        try
+        {
+            using var fs = new FileStream(gameExePath, FileMode.Open, FileAccess.Read);
+            using var br = new BinaryReader(fs);
+            fs.Seek(0x3C, SeekOrigin.Begin);
+            int pe = br.ReadInt32();
+            if (pe <= 0 || pe + 24 > fs.Length) return false;
+            fs.Seek(pe + 6, SeekOrigin.Begin);
+            int sections = br.ReadUInt16();
+            fs.Seek(pe + 20, SeekOrigin.Begin);
+            int optSize = br.ReadUInt16();
+            long table = pe + 24 + optSize;
+            for (int i = 0; i < sections; i++)
+            {
+                fs.Seek(table + i * 40, SeekOrigin.Begin);
+                string n = new string(br.ReadChars(8)).TrimEnd('\0').Trim();
+                // stxt371 / stxt774 are SafeDisc's; Diablo II's discs used it.
+                if (n.StartsWith("stxt", StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+            return false;
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine("[D2] copy-protection check failed: " + ex.Message);
+            return false;   // never block a launch on a failed inspection
+        }
+    }
+
+    /// <summary>Null when nothing needs saying, otherwise the note to show.</summary>
+    public string? DiscProtectionNotice()
+    {
+        if (string.IsNullOrEmpty(GameDirectory)) return null;
+        string exe = Path.Combine(GameDirectory, "Game.exe");
+        if (!File.Exists(exe) || !HasDiscProtection(exe)) return null;
+        return "Your Game.exe is the original disc-protected build, so Diablo II " +
+               "will ask for the CD when it starts. Keep your disc in the drive. " +
+               "This launcher does not modify Game.exe.";
+    }
+
     // --- Optional add-ons the player installs themselves ---
 
     /// <summary>One optional component and what we can see of it on disk.</summary>

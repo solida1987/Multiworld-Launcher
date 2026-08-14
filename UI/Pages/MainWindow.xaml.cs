@@ -9132,6 +9132,13 @@ public partial class MainWindow : Window
         foreach (string line in d2.DescribeOptionalAddons())
             AppendLog(line);
 
+        // A disc-protected Game.exe will stop and ask for the CD. Say so before
+        // it happens, so it reads as the game doing its thing rather than the
+        // mod failing.
+        string? disc = d2.DiscProtectionNotice();
+        if (disc != null)
+            AppendLog("[Disc] " + disc);
+
         List<Plugins.DiabloII.D2Plugin.InstallProblem>? problems;
         try { problems = await d2.ScanInstallProblemsAsync(ct); }
         catch (OperationCanceledException) { throw; }
