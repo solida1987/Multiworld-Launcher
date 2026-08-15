@@ -15,10 +15,10 @@ public static class PluginInstallFlow
 {
     public sealed record Outcome(bool Added, string? Message, LoadedPlugin? Plugin);
 
-    /// <summary>
+    ///
     /// Run the whole flow for a chosen .londonplugin file.
     /// Never throws; the message is written for the player.
-    /// </summary>
+    ///
     public static Outcome AddFromFile(Window? owner, string path)
     {
         var candidate = PluginPackage.Inspect(path);
@@ -78,7 +78,7 @@ public static class PluginInstallFlow
         return new Outcome(true, $"{m.DisplayName} was added.", loaded);
     }
 
-    /// <summary>Remove a plugin: out of the library, off the disk, out of the trust file.</summary>
+    /// Remove a plugin: out of the library, off the disk, out of the trust file.
     public static string? Remove(string gameId)
     {
         GameRegistry.UnloadFromDisk(gameId);

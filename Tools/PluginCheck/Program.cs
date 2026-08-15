@@ -94,6 +94,56 @@ internal static class Program
         try { Directory.Delete(want, recursive: false); } catch (IOException) { }
     }
 
+    // What the launcher would actually draw for this plugin. A plugin can pass
+    // every check above and still answer nothing anywhere, which reaches the
+    // player as a game page that is simply empty.
+    private static void ReportSurfaces(IGamePlugin p)
+    {
+        Console.WriteLine();
+        Console.WriteLine("  Surfaces the launcher would draw:");
+
+        void Line(string what, int n, string? sample = null)
+            => Console.WriteLine($"    {(n > 0 ? "*" : "-")} {what,-26} {n,3}" +
+                                 (sample == null ? "" : "   " + sample));
+
+        try
+        {
+            var comps = p.DetectComponents().ToList();
+            Line("components", comps.Count,
+                 comps.Count > 0 ? string.Join(", ", comps.Take(3).Select(c => c.Name)) : null);
+
+            var cmds = p.GetCommands().ToList();
+            Line("commands", cmds.Count,
+                 cmds.Count > 0 ? string.Join(", ", cmds.Take(4).Select(c => c.Label)) : null);
+
+            var issues = p.KnownIssues.ToList();
+            Line("known issues", issues.Count);
+
+            var credits = p.Credits.ToList();
+            Line("credits", credits.Count);
+
+            var ach = p.ExtraAchievements.ToList();
+            Line("achievements", ach.Count, p.AchievementIdPrefix);
+
+            Line("item action menu", p.ItemActions != null ? 1 : 0);
+
+            var dp = p.GetLocationDataPackage();
+            int locs = 0;
+            if (dp is { } el && el.ValueKind == System.Text.Json.JsonValueKind.Object
+                && el.TryGetProperty("location_name_to_id", out var byName))
+                locs = byName.EnumerateObject().Count();
+            Line("locations in datapackage", locs);
+
+            Console.WriteLine($"    . standalone {p.SupportsStandalone}, map tracker " +
+                              $"{p.SupportsMapTracker}, deathlink {p.SendsDeathLink}, " +
+                              $"needs base game {p.NeedsBaseGameFolder() != null}");
+        }
+        catch (Exception ex)
+        {
+            Check("surfaces answer without throwing", false, ex.Message);
+        }
+    }
+
     private static int Main(string[] args)
     {
         if (args.Length < 1)
@@ -165,6 +215,8 @@ internal static class Program
         _ = p.SupportsMapTracker;
         _ = p.ConnectsItself;
         Check("optional flags answer", true);
+
+        ReportSurfaces(p);
 
         // 5. Optional: the whole way, with the real game on the other end.
         //    Everything above can pass while the two sides still fail to meet.

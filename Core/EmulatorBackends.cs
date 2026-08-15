@@ -79,7 +79,7 @@ public sealed record EmulatorBackend
     public bool LiveVerified { get; init; } = true;
 
     // Folder the launcher installs this backend into, next to the exe:
-    // Emulators/&lt;id&gt;.
+    // Emulators/<id>.
     public string InstallSubdir => Id == "bizhawk" ? "BizHawk" : Id;
 }
 
@@ -157,7 +157,7 @@ public static class EmulatorBackends
             ? null
             : All.FirstOrDefault(b => string.Equals(b.Id, id, StringComparison.OrdinalIgnoreCase));
 
-    // All backends that can host <paramref name="system"/> (e.g.
+    // All backends that can host system (e.g.
     // in registry order (working backend first).
     public static IReadOnlyList<EmulatorBackend> BackendsForSystem(string system)
         => All.Where(b => b.Systems.Contains(system, StringComparer.OrdinalIgnoreCase))

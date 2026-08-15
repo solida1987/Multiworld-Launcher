@@ -9,7 +9,7 @@ namespace LauncherV2.Core.Plugins;
 
 // A .londonplugin (zip), inspected without running anything inside it.
 
-/// <summary>A package inspected but not yet installed.</summary>
+/// A package inspected but not yet installed.
 public sealed record PluginCandidate(
     string          SourcePath,
     string          Sha256,
@@ -18,7 +18,7 @@ public sealed record PluginCandidate(
 {
     public bool IsUsable => Manifest != null && Error == null;
 
-    /// <summary>Short hash for the consent dialog — nobody reads 64 hex digits.</summary>
+    /// Short hash for the consent dialog — nobody reads 64 hex digits.
     public string ShortHash => Sha256.Length >= 16 ? Sha256[..16] + "…" : Sha256;
 }
 
@@ -26,22 +26,22 @@ public static class PluginPackage
 {
     public const string Extension = ".londonplugin";
 
-    /// <summary>Where installed plugins live, beside the launcher.</summary>
-    /// <remarks>
+    /// Where installed plugins live, beside the launcher.
+    ///
     /// Deliberately not "Plugins" — an installed launcher already has a Plugins
     /// folder holding Scripts (BizHawk connector and friends). Two different
     /// things called the same would get merged by somebody eventually.
-    /// </remarks>
+    ///
     public static string RootDirectory =>
         Path.Combine(AppContext.BaseDirectory, "GamePlugins");
 
     public static string DirectoryFor(string gameId)
         => Path.Combine(RootDirectory, gameId);
 
-    /// <summary>
+    ///
     /// Look inside a package. Reads the manifest and hashes the file; writes
     /// nothing, runs nothing. Never throws.
-    /// </summary>
+    ///
     public static PluginCandidate Inspect(string path)
     {
         string hash;
@@ -80,10 +80,10 @@ public static class PluginPackage
         }
     }
 
-    /// <summary>
+    ///
     /// Unpack an approved package into its own folder, replacing whatever was
     /// there. Returns null on success, otherwise the reason.
-    /// </summary>
+    ///
     public static string? Install(PluginCandidate candidate)
     {
         if (!candidate.IsUsable) return candidate.Error ?? "package is not usable";
@@ -124,7 +124,7 @@ public static class PluginPackage
         }
     }
 
-    /// <summary>Every installed plugin folder that has a readable manifest.</summary>
+    /// Every installed plugin folder that has a readable manifest.
     public static IReadOnlyList<(string Directory, PluginManifest Manifest)> Installed()
     {
         var found = new List<(string, PluginManifest)>();
@@ -144,7 +144,7 @@ public static class PluginPackage
         return found;
     }
 
-    /// <summary>SHA-256 of a file, lowercase hex.</summary>
+    /// SHA-256 of a file, lowercase hex.
     public static string HashFile(string path)
     {
         using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
@@ -152,10 +152,10 @@ public static class PluginPackage
         return Convert.ToHexString(sha.ComputeHash(fs)).ToLowerInvariant();
     }
 
-    /// <summary>
+    ///
     /// SHA-256 over an installed folder's contents, so a plugin that is edited
     /// on disk after approval stops matching what was approved.
-    /// </summary>
+    ///
     public static string HashDirectory(string dir)
     {
         using var sha = SHA256.Create();

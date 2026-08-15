@@ -5,13 +5,13 @@ using LauncherV2.Core;
 
 namespace LauncherV2.UI.Controls;
 
-// <summary>
+//
 // Steam-style achievement toast popup.
 // Slides in from the bottom-right, stays for 4 seconds, then fades out.
 // Never steals focus (ShowActivated=False — it used to yank keyboard focus
 // out of the game), and simultaneous unlocks stack upwards instead of
 // painting on top of each other (a first session can grant 2–3 at once).
-// </summary>
+//
 public partial class AchievementToast : Window
 {
     private const double MarginRight  = 18;

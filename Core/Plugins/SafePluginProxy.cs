@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
@@ -22,7 +24,7 @@ public sealed class SafePluginProxy : IGamePlugin
     private volatile bool _quarantined;
     private string?       _reason;
 
-    /// <summary>Raised the first time the plugin misbehaves. UI shows it on the game.</summary>
+    /// Raised the first time the plugin misbehaves. UI shows it on the game.
     public event Action<string, string>? Quarantined;   // (gameId, reason)
 
     public bool    IsQuarantined     => _quarantined;
@@ -194,7 +196,118 @@ public sealed class SafePluginProxy : IGamePlugin
     public Task<NewsItem[]> GetNewsAsync(CancellationToken ct = default)
         => GetAsync(() => _inner.GetNewsAsync(ct), Array.Empty<NewsItem>());
 
-    /// <summary>Stop listening, so the context can be unloaded.</summary>
+    // --- install shape ---
+    //
+    // Every member below forwards to the plugin. A member that is NOT here
+    // silently resolves to the interface default instead, which reaches the
+    // player as a game page that is simply missing that part -- with no error
+    // anywhere. Adding a member to IGamePlugin means adding it here too.
+    //
+    // Each fallback is the answer that is safe when the plugin is broken, and
+    // that is not always "empty": a scan that cannot run must say "could not
+    // tell" (null), never "healthy" (empty).
+
+    public InstallCapability InstallCapability
+        => Get(() => _inner.InstallCapability, InstallCapability.AutoInstall);
+
+    public bool    IsFreeGame  => Get(() => _inner.IsFreeGame, false);
+    public string? PurchaseUrl => Get(() => _inner.PurchaseUrl, null);
+    public string? WebsiteUrl  => Get(() => _inner.WebsiteUrl, null);
+
+    public IReadOnlyList<GameComponent> DetectComponents()
+        => Get(() => _inner.DetectComponents(), Array.Empty<GameComponent>());
+
+    public IReadOnlyList<GameComponent> DetectComponentsAdopting()
+        => Get(() => _inner.DetectComponentsAdopting(), Array.Empty<GameComponent>());
+
+    // null = could not tell. Empty would claim the install is healthy.
+    public Task<IReadOnlyList<IGamePlugin.InstallProblem>?> ScanInstallProblemsAsync(
+            CancellationToken ct = default)
+        => GetAsync(() => _inner.ScanInstallProblemsAsync(ct),
+                    (IReadOnlyList<IGamePlugin.InstallProblem>?)null);
+
+    // A repair that never ran restored nothing: every file is unrepairable.
+    public Task<(IReadOnlyList<string> Restored, IReadOnlyList<string> Unrepairable)>
+        RepairFilesAsync(IEnumerable<string> paths,
+                         IProgress<(int Pct, string Msg)> progress,
+                         CancellationToken ct = default)
+        => GetAsync(() => _inner.RepairFilesAsync(paths, progress, ct),
+                    ((IReadOnlyList<string>)Array.Empty<string>(),
+                     (IReadOnlyList<string>)paths.ToList()));
+
+    // --- the original game a mod is built from ---
+
+    public BaseGameFolderRequest? NeedsBaseGameFolder()
+        => Get<BaseGameFolderRequest?>(() => _inner.NeedsBaseGameFolder(), null);
+
+    // A broken plugin must not make the launcher demand a folder it cannot use.
+    public bool HasBaseGameFiles() => Get(() => _inner.HasBaseGameFiles(), true);
+
+    public void SetBaseGameFolder(string folder)
+        => Guard(() => _inner.SetBaseGameFolder(folder));
+
+    // --- files the game cannot start without ---
+
+    public IReadOnlyList<string> GetMissingCriticalFiles()
+        => Get(() => _inner.GetMissingCriticalFiles(), Array.Empty<string>());
+
+    public string? MissingCriticalFilesCause
+        => Get(() => _inner.MissingCriticalFilesCause, null);
+
+    public Task<int> RepairMissingCriticalFilesAsync(IProgress<(int Pct, string Msg)> progress)
+        => GetAsync(() => _inner.RepairMissingCriticalFilesAsync(progress), 0);
+
+    // false = "not an antivirus problem", so the launcher shows its own error
+    // rather than swallowing one the plugin never handled.
+    public Task<bool> TryHandleAntivirusBlockAsync(Window owner, Exception failure)
+        => GetAsync(() => _inner.TryHandleAntivirusBlockAsync(owner, failure), false);
+
+    // --- the live Archipelago session ---
+
+    public void OnApServicesAttached(IApServices? services)
+        => Guard(() => _inner.OnApServicesAttached(services));
+
+    public void OnApSessionChanged(ApSessionContext? session)
+        => Guard(() => _inner.OnApSessionChanged(session));
+
+    public Task OnDeathLinkReceivedAsync(string source, string cause)
+        => GuardAsync(() => _inner.OnDeathLinkReceivedAsync(source, cause));
+
+    public bool SendsDeathLink => Get(() => _inner.SendsDeathLink, false);
+
+    public System.Text.Json.JsonElement? GetLocationDataPackage()
+        => Get<System.Text.Json.JsonElement?>(() => _inner.GetLocationDataPackage(), null);
+
+    public long[] GetStandaloneLocationUniverse()
+        => Get(() => _inner.GetStandaloneLocationUniverse(), Array.Empty<long>());
+
+    // --- what the game page draws ---
+
+    public Action<Window, ApSessionContext>? ItemActions
+        => Get<Action<Window, ApSessionContext>?>(() => _inner.ItemActions, null);
+
+    public IReadOnlyList<GameCommand> GetCommands()
+        => Get(() => _inner.GetCommands(), Array.Empty<GameCommand>());
+
+    public IReadOnlyList<KnownIssue> KnownIssues
+        => Get(() => _inner.KnownIssues, Array.Empty<KnownIssue>());
+
+    public IReadOnlyList<GameCredit> Credits
+        => Get(() => _inner.Credits, Array.Empty<GameCredit>());
+
+    public string? HeaderArtPath => Get(() => _inner.HeaderArtPath, null);
+
+    // Falls back to the game id, exactly as the interface does -- achievement
+    // ids are stored raw, so a wrong prefix would merge two games' records.
+    public string AchievementIdPrefix => Get(() => _inner.AchievementIdPrefix, _gameId);
+
+    public IReadOnlyList<GameAchievement> ExtraAchievements
+        => Get(() => _inner.ExtraAchievements, Array.Empty<GameAchievement>());
+
+    public (string Title, string Description, string Icon)? GoalAchievement
+        => Get<(string, string, string)?>(() => _inner.GoalAchievement, null);
+
+    /// Stop listening, so the context can be unloaded.
     public void Detach()
     {
         try

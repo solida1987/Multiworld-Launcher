@@ -50,7 +50,7 @@ public static class PluginTrustStore
             JsonSerializer.Serialize(map, new JsonSerializerOptions { WriteIndented = true }));
     }
 
-    /// <summary>Record that the player accepted exactly these bytes.</summary>
+    /// Record that the player accepted exactly these bytes.
     public static void Approve(string gameId, string sha256, string version, string author)
     {
         lock (Gate)
@@ -67,7 +67,7 @@ public static class PluginTrustStore
         }
     }
 
-    /// <summary>Forget a plugin — on removal, or when the player revokes it.</summary>
+    /// Forget a plugin — on removal, or when the player revokes it.
     public static void Revoke(string gameId)
     {
         lock (Gate)
@@ -82,21 +82,21 @@ public static class PluginTrustStore
         lock (Gate) { return Load().TryGetValue(gameId, out var r) ? r : null; }
     }
 
-    /// <summary>Why a plugin may not load, or null when it may.</summary>
+    /// Why a plugin may not load, or null when it may.
     public enum Verdict
     {
-        /// <summary>Approved, and the bytes still match.</summary>
+        /// Approved, and the bytes still match.
         Trusted,
-        /// <summary>Never approved on this machine.</summary>
+        /// Never approved on this machine.
         Unknown,
-        /// <summary>Approved once, but the files have changed since.</summary>
+        /// Approved once, but the files have changed since.
         Changed,
     }
 
-    /// <summary>
+    ///
     /// Check an installed plugin folder against what was approved.
     /// Hashes the folder, so an edit anywhere inside it counts.
-    /// </summary>
+    ///
     public static Verdict Check(string gameId, string directory)
     {
         var rec = Get(gameId);
@@ -111,7 +111,7 @@ public static class PluginTrustStore
             : Verdict.Changed;
     }
 
-    /// <summary>Wording for the player when a check comes back not-Trusted.</summary>
+    /// Wording for the player when a check comes back not-Trusted.
     public static string Explain(Verdict v, string displayName) => v switch
     {
         Verdict.Changed =>

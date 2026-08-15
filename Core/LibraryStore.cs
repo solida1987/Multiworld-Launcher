@@ -70,12 +70,12 @@ public static class LibraryStore
 
     // --- Seeding ---
 
-    // <summary>
+    //
     // Ensures every supplied gameId appears in the library.
     // Call on startup with GameRegistry.All.Select(p => p.GameId) so the
     // sidebar is not empty on first launch.
     // New entries are inserted at the front (pre-existing order preserved).
-    // </summary>
+    //
     public static void SeedPlugins(IEnumerable<string> gameIds)
     {
         bool changed = false;
@@ -153,7 +153,7 @@ public static class LibraryStore
         Save();
     }
 
-    // Move <paramref name="movedId"/> to immediately before <paramref name="targetId"/> in the list.
+    // Move movedId to immediately before targetId in the list.
     // Reorders within the same favorites/non-favorites group.
     // No-op if either ID is missing or they are the same entry.
     public static void MoveBeforeId(string movedId, string targetId)
