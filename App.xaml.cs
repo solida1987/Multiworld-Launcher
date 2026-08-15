@@ -1,9 +1,9 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
 using System.Windows;
 using LauncherV2.Core;
-using LauncherV2.Plugins.DiabloII;
 using LauncherV2.UI.Pages;
 // (WPF/WinForms disambiguation handled in GlobalUsings.cs)
 
@@ -11,6 +11,16 @@ namespace LauncherV2;
 
 public partial class App : Application
 {
+    /// <summary>
+    /// Why a plugin did not load, if any did not. Read once by the main
+    /// window when its log exists, then cleared.
+    /// </summary>
+    public static IReadOnlyList<string> PluginLoadProblems { get; private set; }
+        = Array.Empty<string>();
+
+    /// <summary>Called by the main window once it has reported them.</summary>
+    public static void ClearPluginLoadProblems() => PluginLoadProblems = Array.Empty<string>();
+
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
@@ -56,28 +66,15 @@ public partial class App : Application
         // details and scope in Core/ContentCleanup.cs.
         ContentCleanup.RunOnce();
 
-        // ── Register game plugins ────────────────────────────────────────────
-        // This launcher integrates Diablo II only.
-
-        GameRegistry.Register(new D2Plugin
-        {
-            // The mod installs into Games/diablo2_archipelago next to the launcher
-            // — never the user's own Diablo II. DiabloIIPath now records where the
-            // player's ORIGINAL Diablo II lives, used only to copy the MPQ data in.
-            GameDirectory       = SettingsStore.DefaultGamePath("diablo2_archipelago"),
-            OriginalD2Directory = settings.DiabloIIPath,
-        });
-
-        // 2.8.2 — EXPERIMENTAL build as a SEPARATE installable entry. Distinct
-        // GameId → its own folder (Games/diablo2_archipelago_experimental) and its
-        // own GitHub repo (Diablo-II-Archipelago-experimental). Fully isolated from
-        // the stable install above; for aggressive testing only.
-        GameRegistry.Register(new D2Plugin
-        {
-            Experimental        = true,
-            GameDirectory       = SettingsStore.DefaultGamePath("diablo2_archipelago_experimental"),
-            OriginalD2Directory = settings.DiabloIIPath,
-        });
+        // ── Game plugins ────────────────────────────────────────────────────
+        //
+        // The launcher registers nothing. Every game arrives as a
+        // .londonplugin the player downloaded and added themselves — including
+        // the ones written by the same person who wrote this launcher.
+        //
+        // Diablo II used to be registered here, in two channels. It is now
+        // built from Diablo-London-Plugin/ and shipped separately; see
+        // PLUGIN_API.md.
 
 
 
@@ -98,8 +95,14 @@ public partial class App : Application
         // problem line — a game that silently vanishes is a support request, a
         // game that says why is not.
         GameRegistry.LoadFromDisk(out var pluginProblems);
-        foreach (string p in pluginProblems)
-            System.Diagnostics.Debug.WriteLine("[plugin] " + p);
+
+        // Held for the main window, which owns the log. Debug.WriteLine was
+        // all this did before -- and Debug.WriteLine does not exist in a
+        // Release build, so a plugin that failed to load told the player
+        // nothing at all: no error, no log line, just a game missing from the
+        // sidebar. The comment on LoadFromDisk already said it should be
+        // surfaced; it simply never was.
+        PluginLoadProblems = pluginProblems;
 
         // ── Splash screen ────────────────────────────────────────────────────
         // Show splash, then reveal the main window after a short minimum delay.

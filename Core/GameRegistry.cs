@@ -46,7 +46,8 @@ public static class GameRegistry
 
     private static readonly List<Plugins.LoadedPlugin> _loaded = new();
 
-    /// <summary>Everything that came from a .londonplugin, for the manage page.</summary>
+    // Register every approved plugin in GamePlugins\. Runs AFTER built-ins so
+    // a plugin can never take over an existing GameId.
     public static IReadOnlyList<Plugins.LoadedPlugin> LoadedFromDisk => _loaded;
 
     /// <summary>
@@ -74,6 +75,13 @@ public static class GameRegistry
 
             Register(lp.Plugin);
             _loaded.Add(lp);
+
+            // A plugin the player approved is a game they wanted. Keeping it
+            // out of the library until they ask again would mean an installed
+            // plugin that is nowhere on screen -- which is what a missing
+            // library entry looked like: the game page open on the right and
+            // "your library is empty" on the left.
+            LibraryStore.Add(lp.Manifest.GameId);
         }
         issues.AddRange(loadIssues);
         problems = issues;

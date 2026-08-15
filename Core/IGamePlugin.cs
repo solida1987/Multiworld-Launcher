@@ -1,235 +1,372 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 
 namespace LauncherV2.Core;
 
-// IGamePlugin — the central contract for every game the launcher supports.
+// IGamePlugin — the contract every game plugin implements.
+//
+// The launcher core knows nothing about specific games. Nearly every member
+// has a default that means "this game does not do that", and the launcher
+// simply does not draw what a plugin does not answer.
+//
+// Full documentation, contracts and the list of required members: PLUGIN_API.md.
+// Async methods are fire-and-forget from the UI thread; events fire on
+// arbitrary threads and handlers must marshal to UI themselves.
 
-// DESIGN INTENT
-// The launcher core knows NOTHING about specific games.
-// Each game (Diablo II, future games) ships as a plugin that implements this
-// interface. The launcher calls the methods; the plugin fires events back.
+// What the launcher can actually do for this game — drives badges and buttons.
+public enum InstallCapability
+{
+    // Launcher downloads game + mod; click Install and play.
+    AutoInstall,
 
-// THREADING
-// All async methods are fire-and-forget from the UI thread (via Task.Run).
-// Events fire on arbitrary threads — handlers must marshal to UI if needed:
-// Application.Current.Dispatcher.Invoke(() => { ...
+    // User owns the base game; the launcher installs the mod on top.
+    AutoMod,
 
-// PLUGIN DISCOVERY (V2.0.0 → future)
-// V2.0.0: plugins are compiled into the launcher and registered in App.xaml.cs.
-// Future: GameRegistry scans a Plugins/ folder, loads assemblies via reflection.
-// The interface is designed so the discovery mechanism is transparent to plugins.
+    // Launcher installs emulator + mod; the user supplies the ROM.
+    RomRequired,
+
+    // Cannot be automated — install guide and links only.
+    ManualSetup,
+}
+
+public enum ComponentNeed
+{
+    // The game cannot start without it.
+    Required,
+
+    // The game runs fine; this only makes it nicer.
+    Optional,
+}
+
+// One component the game needs beside its own files (renderer, sound driver…).
+// Present = there AND able to do its job, not merely on disk.
+public sealed record GameComponent(
+    string Name,
+    bool Present,
+    ComponentNeed Need,
+    string Status,
+    string? Advice = null,
+    string? Url = null);
+
+// A game asking for the player's own copy of the base game it modifies.
+// The wording is the plugin's; the dialog and picker are the launcher's.
+public sealed record BaseGameFolderRequest(
+    string Title,
+    string Explanation,
+    string PickerTitle,
+    string? InitialDirectory = null);
+
+// The live AP session, as presented to the game's own UI. ItemNames and
+// LocationNamesInSeed are what THIS seed contains — offering names the seed
+// does not use means offering server errors as buttons.
+public sealed record ApSessionContext(
+    string SlotName,
+    IReadOnlyCollection<string> ItemNames,
+    IReadOnlyCollection<string> LocationNamesInSeed,
+    int HintPoints,
+    int HintCostPoints,
+    Func<string, Task> Send);
+
+// A game-defined achievement. IsMet reads the launcher's own bookkeeping.
+public sealed record GameAchievement(
+    string Id,
+    string Title,
+    string Description,
+    string Icon,
+    string Tier,                       // "bronze" | "silver" | "gold" | "platinum"
+    Func<AchievementSystem.AchievementStore, bool> IsMet);
+
+// A known bug with a player-performable workaround, shown as a card.
+public sealed record KnownIssue(string Symptom, string Cause, string Fix);
+
+// One credit line on the Overview. Highlight lifts a line visually.
+public sealed record GameCredit(string Role, string Name, bool Highlight = false);
+
+// One named button in the Overview action row. NeedsInstall=false for things
+// done before installing (e.g. writing a settings YAML).
+public sealed record GameCommand(
+    string Label,
+    string Tooltip,
+    Action<Window> Run,
+    bool NeedsInstall = true);
 
 public interface IGamePlugin
 {
     // --- Identity ---
 
-    // Stable, never-changing key.
-    // checks. Must be lowercase ASCII with no spaces. e.g. "diablo2_archipelago"
+    // Stable key, lowercase ASCII, no spaces. Must equal plugin.json.
     string GameId { get; }
 
-    // Human-readable name shown in the game library.
     string DisplayName { get; }
 
-    // Short subtitle / genre tag shown under DisplayName.
     string Subtitle { get; }
 
-    // Absolute path to a 256×256 PNG icon (shipped with the launcher assets).
+    // Absolute path to a 256×256 PNG shipped in the package.
     string IconPath { get; }
 
-    // --- Version state ---
-    // Updated by CheckForUpdateAsync and InstallOrUpdateAsync.
+    // --- Version state (read on every library refresh — keep cheap) ---
 
-    // The currently installed mod/game version.
-    // e.g. "1.9.13" (matches the GitHub release tag format used by this mod)
     string? InstalledVersion { get; }
 
-    // Absolute path to the directory where this game is installed.
-    // Empty string when the game is not installed.
+    // Empty string when not installed.
     string GameDirectory { get; }
 
-    // The latest available version found on GitHub.
     string? AvailableVersion { get; }
 
-    // Convenience: InstalledVersion != null.
     bool IsInstalled { get; }
 
-    // True while Game.exe (or equivalent) is running.
     bool IsRunning { get; }
 
     // --- Lifecycle ---
 
-    // Poll GitHub for the latest release.
-    // Should not throw on network failure — set AvailableVersion to null and return.
+    // Must not throw on network failure — set AvailableVersion null and return.
     Task CheckForUpdateAsync(CancellationToken ct = default);
 
-    // Download and install (or update to) the latest release from GitHub.
-    // progress: (percent 0–100, status message)
-    // Must be idempotent — safe to call even if already up-to-date.
+    // Must be idempotent; called again when already up to date.
     Task InstallOrUpdateAsync(IProgress<(int Pct, string Msg)> progress,
                               CancellationToken ct = default);
 
-    // Verify the local install is intact (size/SHA check against manifest).
-    // Returns true = OK, false = damaged/missing files detected.
-    // Does NOT repair — caller decides whether to trigger InstallOrUpdateAsync.
+    // Check only; never repair. The caller decides.
     Task<bool> VerifyInstallAsync(CancellationToken ct = default);
 
-    // AutoMod games only (§10): the user located their existing install of
-    // the ORIGINAL game via the launcher's folder picker — check that
-    // `folder` actually looks like that game (right exe, right version, …).
-    // Return null when the folder is acceptable; otherwise a short,
-    // human-readable reason that is shown to the user so they can pick again.
-    // Default accepts any folder — only plugins with real requirements
-    // override this. The launcher stores the accepted location and never
-    // modifies the original install (§11).
+    // Null = the folder the player picked looks right; otherwise a short
+    // reason shown to them so they can pick again.
     string? ValidateExistingInstall(string folder) => null;
 
-    // Launch the game. The launcher passes an already-configured ApSession
-    // so the plugin knows which AP server/slot to bridge to.
-    // The launcher's ApClient for this session is already connected before
-    // LaunchAsync is called; the plugin just needs to open the IPC channel to
-    // the in-game side and start forwarding messages.
+    // The launcher's AP session is already connected when this is called.
     Task LaunchAsync(ApSession session, CancellationToken ct = default);
 
-    // True if this game can be launched without an Archipelago connection.
-    // When true, a "Launch Standalone" button is shown in the game header.
+    // Shows the "Launch Standalone" button.
     bool SupportsStandalone => false;
 
-    // True for browser/web games that require no local installation.
-    // These are never auto-added to a fresh library — the user adds them manually.
+    // Browser games with no local install. Never auto-added to a library.
     bool IsWebBased => false;
 
-    // True when the game ships its OWN native AP client and connects to the
-    // slot itself, rather than letting the launcher hold it. AP servers allow one
-    // connection per slot and kick the older one — so for these games the
-    // launcher must NOT hold an ApClient session on the same slot while the
-    // game runs (launcher and game would endlessly kick each other off).
-    // The launcher launches with credential prefill only and suppresses its
-    // auto-reconnect + "connection lost" toast while the game is running.
+    // --- What the launcher can do, and where the base game comes from ---
+
+    InstallCapability InstallCapability => InstallCapability.AutoInstall;
+
+    // Changes "Get the game" to "Free — get it".
+    bool IsFreeGame => false;
+
+    // Null hides the button.
+    string? PurchaseUrl => null;
+
+    // Null hides the link.
+    string? WebsiteUrl => null;
+
+    // --- Components ---
+
+    // One badge each; launch is refused while anything Required is missing.
+    IReadOnlyList<GameComponent> DetectComponents() => Array.Empty<GameComponent>();
+
+    // Same list, but may first copy files from the player's own base game.
+    // Split from DetectComponents: a question asked to DECIDE things should
+    // not rearrange the disk while answering.
+    IReadOnlyList<GameComponent> DetectComponentsAdopting() => DetectComponents();
+
+    // --- Install problems and repair ---
+
+    // Path is relative to GameDirectory; Reason is shown to the player verbatim.
+    public sealed record InstallProblem(string Path, string Reason);
+
+    // File-by-file integrity scan. Empty = healthy. Null = COULD NOT TELL
+    // (offline, no manifest) — callers must not treat null as failure.
+    Task<IReadOnlyList<InstallProblem>?> ScanInstallProblemsAsync(
+            CancellationToken ct = default)
+        => Task.FromResult<IReadOnlyList<InstallProblem>?>(null);
+
+    // Restore the named files. Unrepairable = not in the release package,
+    // which is reported differently from a failed download.
+    Task<(IReadOnlyList<string> Restored, IReadOnlyList<string> Unrepairable)>
+        RepairFilesAsync(IEnumerable<string> paths,
+                         IProgress<(int Pct, string Msg)> progress,
+                         CancellationToken ct = default)
+        => Task.FromResult<(IReadOnlyList<string>, IReadOnlyList<string>)>(
+               (Array.Empty<string>(), paths.ToList()));
+
+    // DeathLink receive side; send side is IApServices.ReportDeath.
+    Task OnDeathLinkReceivedAsync(string source, string cause) => Task.CompletedTask;
+
+    // --- The base game this one modifies ---
+
+    // Null = nothing to ask (none needed, already known, or just found).
+    // Try to detect it before asking — see PLUGIN_API.md.
+    BaseGameFolderRequest? NeedsBaseGameFolder() => null;
+
+    // False sends the launcher back through the request and a reinstall.
+    bool HasBaseGameFiles() => true;
+
+    // The picked folder was accepted. The plugin persists it; the launcher
+    // keeps no copy.
+    void SetBaseGameFolder(string folder) { }
+
+    // --- The live Archipelago session ---
+
+    // Everything the game can ask of the live connection, or null when the
+    // session ends. See IApServices.
+    void OnApServicesAttached(IApServices? services) { }
+
+    // Session presentation state (slot, hint economy, in-seed names).
+    // Cheap and idempotent by contract — over-calling is the safe failure.
+    void OnApSessionChanged(ApSessionContext? session) { }
+
+    // The Items tab's hint/cheat dialog. Null hides the button.
+    Action<Window, ApSessionContext>? ItemActions => null;
+
+    // --- Locations, without a server ---
+
+    // The game's own location table in DataPackage shape, for standalone runs.
+    System.Text.Json.JsonElement? GetLocationDataPackage() => null;
+
+    // Every location that EXISTS in the standalone run about to start.
+    // Called after LaunchStandaloneAsync — the answer depends on the settings
+    // that launch just wrote.
+    long[] GetStandaloneLocationUniverse() => Array.Empty<long>();
+
+    // Locations that exist but are not yet checked.
+    event Action<long[]>? LocationsMissing;
+
+    // A standalone run handed the player something (no server to route it).
+    event Action<string>? StandaloneItemReceived;
+
+    // --- Achievements ---
+
+    // Prefix for generated achievement ids. FROZEN once shipped: earned
+    // achievements are stored by id, changing this un-earns everything.
+    string AchievementIdPrefix => GameId;
+
+    // Replaces the generic first-goal achievement with the game's actual win
+    // condition. Null keeps the generic one.
+    (string Title, string Description, string Icon)? GoalAchievement => null;
+
+    // Gates the DeathLink achievement — never offer one nobody can earn.
+    bool SendsDeathLink => false;
+
+    IReadOnlyList<GameAchievement> ExtraAchievements
+        => Array.Empty<GameAchievement>();
+
+    // --- About the game ---
+
+    // Wide banner behind the page header. Null = generic banner, then tint.
+    string? HeaderArtPath => null;
+
+    // Empty hides the card.
+    IReadOnlyList<KnownIssue> KnownIssues => Array.Empty<KnownIssue>();
+
+    // Empty hides the credit lines.
+    IReadOnlyList<GameCredit> Credits => Array.Empty<GameCredit>();
+
+    // --- Critical files, right before launch ---
+    // Separate from the integrity scan: antivirus quarantine strikes BETWEEN
+    // install and launch, so an install-time check proves nothing.
+
+    // Files the game cannot start without. Empty = ready.
+    IReadOnlyList<string> GetMissingCriticalFiles() => Array.Empty<string>();
+
+    // One sentence on what usually removes them, shown in the repair prompt.
+    string? MissingCriticalFilesCause => null;
+
+    // Returns how many came back.
+    Task<int> RepairMissingCriticalFilesAsync(IProgress<(int Pct, string Msg)> progress)
+        => Task.FromResult(0);
+
+    // --- Antivirus ---
+
+    // A launch failed and looks like antivirus. True = the game handled it
+    // and showed its own UI; false = launcher shows its generic dialog.
+    Task<bool> TryHandleAntivirusBlockAsync(Window owner, Exception failure)
+        => Task.FromResult(false);
+
+    // --- Commands ---
+
+    // Buttons in the Overview action row. Called on every page draw.
+    IReadOnlyList<GameCommand> GetCommands() => Array.Empty<GameCommand>();
+
+    // The plugin's line into the launcher's log. The plugin writes the whole
+    // line, prefix and all.
+    event Action<string>? LogLine;
+
+    // True when the game ships its own AP client. The launcher then stays off
+    // the slot entirely (AP servers kick the older connection per slot) and
+    // launches with credential prefill only.
     bool ConnectsItself => false;
 
-    // Upstream-update detection (§15): the AP datapackage checksum this
-    // plugin's game integration (RAM map / patch logic) was derived from.
-    // The server announces current checksums in RoomInfo — a mismatch means
-    // the apworld changed upstream and the integration may be stale, which
-    // the launcher surfaces as a warning instead of silently missing checks.
-    // Null = nothing to verify (no checksum-coupled integration).
+    // The AP datapackage checksum this integration was built against; the
+    // launcher warns when the server announces a different one. Null = n/a.
     string? BuiltAgainstDataPackageChecksum => null;
 
-    // Launch the game directly without connecting to Archipelago.
-    // Called only when SupportsStandalone is true and the user clicks
-    // "Launch Standalone". Default implementation is a no-op.
+    // Only used when SupportsStandalone is true.
     Task LaunchStandaloneAsync(CancellationToken ct = default) => Task.CompletedTask;
 
-    // Gracefully stop the game.
-    // if needed, then terminates the process (or waits for clean exit).
+    // Stop cleanly, then make sure the process is gone.
     Task StopAsync();
 
-    // --- AP bridge — plugin side ---
+    // --- AP bridge, launcher-owned connection ---
 
-    // Fired by the plugin when the game completes one or more location checks.
-    // The launcher's ApClient forwards these to the AP server automatically.
-    // long[] = AP location IDs (numeric, not names).
+    // The game completed checks (numeric AP location ids). Forwarded to the server.
     event Action<long[]>? LocationsChecked;
 
-    // Fired when the game process exits (cleanly or crashed).
-    // int = process exit code.
+    // The game process exited, with its exit code.
     event Action<int>? GameExited;
 
-    // Fired when the game signals that the Archipelago goal is complete.
-    // The launcher wires this to SendStatusUpdateAsync(ApClientStatus.Goal).
+    // The Archipelago goal is complete.
     event Action? GoalCompleted;
 
-    // Called by the launcher when the AP server delivers items to this game slot.
-    // index: AP resume index.
-    // items already processed in a previous session (AP dedup contract).
+    // Items arrived for this slot. index = AP resume index (dedup contract).
     Task ReceiveItemsAsync(ApNetworkItem[] items, int index, CancellationToken ct = default);
 
-    // Called when the AP connection state changes.
-    // Plugins can use this to show an in-game HUD indicator (connected/disconnected).
     void OnApStateChanged(ApConnectionState state);
 
-    // Called when the server hands over this slot's slot_data.
-    // Games built into the launcher are reached by a type check; a plugin
-    // cannot be, because the launcher does not reference it. This is how the
-    // seed's own settings get to one.
+    // The seed's slot_data arrived.
     void OnSlotData(System.Text.Json.JsonElement slotData) { }
 
-    // Called once the datapackage for this game has arrived, with the seed's
-    // location name -> AP id table.
-    // Most games report checks by id and can ignore this. A game that reports
-    // them by name, holding no id table of its own, needs somebody to resolve
-    // them — and the launcher is the side that already knows.
+    // The seed's location name -> id table, for games that report by name.
     void OnLocationTable(IReadOnlyDictionary<string, long> nameToId) { }
 
-    // Called when scout replies arrive, mapping location id -> "player (game)".
-    // For games that show what a location contains before taking it.
+    // Scout replies: location id -> "player (game)".
     void OnLocationHints(IReadOnlyDictionary<long, string> idToLabel) { }
 
-    // --- Settings UI ---
+    // --- UI (both called on the UI thread only) ---
 
-    // Return a WPF UIElement shown in the launcher's Settings tab for this game.
-    // May return null if the game has no launcher-side settings.
-    // Called on the UI thread.
+    // Null = no settings gear.
     UIElement? CreateSettingsPanel();
 
-    // --- Map tracker (optional) ---
-
-    // True when this game ships a graphical map tracker (PopTracker-style:
-    // an area/world overview with a "you are here" marker + per-area checks,
-    // objectives and lock state).
-    // "not available yet" placeholder.
-    // map integration opt in.
+    // Shows the Map tab.
     bool SupportsMapTracker => false;
 
-    // Return the WPF map-tracker UI for this game, or null.
-    // it under the Map tab and calls this on the UI thread only when
-    // SupportsMapTracker is true.
-    // the launcher core stays game-agnostic (mirrors CreateSettingsPanel).
+    // Only called when SupportsMapTracker is true.
     UIElement? CreateMapTrackerPanel() => null;
 
-    // --- Game store / catalog ---
-    // Used by the "Browse Games" store page to show what the game is about.
+    // --- Presentation ---
 
-    // One-paragraph description shown in the store listing.
+    // One-paragraph description on the Overview.
     string Description { get; }
 
-    // URL of a YouTube or direct video link previewed in the store page.
-    // null if no video is available.
+    // Ignored for disk-loaded plugins (remote media is never fetched).
     string? VideoPreviewUrl { get; }
 
-    // URLs of screenshot images shown in the store carousel.
+    // Ignored for disk-loaded plugins.
     string[] ScreenshotUrls { get; }
 
-    // The AP world name as registered in Archipelago (used for DataPackage lookup).
-    // The game name as Archipelago knows it, e.g. from the seed's YAML
+    // The game name as Archipelago knows it (DataPackage lookup).
     string ApWorldName { get; }
 
-    // --- Visual identity ---
-    // Used by the launcher UI to theme the game's detail header and sidebar card.
-
-    // Hex accent color blended into the game header background.
-    // The launcher mixes this with the neutral base at ~25% strength.
+    // Hex accent blended into the header background at ~25%.
     string ThemeAccentColor { get; }
 
-    // Short requirement/info badges shown in the header next to version badges.
-    // e.g. ["Requires D2"] or []. Keep to 1–2 items maximum.
+    // 1-2 short badges next to the version badges, e.g. ["Requires D2"].
     string[] GameBadges { get; }
 
-    // --- News feed ---
-    // Shown on the game's news/patch notes page.
-
-    // Fetch the latest news items for this game (patch notes, announcements).
-    // Returns at most 20 items, newest first.
-    // Implementations typically parse GitHub releases or a hosted news.json.
+    // Patch notes / announcements, newest first, at most 20.
     Task<NewsItem[]> GetNewsAsync(CancellationToken ct = default);
 }
 
-// --- Supporting types for store and news ---
-
-// One news / patch-note entry shown on a game's news page.
+// One entry on a game's news page.
 public sealed record NewsItem(
     string Title,        // e.g. "Beta 1.9.14 released"
     string Body,         // markdown body
@@ -237,8 +374,6 @@ public sealed record NewsItem(
     DateTimeOffset Date, // publish date
     string? Url          // link to full release page, or null
 );
-
-// --- Supporting types shared across Core + Plugins ---
 
 public enum ApConnectionState
 {
@@ -248,19 +383,19 @@ public enum ApConnectionState
     Error
 }
 
-// Describes one AP session (connection credentials for one game slot).
+// Connection credentials for one AP slot.
 public sealed record ApSession(
     string ServerUri,   // e.g. "archipelago.gg:38281" or "ws://localhost:38281"
-    string SlotName,    // AP player slot name
-    string Password,    // "" if no password
-    string Game,        // AP game name e.g. "Diablo II Archipelago"
+    string SlotName,
+    string Password,    // "" if none
+    string Game,        // AP game name, e.g. "Diablo II Archipelago"
     string? Uuid = null // auto-generated if null
 );
 
-// One item received from the AP server for this game slot.
+// One item received from the AP server.
 public sealed record ApNetworkItem(
-    long ItemId,      // AP item ID (numeric)
-    long LocationId,  // AP location ID where this item was found
+    long ItemId,
+    long LocationId,
     int  Player,      // AP player slot that found it
     int  Flags        // AP item classification flags
 );

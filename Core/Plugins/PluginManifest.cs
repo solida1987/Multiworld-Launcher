@@ -6,18 +6,8 @@ using System.Text.RegularExpressions;
 
 namespace LauncherV2.Core.Plugins;
 
-// What a plugin says it is, read before any of its code runs.
-//
-// This is the whole point of shipping a manifest next to the assembly: the
-// launcher can tell the player who made this, what it installs, and where it
-// downloads from, while the plugin is still an inert file. A manifest that lies
-// is at least a lie the player can see. An assembly that lies can only be
-// caught afterwards.
-//
-// Nothing here is enforced technically — we cannot sandbox .NET, and pretending
-// otherwise would be worse than being honest. `Declares` is a statement by the
-// author, shown to the player, and something we can point at if it turns out
-// to be false.
+// plugin.json, read and validated before any plugin code runs. The
+// declares block is what the consent dialog shows.
 
 /// <summary>What the plugin says it does. Author's word, not a restriction.</summary>
 public sealed record PluginDeclarations(

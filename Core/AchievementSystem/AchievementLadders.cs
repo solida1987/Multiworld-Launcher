@@ -13,11 +13,11 @@ namespace LauncherV2.Core.AchievementSystem;
 // AchievementDefinitions.
 
 // IDs ARE A PERSISTENCE CONTRACT.
-// achievements.json, so a generated id must NEVER change once shipped:
-// • Known games use the frozen alias map below (diablo2_archipelago → "d2").
-// • Every other game derives its prefix from its GameId verbatim — adding a
-// plugin automatically grows the ladder set with stable ids and NO edits
-// here. Do not add aliases for games that have already shipped without one.
+// achievements.json, so a generated id must NEVER change once shipped.
+// Each plugin names its own prefix via IGamePlugin.AchievementIdPrefix, and
+// defaults to its GameId. The launcher used to hold an alias table for this
+// (diablo2_archipelago → "d2"), which put one game's frozen id somewhere it
+// could be broken by someone who had never heard of that game.
 
 // HONESTY: every rule reads real tracked state (AchievementStore counters and
 // sessions, LibraryStore).
@@ -41,16 +41,6 @@ public sealed record LadderRule(string Id, string? GameId, Func<AchievementStore
 
 public static class AchievementLadders
 {
-    // --- Frozen id-prefix aliases ---
-    // Only for games that shipped WITH an alias.
-    private static readonly Dictionary<string, string> IdAliases = new()
-    {
-        ["diablo2_archipelago"] = "d2",
-    };
-
-    private static string Prefix(string gameId)
-        => IdAliases.GetValueOrDefault(gameId, gameId);
-
     // --- Lazily generated (plugins are registered before first UI access) ---
     private static readonly Lazy<(IReadOnlyList<AchievementDefinition> Defs,
                                   IReadOnlyList<LadderRule>            Rules)> _generated
@@ -81,7 +71,7 @@ public static class AchievementLadders
         foreach (var plugin in GameRegistry.All)
         {
             string id   = plugin.GameId;
-            string p    = Prefix(id);
+            string p    = plugin.AchievementIdPrefix;
             string name = plugin.DisplayName;
 
             Func<AchievementStore, bool> Counter(string kind, long n)
@@ -126,7 +116,7 @@ public static class AchievementLadders
             }
 
             // Goals: first + milestones (game-specific flavor when available)
-            var goalFlavor = GameFlavorText.GoalFlavor(id);
+            var goalFlavor = plugin.GoalAchievement;
             Add(new AchievementDefinition
             {
                 Id          = $"{p}_goal_1",
@@ -186,8 +176,9 @@ public static class AchievementLadders
                 }, id, store => store.TotalSessions(id) >= c);
             }
 
-            // DeathLink — D2 only for now (the only plugin with a send path).
-            if (id == "diablo2_archipelago")
+            // DeathLink — only for games that can actually send one. An
+            // achievement nobody can earn is worse than no achievement.
+            if (plugin.SendsDeathLink)
             {
                 Add(new AchievementDefinition
                 {

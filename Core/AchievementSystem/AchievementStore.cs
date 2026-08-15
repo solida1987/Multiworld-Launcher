@@ -22,14 +22,7 @@ namespace LauncherV2.Core.AchievementSystem;
 // evaluated after every counter increment and on session end.
 // start at 0 — play from before the feature existed has not counted.
 
-// THREAD SAFETY: all public methods are safe to call from any thread.
-// Collection access is guarded by locks on _sessions/_earned/_counterLock;
-// Save() serializes SNAPSHOTS taken under those locks and writes the files
-// under a dedicated save lock, so concurrent EndSession calls (game exit
-// racing a manual disconnect) can neither corrupt the JSON nor interleave
-// writes. (P2-21: an earlier version of this header claimed a queue +
-// background flush timer that never existed, while Save() serialized the
-// live collections outside the writers' locks.)
+// THREAD SAFETY: all public methods lock; events may fire on any thread.
 
 public sealed class AchievementStore
 {
@@ -432,10 +425,21 @@ public sealed class AchievementStore
             // --- Session duration ---
             "session_1h"          => latest.Duration >= TimeSpan.FromHours(1),
             "session_4h"          => latest.Duration >= TimeSpan.FromHours(4),
-            // --- D2-specific ---
-            "d2_speed"            => FastestGoal("diablo2_archipelago") is { } t && t <= TimeSpan.FromHours(4),
-            _                     => false
+            // Anything else is a plugin's own achievement -- ask the plugin
+            // that declared it. The launcher used to carry one game's rule in
+            // this switch ("under four hours" for Diablo), which meant every
+            // future game would have added a line here.
+            _ => PluginRule(def.Id) is { } rule && rule(this),
         };
+    }
+
+    // Find the unlock rule a plugin declared for one of its own achievements.
+    private static Func<AchievementStore, bool>? PluginRule(string id)
+    {
+        foreach (var plugin in GameRegistry.All)
+            foreach (var extra in plugin.ExtraAchievements)
+                if (extra.Id == id) return extra.IsMet;
+        return null;
     }
 }
 
@@ -492,10 +496,6 @@ public static class AchievementDefinitions
         new() { Id = "session_4h",       Title = "All-Nighter",          Icon = "🌙", Tier = "silver",
                 Description = "Play a single session for at least 4 hours." },
 
-        // --- Diablo II Archipelago — flavor (the basics live in the ladders) ---
-        new() { Id = "d2_speed",         Title = "Speed Demon",         Icon = "🔴", Tier = "gold",
-                GameId = "diablo2_archipelago",
-                Description = "Complete a Diablo II: Lord of Destruction run in under 4 hours." },
     };
 
     // Every achievement the launcher knows: the handwritten set above plus
@@ -505,7 +505,15 @@ public static class AchievementDefinitions
     public static IReadOnlyList<AchievementDefinition> All => _all.Value;
 
     private static readonly Lazy<IReadOnlyList<AchievementDefinition>> _all =
-        new(() => Handwritten.Concat(AchievementLadders.Definitions).ToList());
+        new(() => Handwritten
+            .Concat(AchievementLadders.Definitions)
+            .Concat(GameRegistry.All.SelectMany(p => p.ExtraAchievements.Select(
+                e => new AchievementDefinition
+                {
+                    Id     = e.Id,     Title = e.Title, Description = e.Description,
+                    Icon   = e.Icon,   Tier  = e.Tier,  GameId      = p.GameId,
+                })))
+            .ToList());
 
     // Point value of a tier — the page shows these instead of the tier word.
     // bronze = 10, silver = 25, gold = 50, platinum = 100.

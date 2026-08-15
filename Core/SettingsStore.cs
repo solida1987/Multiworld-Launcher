@@ -23,8 +23,11 @@ public sealed record RecentConnection
 public sealed class LauncherSettings
 {
     // Absolute path to the user's OWN original Classic Diablo II + LoD install.
-    // Used only as the source to copy the Blizzard MPQ data files from; the mod
-    // itself installs into Games/diablo2_archipelago.
+    // ⚠ LEGACY, read once and migrated. See PluginValues below.
+    //
+    // The launcher used to hold three settings named after one game. Kept as
+    // properties so an existing launcher_settings.json still deserialises and
+    // its values can be carried across; nothing writes them any more.
     [JsonPropertyName("diablo2_path")]
     public string DiabloIIPath { get; set; } = string.Empty;
 
@@ -39,18 +42,18 @@ public sealed class LauncherSettings
     [JsonPropertyName("apworld_sync_dir")]
     public string ApworldSyncDir { get; set; } = string.Empty;
 
-    // Override URL for the game catalog JSON feed.
-    // If null, uses GameCatalog.DefaultCatalogUrl (the public catalog repo).
-    [JsonPropertyName("catalog_url")]
-    public string? CatalogUrl { get; set; } = null;
-
-    // Launch Diablo II in windowed mode (-w flag).
+    // ⚠ LEGACY, read once and migrated. See PluginValues below.
     [JsonPropertyName("d2_windowed")]
     public bool D2Windowed { get; set; } = false;
 
-    // Disable Diablo II in-game music/sound on launch (-ns flag).
+    // ⚠ LEGACY, read once and migrated. See PluginValues below.
     [JsonPropertyName("d2_no_sound")]
     public bool D2NoSound { get; set; } = false;
+
+    // Per-plugin settings: gameId -> (key -> value). Strings on purpose — a
+    // typed shape would make the launcher know what plugins store.
+    [JsonPropertyName("plugin_values")]
+    public Dictionary<string, Dictionary<string, string>> PluginValues { get; set; } = new();
 
     // One-time: the launcher + game folders have been added to (or already exist
     // in) Windows Defender's exclusions.

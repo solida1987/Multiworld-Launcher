@@ -68,6 +68,13 @@ public static class PluginInstallFlow
         }
 
         GameRegistry.Register(loaded.Plugin);
+
+        // Into the library, so it appears in the sidebar the moment the player
+        // approves it. Adding a plugin IS the act of putting a game there;
+        // asking them to add it a second time in a different place would be a
+        // step that exists only because the code was written in two halves.
+        LibraryStore.Add(m.GameId);
+
         return new Outcome(true, $"{m.DisplayName} was added.", loaded);
     }
 

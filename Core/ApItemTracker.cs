@@ -207,15 +207,8 @@ public sealed class ApItemTracker
         {
             foreach (var raw in items)
             {
-                // de-duplicate. The AP server replays the FULL item history on
-                // every (re)connect, and the D2 plugin additionally issues up to three
-                // resyncs per session, so the Received tab used to list the same items
-                // 4-5 times over (cpuff).
-                // originated items share a sentinel LocationId (-2 precollected,
-                // -1 !getitem) with Player=0, so a location-only key collapsed all 6
-                // precollected starting skills into one visible row.
-                // included, replays still dedup (same item, same sentinel) while
-                // distinct server-granted items stay distinct.
+                // De-dup: the server replays the FULL item history on reconnect; the
+                // index, not the item, decides novelty.
                 var key = (raw.LocationId, raw.Player, receiverSlot, raw.ItemId);
                 if (!_seenKeys.Add(key)) continue;
 

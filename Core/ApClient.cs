@@ -21,14 +21,7 @@ namespace LauncherV2.Core;
 // the plugin reports checks by firing LocationsChecked, which the launcher
 // intercepts and forwards to the AP server via SendLocationsCheckedAsync.
 
-// THREADING
-// ConnectAsync starts a receive loop on a background Task.
-// on that background thread — handlers must marshal to UI thread if needed.
-// SendXxxAsync is safe to call from any thread: a SemaphoreSlim serialises
-// the send path, because ClientWebSocket allows at most ONE outstanding
-// SendAsync — a second concurrent call throws InvalidOperationException
-// (concurrent senders are real: UI chat/toggles, the receive loop's
-// connect burst, and the game plugin's pipe-loop check forwarding).
+// THREADING: receive loop on its own task; events fire there — subscribers marshal.
 
 // RECONNECT
 // No automatic retry loop in V2.0.0 — if the connection drops, GameExited
@@ -690,15 +683,8 @@ public sealed class ApClient : IAsyncDisposable
         // Cloned so it outlives the receive buffer's JsonDocument.
         if (el.TryGetProperty("slot_data", out var slotDataEl))
             SlotData = slotDataEl.Clone();
-        // The replay set belongs to ONE room.
-        // different slot in the same one) with the old set still loaded made the
-        // reconnect path below announce the previous world's locations as checked
-        // in the new one: the server dutifully handed out the items behind them,
-        // some of which came back to this slot, and the mod recorded those as its
-        // own progress. A brand-new character opened with ten checks already done
-        // and four items posted to another player.
-        // its eleven checks were exactly the ones the previous seed's character had.
-        // The set is keyed on the room now and dropped whenever the room changes.
+        // The replay set belongs to ONE room — a new room id wipes it, or a
+        // reconnect would replay the previous seed's checks into the new slot.
         {
             string roomKey = (SeedName ?? "") + "|" + _slot + "|" + _team;
             if (_checkedRoomKey != roomKey)

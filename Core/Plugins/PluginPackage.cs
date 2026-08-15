@@ -7,18 +7,7 @@ using System.Text;
 
 namespace LauncherV2.Core.Plugins;
 
-// A .londonplugin file, opened without running anything inside it.
-//
-// The order matters and is the whole security model:
-//
-//   1. hash the file          — identity of exactly these bytes
-//   2. read plugin.json       — who it says it is
-//   3. ask the player         — with 1 and 2 on screen
-//   4. extract                — only after a yes
-//   5. load the assembly      — only after extraction
-//
-// Steps 1 and 2 read the archive; they never write to disk and never execute.
-// A package the player declines leaves nothing behind.
+// A .londonplugin (zip), inspected without running anything inside it.
 
 /// <summary>A package inspected but not yet installed.</summary>
 public sealed record PluginCandidate(

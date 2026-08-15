@@ -5,17 +5,9 @@ using System.Runtime.Loader;
 
 namespace LauncherV2.Core.Plugins;
 
-// One load context per plugin, so a plugin can be unloaded again without
-// restarting the launcher — the player drops a file in, changes their mind,
-// removes it, and nothing lingers.
-//
-// The subtle part is what must NOT be loaded from the plugin's own folder.
-// A plugin references the launcher to get IGamePlugin. If we let it load its
-// own copy of that assembly, its IGamePlugin would be a different type from
-// ours — same name, same shape, different identity — and every cast would fail
-// with a message that makes no sense ("cannot convert IGamePlugin to
-// IGamePlugin"). So anything the host already has must resolve to the host's
-// copy, and only the plugin's private dependencies come from its folder.
+// One collectible AssemblyLoadContext per plugin so it can be unloaded.
+// Launcher assemblies resolve to the HOST's copy — a second copy would make
+// IGamePlugin a different type and the cast would fail.
 
 internal sealed class PluginLoadContext : AssemblyLoadContext
 {

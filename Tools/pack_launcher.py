@@ -20,6 +20,8 @@ import os
 import sys
 import zipfile
 
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 # Runtime state. Matched on the archive path, case-insensitively.
 EXCLUDE_PATHS = {
     "data/library.json",
@@ -101,6 +103,31 @@ def main():
                       % (expect_version, hits))
     if size_mb < 50:
         problems.append("zip er kun %.1f MB — ser afkortet ud" % size_mb)
+
+    # ---- every asset in the source tree must be in the zip ---------------
+    #
+    # A missing asset is invisible: the logo silently does not draw, an icon
+    # falls back to the generic one, a sound does not play. Nothing errors,
+    # nothing logs, and the first report is a screenshot with a blank space
+    # in it. The build has skipped an asset copy at least once on this
+    # machine without saying so, so the zip -- not the build -- is where
+    # this gets checked.
+    missing = []
+    src_assets = os.path.join(ROOT, "Assets")
+    if os.path.isdir(src_assets):
+        for root, _dirs, files in os.walk(src_assets):
+            for fn in files:
+                rel = os.path.relpath(os.path.join(root, fn), ROOT)
+                if rel.replace("\\", "/").lower() not in lower:
+                    missing.append(rel)
+    if missing:
+        for m in sorted(missing)[:12]:
+            problems.append("zip mangler asset: " + m)
+        if len(missing) > 12:
+            problems.append("...og %d asset(s) mere" % (len(missing) - 12))
+    else:
+        print("  alle %d assets er med"
+              % sum(len(f) for _r, _d, f in os.walk(src_assets)))
 
     if problems:
         print()

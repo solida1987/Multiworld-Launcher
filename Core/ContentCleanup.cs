@@ -4,20 +4,9 @@ using System.Linq;
 
 namespace LauncherV2.Core;
 
-// ContentCleanup — one-shot removal of every non-Diablo game this launcher
-// previously installed or cached on the user's machine.
-//
-// WHY THIS EXISTS
-// The launcher used to carry a large game catalog. That catalog is gone: from
-// this version on, only the two Diablo II channels remain. Anything the old
-// catalog put on disk — installed game folders, fetched apworlds, cached
-// thumbnails and hero art — must not linger on users' machines, so the first
-// run of this version sweeps it.
-//
-// SCOPE — deliberately narrow. Only directories THIS launcher owns are
-// touched: Games\, Assets caches, and the CatalogRepo mirror next to the exe.
-// Nothing outside the launcher's own folder is ever deleted, and the two
-// Diablo channels (installs, saves, seeds) are explicitly kept.
+// ContentCleanup — one-shot removal of what the retired catalogue left on
+// players' machines. Touches only the launcher's own folders; runs once per
+// stamp version.
 public static class ContentCleanup
 {
     private static readonly string[] KeepGameIds =
@@ -124,8 +113,17 @@ public static class ContentCleanup
         return changed;
     }
 
+    // The launcher's OWN artwork, which is not game art and must never be
+    // swept. This list existed implicitly and wrongly: logo.png matched none
+    // of the keep-prefixes below, so every machine that ran the sweep deleted
+    // the front-page logo — the very image the CC BY-NC attribution on that
+    // page credits. The text stayed and the artwork went.
+    //
+    // Add to this list whenever the launcher gains an asset of its own.
+    private static readonly string[] LauncherOwnArt = { "logo" };
+
     // Deletes .png files in ONE directory (not subdirectories) whose name does
-    // not belong to a kept game or the generic fallbacks.
+    // not belong to a kept game, the generic fallbacks, or the launcher itself.
     private static int DeleteForeignArt(string dir)
     {
         int removed = 0;
@@ -139,7 +137,8 @@ public static class ContentCleanup
                 bool keep =
                     name.StartsWith("diablo2_", StringComparison.OrdinalIgnoreCase) ||
                     name.StartsWith("_generic", StringComparison.OrdinalIgnoreCase) ||
-                    name.StartsWith("placeholder", StringComparison.OrdinalIgnoreCase);
+                    name.StartsWith("placeholder", StringComparison.OrdinalIgnoreCase) ||
+                    LauncherOwnArt.Contains(name, StringComparer.OrdinalIgnoreCase);
                 if (keep) continue;
                 try
                 {
