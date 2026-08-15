@@ -77,12 +77,12 @@ public static class ApworldSync
         return found;
     }
 
-    // Copy one plugin's .apworld files into <paramref name="targetDir"/>.
+    // Copy one plugin's .apworld files into targetDir.
     // Never throws.
     public static ApworldSyncResult Sync(IGamePlugin plugin, string? targetDir)
         => Sync(new[] { plugin }, targetDir);
 
-    // Copy several plugins' .apworld files into <paramref name="targetDir"/>.
+    // Copy several plugins' .apworld files into targetDir.
     // Never throws.
     public static ApworldSyncResult Sync(IEnumerable<IGamePlugin> plugins, string? targetDir)
     {
@@ -109,7 +109,7 @@ public static class ApworldSync
     // The copy half, split out from plugin discovery so the semantics that
     // actually matter — overwrite, skip-identical, self-copy, per-file failure
     // — can be exercised directly without standing up a game plugin.
-    // Assumes <paramref name="dest"/> already exists.
+    // Assumes dest already exists.
     public static ApworldSyncResult CopyInto(IEnumerable<string> sources, string dest)
     {
         int copied = 0, upToDate = 0, failed = 0;

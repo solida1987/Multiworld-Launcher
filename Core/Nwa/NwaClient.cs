@@ -195,7 +195,7 @@ public sealed class NwaClient : IDisposable
         return sb.ToString();
     }
 
-    // Fill <paramref name="count"/> bytes of <paramref name="buf"/> or throw on EOF.
+    // Fill count bytes of buf or throw on EOF.
     private async Task ReadExactAsync(byte[] buf, int count, CancellationToken ct)
     {
         int got = 0;

@@ -8,10 +8,10 @@ using DrawingColor = System.Drawing.Color;
 
 namespace LauncherV2.Core;
 
-// <summary>
+//
 // Manages a Windows system tray icon.
 // can restore or stop the launcher without hunting for it on the taskbar.
-// </summary>
+//
 public sealed class SystemTrayManager : IDisposable
 {
     // --- State ---
@@ -21,18 +21,18 @@ public sealed class SystemTrayManager : IDisposable
 
     // --- Events ---
 
-    // <summary>User clicked "Open Launcher" from the tray menu.</summary>
+    // User clicked "Open Launcher" from the tray menu.
     public event Action? OpenRequested;
 
-    // <summary>User clicked "Stop Game" from the tray menu.</summary>
+    // User clicked "Stop Game" from the tray menu.
     public event Action? StopGameRequested;
 
     // --- Public API ---
 
-    // <summary>
+    //
     // Show the tray icon with the given tooltip.
     // Call when the game process starts.
-    // </summary>
+    //
     public void Show(string tooltip = "Multiworld Launcher")
     {
         if (_disposed) return;
@@ -42,17 +42,17 @@ public sealed class SystemTrayManager : IDisposable
         _notify!.Visible = true;
     }
 
-    // <summary>
+    //
     // Hide (but do not destroy) the tray icon.
     // Call when the game process exits.
-    // </summary>
+    //
     public void Hide()
     {
         if (_notify != null)
             _notify.Visible = false;
     }
 
-    // <summary>Show a balloon tip notification from the tray icon.</summary>
+    // Show a balloon tip notification from the tray icon.
     public void ShowBalloon(string title, string text, int timeoutMs = 3000)
     {
         if (_notify is { Visible: true })
@@ -124,13 +124,13 @@ public sealed class SystemTrayManager : IDisposable
         return menu;
     }
 
-    // <summary>
+    //
     // Build the tray icon programmatically — gold "AP" text on a dark
     // background, no .ico file required.
     // icon size (16 px at 100% DPI, larger when scaled): rendering 12 pt
     // text into a 32×32 bitmap and letting Windows shrink it made the tray
     // icon blurry at standard DPI (P3-12).
-    // </summary>
+    //
     private static Icon BuildProgrammaticIcon()
     {
         int size = Math.Max(16, SystemInformation.SmallIconSize.Width);

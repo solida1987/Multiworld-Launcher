@@ -13,11 +13,11 @@ namespace LauncherV2.Core;
 
 public static class SteamLocator
 {
-    // <summary>
-    // Return the install directory for the Steam game with <paramref name="appId"/>
-    // (e.g. 405640 for Pony Island), or <c>null</c> when the game is not found.
+    //
+    // Return the install directory for the Steam game with appId
+    // (e.g. 405640 for Pony Island), or null when the game is not found.
     // Searches every Steam library folder on this PC.
-    // </summary>
+    //
     public static string? FindGameDir(int appId)
     {
         try

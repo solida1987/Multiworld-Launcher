@@ -6,10 +6,10 @@ using System.Windows.Media.Animation;
 
 namespace LauncherV2.UI.Pages;
 
-// <summary>
+//
 // Lightweight splash screen shown during launcher startup.
-// Call <see cref="FadeOutAsync"/> when the main window is ready to take over.
-// </summary>
+// Call FadeOutAsync when the main window is ready to take over.
+//
 public partial class SplashWindow : Window
 {
     public SplashWindow()
@@ -35,10 +35,10 @@ public partial class SplashWindow : Window
         });
     }
 
-    // <summary>
+    //
     // Fades the splash window out over 300 ms, then closes it.
     // Awaitable — callers can await this before activating the main window.
-    // </summary>
+    //
     public Task FadeOutAsync()
     {
         var tcs = new TaskCompletionSource<bool>();

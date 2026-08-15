@@ -9,11 +9,11 @@ using System.Windows.Media;
 
 namespace LauncherV2.UI.Pages;
 
-// <summary>
+//
 // Floating window that renders a plain-text or light-Markdown install guide.
 // Supports: ## Headings, ### Sub-headings, - Bullet lists, **Bold** text,
 // blank lines as spacers, and https:// URLs (rendered as hyperlinks).
-// </summary>
+//
 public partial class InstallGuideWindow : Window
 {
     public InstallGuideWindow(string title, string markdownText)

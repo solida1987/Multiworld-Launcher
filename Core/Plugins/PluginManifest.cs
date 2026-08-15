@@ -9,7 +9,7 @@ namespace LauncherV2.Core.Plugins;
 // plugin.json, read and validated before any plugin code runs. The
 // declares block is what the consent dialog shows.
 
-/// <summary>What the plugin says it does. Author's word, not a restriction.</summary>
+/// What the plugin says it does. Author's word, not a restriction.
 public sealed record PluginDeclarations(
     bool     InstallsFiles,
     string[] DownloadsFrom,
@@ -20,7 +20,7 @@ public sealed record PluginDeclarations(
     public static PluginDeclarations Empty =>
         new(false, Array.Empty<string>(), false, false, false);
 
-    /// <summary>Bullet lines for the consent dialog. Empty when it claims nothing.</summary>
+    /// Bullet lines for the consent dialog. Empty when it claims nothing.
     public IReadOnlyList<string> Describe(string gameId)
     {
         var lines = new List<string>();
@@ -50,23 +50,23 @@ public sealed record PluginManifest(
 {
     public const string FileName = "plugin.json";
 
-    /// <summary>The API revision this launcher can load. Bump when IGamePlugin changes.</summary>
-    /// <remarks>
+    /// The API revision this launcher can load. Bump when IGamePlugin changes.
+    ///
     /// 2: OnLocationTable and OnLocationHints, for games that report checks by
     ///    name instead of id. Both have default implementations, so a plugin
     ///    built for 1 still compiles -- but it would load against a launcher
     ///    that has moved on, so the number moves too.
-    /// </remarks>
+    ///
     public const int CurrentApiVersion = 2;
 
     // A game id becomes a folder name and a registry key. Anything outside this
     // set is either a path escape or a collision waiting to happen.
     private static readonly Regex GameIdShape = new(@"^[a-z0-9][a-z0-9_]{1,63}$", RegexOptions.Compiled);
 
-    /// <summary>
-    /// Parse and validate. Returns null and fills <paramref name="error"/> on
+    ///
+    /// Parse and validate. Returns null and fills error on
     /// anything wrong — a bad manifest is a normal event, not an exception.
-    /// </summary>
+    ///
     public static PluginManifest? Parse(string json, out string error)
     {
         error = "";

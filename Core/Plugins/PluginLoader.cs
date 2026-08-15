@@ -29,7 +29,7 @@ public sealed class LoadedPlugin
         Manifest = manifest; Directory = directory; Plugin = plugin; Context = context;
     }
 
-    /// <summary>Detach and drop the context so the files can be replaced.</summary>
+    /// Detach and drop the context so the files can be replaced.
     public void Unload()
     {
         Plugin.Detach();
@@ -40,11 +40,11 @@ public sealed class LoadedPlugin
 
 public static class PluginLoader
 {
-    /// <summary>
+    ///
     /// Load one approved plugin folder. Returns null and fills
-    /// <paramref name="error"/> rather than throwing — a broken plugin is a
+    /// error rather than throwing — a broken plugin is a
     /// line in the UI, not a crash on startup.
-    /// </summary>
+    ///
     public static LoadedPlugin? Load(string directory, PluginManifest manifest, out string error)
     {
         error = "";
@@ -118,11 +118,11 @@ public static class PluginLoader
         }
     }
 
-    /// <summary>
+    ///
     /// Every installed plugin that the player has approved and whose files
-    /// still match. Anything else comes back in <paramref name="problems"/> so
+    /// still match. Anything else comes back in problems so
     /// the UI can say why instead of silently showing fewer games.
-    /// </summary>
+    ///
     public static IReadOnlyList<LoadedPlugin> LoadApproved(out IReadOnlyList<string> problems)
     {
         var loaded = new List<LoadedPlugin>();

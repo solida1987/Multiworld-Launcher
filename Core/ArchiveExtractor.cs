@@ -19,7 +19,7 @@ public static class ArchiveExtractor
     private static string SystemTar =>
         Path.Combine(Environment.SystemDirectory, "tar.exe");
 
-    // Extract <paramref name="archivePath"/> into <paramref name="destDir"/>
+    // Extract archivePath into destDir
     // (created if missing), choosing the method from the file extension.
     // Throws on any failure.
     public static void Extract(string archivePath, string destDir)
@@ -83,8 +83,8 @@ public static class ArchiveExtractor
     }
 
     // Many emulator archives unpack into a single top-level folder
-    // (e.g. snes9x-1.63-nwa-win32-x64\snes9x-x64.exe). If <paramref name="destDir"/>
-    // ended up with exactly one sub-directory and the <paramref name="sentinelExe"/>
+    // (e.g. snes9x-1.63-nwa-win32-x64\snes9x-x64.exe). If destDir
+    // ended up with exactly one sub-directory and the sentinelExe
     // is NOT already at the top level, lift the inner folder's contents up one
     // level so callers find the exe directly under destDir.
     // layout is already flat.
@@ -110,9 +110,9 @@ public static class ArchiveExtractor
     }
 
     // Find the first release asset whose name matches a backend's archive
-    // pattern. <paramref name="systemTag"/> is the platform token in the asset
+    // pattern. systemTag is the platform token in the asset
     // name ("win-x64" for BizHawk, "win32-x64" for snes9x-emunwa) and
-    // <paramref name="ext"/> is the extension (".zip"/".7z").
+    // ext is the extension (".zip"/".7z").
     // name or null. Kept here so the per-backend asset rule lives next to the
     // extractor that consumes it.
     public static string? MatchAssetName(System.Collections.Generic.IEnumerable<string> assetNames,

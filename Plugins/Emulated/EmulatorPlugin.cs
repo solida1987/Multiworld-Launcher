@@ -127,7 +127,7 @@ public abstract class EmulatorPlugin : IGamePlugin
     public bool StartFullscreen { get; set; }
 
     /// Root directory where the SELECTED backend is (or will be) installed:
-    /// Emulators/&lt;subdir&gt;. Computed (not stored) so install/launch/trace/
+    /// Emulators/<subdir>. Computed (not stored) so install/launch/trace/
     /// config always target the chosen emulator. BizHawk keeps its historical
     /// "Emulators/BizHawk"; snes9x lands in "Emulators/snes9x".
     public string EmulatorDirectory

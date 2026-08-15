@@ -27,7 +27,7 @@ internal sealed class PluginConsentDialog : Window
         return br;
     }
 
-    /// <summary>Seconds the approve button stays disabled.</summary>
+    /// Seconds the approve button stays disabled.
     private const int ReadDelaySeconds = 3;
 
     private readonly Button _approve;
@@ -35,10 +35,10 @@ internal sealed class PluginConsentDialog : Window
     private int _remaining = ReadDelaySeconds;
     private bool _approved;
 
-    /// <summary>
+    ///
     /// Ask the player. Returns true when they approved; the caller then
     /// installs and records the hash. Returns false on cancel or close.
-    /// </summary>
+    ///
     public static bool Ask(Window? owner, PluginCandidate candidate)
     {
         if (!candidate.IsUsable) return false;

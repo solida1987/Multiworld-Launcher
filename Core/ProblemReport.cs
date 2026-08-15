@@ -7,7 +7,7 @@ using System.Text;
 
 namespace LauncherV2.Core;
 
-// <summary>
+//
 // Collects everything needed to diagnose a crash into ONE zip on the Desktop.
 
 // The problem this solves: the game already writes a good crash log
@@ -19,7 +19,7 @@ namespace LauncherV2.Core;
 // So the player is never asked to find anything.
 // Desktop with an obvious name, and it is produced automatically when a game
 // exits abnormally as well as on demand.
-// </summary>
+//
 internal static class ProblemReport
 {
     // Per-file cap. Logs from a long session can reach tens of megabytes, and
@@ -49,11 +49,11 @@ internal static class ProblemReport
         "data", "mpq", "save", "screenshots", "cache", "_apbackup",
     };
 
-    // <summary>
+    //
     // Build the report and return the full path of the zip that was written.
     // Throws only if the Desktop itself is unwritable; individual files that
     // cannot be read are recorded in the manifest instead of aborting.
-    // </summary>
+    //
     internal static string Build(string diagnosticsText,
                                  IEnumerable<(string GameId, string Directory, bool Installed)> games,
                                  string? trigger = null,
@@ -256,12 +256,12 @@ internal static class ProblemReport
         return s;
     }
 
-    // <summary>
+    //
     // Did this exit code mean the game died rather than quit?
     // Windows reports a fatal exception as the exception code itself, which is
     // always in the 0xC0000000 range (0xC0000005 = access violation,
     // 0x80000003 = the breakpoint a Diablo II assert raises).
-    // </summary>
+    //
     internal static bool LooksLikeCrash(int exitCode)
     {
         if (exitCode == 0) return false;

@@ -240,7 +240,7 @@ public sealed class ApItemTracker
     }
 
     // Record a STANDALONE reward (no AP server).
-    // reward as "&lt;location&gt;: &lt;reward&gt;" over the pipe; the caller splits it
+    // reward as "<location>: <reward>" over the pipe; the caller splits it
     // and we append an entry attributed to the local player so it shows up in the
     // Received tab exactly like an AP item.
     // Standalone rewards the tracker has already seen — the game re-reports a

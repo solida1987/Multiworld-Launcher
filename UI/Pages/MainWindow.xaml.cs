@@ -203,7 +203,7 @@ public partial class MainWindow : Window
     }
 
     // Standalone "Received" pipe line — the mod forwards each check's reward
-    // as "&lt;location&gt;: &lt;reward&gt;".
+    // as "<location>: <reward>".
     // -=/+= (an inline lambda could never be removed and stacked duplicates).
     private void OnStandaloneItemReceived(string text)
     {
@@ -1204,10 +1204,10 @@ public partial class MainWindow : Window
     private void TabSettings_Click(object sender, MouseButtonEventArgs e)
         => SwitchTab(PageTab.Settings);
 
-    // <summary>
+    //
     // Fade a page in from opacity 0 → 1 over 130 ms.
-    // The page must already be <see cref="Visibility.Visible"/> before calling.
-    // </summary>
+    // The page must already be Visibility.Visible before calling.
+    //
     private static void FadeInPage(UIElement page)
     {
         page.Opacity    = 0;
@@ -1570,7 +1570,7 @@ public partial class MainWindow : Window
     private string? _overviewGetGameUrl;
     private string? _overviewWebsiteUrl;
 
-    // Rebuild the Overview page for <paramref name="plugin"/>.
+    // Rebuild the Overview page for plugin.
     // to call on every visit and after installs / session ends.
     // the plugin is not the one on screen (e.g.
     // another game finishing while the user browses elsewhere).
@@ -3366,10 +3366,10 @@ public partial class MainWindow : Window
 
     // Catalog game detail page
 
-    // <summary>
+    //
     // Full-width section divider for use inside the CatalogPanel WrapPanel.
     // Width=4000 forces the element onto its own row regardless of panel width.
-    // </summary>
+    //
     private UIElement BuildSectionHeader(string title)
     {
         var muted = (Brush)FindResource("BrushMuted");
@@ -5581,10 +5581,10 @@ public partial class MainWindow : Window
 
     // Skeleton / loading placeholder cards
 
-    // <summary>
+    //
     // Creates a single skeleton "shimmer" bar of a given width (0–1 = fraction of panel).
     // Used to build placeholder cards while data loads.
-    // </summary>
+    //
     private static Border SkeletonBar(double widthFraction, double height, double topMargin = 0)
         => new()
         {
@@ -5597,7 +5597,7 @@ public partial class MainWindow : Window
             Opacity         = 0.65,
         };
 
-    // <summary>Skeleton placeholder that matches a news card.</summary>
+    // Skeleton placeholder that matches a news card.
     private UIElement BuildSkeletonNewsCard()
     {
         var card = new Border
@@ -6308,11 +6308,11 @@ public partial class MainWindow : Window
         _etaSuffix     = "";
     }
 
-    // <summary>
+    //
     // Returns " · ~3m 20s remaining" while the percentage is advancing, or ""
     // when stalled/complete.
     // per second so the text never flickers.
-    // </summary>
+    //
     private string ComputeEtaSuffix(int pct)
     {
         var now = DateTime.UtcNow;
@@ -6757,7 +6757,7 @@ public partial class MainWindow : Window
                 receivingSlot);
 
             // Live SENT feed — the other half of what big-async testers asked
-            // for: "Sent <item> to <player>" in the launcher log the moment a
+            // for: "Sent  to <player>" in the launcher log the moment a
             // check clears, no alt-tabbing to the AP text client.
             // already have their line below; this is the mirror.
             if (sendingSlot == ap.Slot && receivingSlot != ap.Slot)
@@ -8201,11 +8201,11 @@ public partial class MainWindow : Window
         }
     }
 
-    // <summary>
+    //
     // Collect one zip on the Desktop with everything a bug report needs.
     // Never throws — a failure to write a report must not take down a game
     // teardown or a settings click.
-    // </summary>
+    //
     private void SaveProblemReport(string trigger)
     {
         try
@@ -9477,10 +9477,10 @@ public partial class MainWindow : Window
 
     // --- Tray helpers ---
 
-    // <summary>
+    //
     // Restore the launcher window to the foreground.
     // Called when the user clicks the tray icon or chooses "Open Launcher".
-    // </summary>
+    //
     private void RestoreFromTray()
     {
         Show();
@@ -9493,12 +9493,12 @@ public partial class MainWindow : Window
 
     // Window bounds persistence (restore side — saving happens in BtnClose_Click)
 
-    // <summary>
+    //
     // Apply the persisted window size/position/maximized state, clamped to the
     // current virtual screen so an unplugged monitor can never strand the
     // window off-screen. Saved sizes below 700×500 are treated as corrupt and
     // ignored (the XAML defaults stay in effect).
-    // </summary>
+    //
     private void RestoreWindowBounds(LauncherSettings s)
     {
         double vsLeft = SystemParameters.VirtualScreenLeft;

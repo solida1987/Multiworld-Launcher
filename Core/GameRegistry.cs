@@ -50,12 +50,12 @@ public static class GameRegistry
     // a plugin can never take over an existing GameId.
     public static IReadOnlyList<Plugins.LoadedPlugin> LoadedFromDisk => _loaded;
 
-    /// <summary>
+    ///
     /// Register every approved plugin in GamePlugins\. Call once at startup,
     /// AFTER the compiled-in games — a plugin must never be able to take over
     /// a built-in game's id by being loaded first.
-    /// </summary>
-    /// <param name="problems">
+    ///
+    /// problems:
     /// Why a plugin did not load. Surfaced in the UI: a game that silently
     /// disappears is a support request, a game that says why is not.
     /// </param>
@@ -87,7 +87,7 @@ public static class GameRegistry
         problems = issues;
     }
 
-    /// <summary>Drop a disk plugin from the library — removal, or revoked trust.</summary>
+    /// Drop a disk plugin from the library — removal, or revoked trust.
     public static bool UnloadFromDisk(string gameId)
     {
         var lp = _loaded.FirstOrDefault(p =>

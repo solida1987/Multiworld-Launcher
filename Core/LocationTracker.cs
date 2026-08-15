@@ -201,7 +201,7 @@ public sealed class LocationTracker
     }
 
     // Mark location IDs as checked (from our plugin checks or server RoomUpdate).
-    // <paramref name="addUnknown"/> = true (standalone / no AP server, so the
+    // addUnknown = true (standalone / no AP server, so the
     // full location universe was never delivered by OnConnected) adds any
     // unseen id as a freshly-checked entry, so a solo run's checks still show
     // up in the tracker instead of being dropped.
