@@ -6,20 +6,8 @@ using System.Text.Json.Serialization;
 
 namespace LauncherV2.Core.Plugins;
 
-// Which plugins the player has approved, and exactly which bytes they approved.
-//
-// Consent is bound to a hash, not to a name. Approving "OpenTTD Archipelago"
-// once and then trusting whatever happens to sit in that folder later would
-// make the dialog decorative: anything that could overwrite the file would
-// inherit the trust. So the folder is re-hashed at every start, and a changed
+// Approval is bound to the SHA-256 of the installed folder — a changed
 // plugin is an unapproved plugin again.
-//
-// That is deliberately strict. Updating a plugin means asking again — which is
-// right, because an update is new code the player has not seen.
-//
-// This file is player state, like Data\library.json, which shipped to everyone
-// in London 2.9.32 because it lived in the publish tree. It must be excluded
-// from launcher_package.zip.
 
 public sealed class PluginTrustRecord
 {

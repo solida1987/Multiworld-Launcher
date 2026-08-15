@@ -35,7 +35,7 @@ GAME_TYPES = re.compile(
 
 # Where a game's own code is allowed to live. Everything else is the launcher.
 ALLOWED_PREFIXES = ("Plugins" + os.sep + "DiabloII", "Tools", "bin", "obj",
-                    ".claude", "dist")
+                    "dist")
 
 EXTENSIONS = (".cs", ".xaml")
 
@@ -47,8 +47,13 @@ def scan():
         if rel_base.startswith(ALLOWED_PREFIXES):
             dirs[:] = []
             continue
+        # Hidden directories are skipped generically: version control, editor
+        # and tool state all live behind a leading dot, and naming any one of
+        # them here would put a particular tool's name in public source.
         dirs[:] = [d for d in dirs
-                   if not os.path.relpath(os.path.join(base, d), ROOT).startswith(ALLOWED_PREFIXES)]
+                   if not d.startswith(".")
+                   and not os.path.relpath(os.path.join(base, d), ROOT)
+                              .startswith(ALLOWED_PREFIXES)]
         for f in files:
             if not f.endswith(EXTENSIONS):
                 continue

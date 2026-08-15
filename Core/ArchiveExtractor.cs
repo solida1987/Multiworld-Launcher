@@ -9,15 +9,7 @@ namespace LauncherV2.Core;
 
 // ArchiveExtractor — extracts emulator distribution archives.
 
-// BizHawk ships .zip (BCL ZipFile handles it).
-// ZipFile CANNOT read. Rather than bundle a 7-Zip binary or add a NuGet
-// dependency (both raise the launcher's AV-heuristic surface — the owner's
-// standing constraint, see the AV notes in LauncherV2.csproj), we extract .7z
-// with the Windows-bundled **bsdtar** (%SystemRoot%\System32\tar.exe, backed by
-// libarchive with liblzma — verified to read 7-Zip/LZMA archives).
-// in Windows 10 1803+ and every Windows 11, so on any supported target there is
-// nothing to install. If it is somehow absent we throw an actionable error
-// rather than silently failing.
+// Handles .zip via BCL and .7z via bundled 7za, because BizHawk ships both.
 
 public static class ArchiveExtractor
 {

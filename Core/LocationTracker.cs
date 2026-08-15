@@ -54,13 +54,6 @@ public sealed class LocationCategory
 public sealed class LocationTracker
 {
     // --- Internal state ---
-    // Every collection below is guarded by _sync (P2-1): the AP receive thread
-    // mutates them (OnConnected/OnDataPackage/OnLocationInfo/OnLocationsChecked)
-    // while the UI thread enumerates via GetCategories()/GetAll()/the counters —
-    // unguarded, that intermittently threw "collection was modified" into the
-    // global crash dialog. Queries return snapshots built under the lock.
-    // Changed is ALWAYS raised AFTER the lock is released: handlers marshal to
-    // the dispatcher, and the UI thread may itself be waiting on _sync.
     private readonly object _sync = new();
     private readonly Dictionary<long,   LocationEntry> _entries     = new();
     private readonly Dictionary<long,   string>        _locNames    = new();

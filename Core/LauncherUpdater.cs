@@ -30,14 +30,7 @@ public sealed class LauncherUpdater
 {
     // --- Step log ---
 
-    // Every stage of an update writes one line here. This exists because
-    // an update once failed on a tester's machine and left nothing behind
-    // to say why: the package downloaded, the hash verified, the archive
-    // extracted and the script was written -- and then nothing happened,
-    // with the launcher still on the old version. Every step could be
-    // reproduced by hand afterwards, which is the least useful kind of
-    // evidence. The batch script only ever recorded one failure mode, and
-    // App.xaml.cs swallowed every exception without a word.
+    // Every stage logs one line — update failures must be diagnosable from a report.
     private static readonly string LogPath = Path.Combine(
         Path.GetTempPath(), "multiworld_launcher_update.log");
 
@@ -217,13 +210,6 @@ public sealed class LauncherUpdater
                         ?? exes[0];
 
         // --- Write updater batch script ---
-        // The install is a single-file exe PLUS loose asset folders
-        // (Assets\, Data\, etc.).
-        // change to a loose file never reached an updating user — new code,
-        // old assets. That went unnoticed until Assets\Sounds\ shipped: 2.9.29
-        // installed the picker UI but not the sound files, and every event fell
-        // back to the Windows ping.
-        // not just the executable.
         string newRoot = Path.GetDirectoryName(newExe)!;
         string curRoot = Path.GetDirectoryName(currentExe)!;
 
@@ -267,17 +253,8 @@ public sealed class LauncherUpdater
     private static string BuildUpdateScript(string currentExe, string newExe,
                                             string newRoot, string curRoot, string batPath)
     {
-        // The naive "wait 3s, copy, start" script silently relaunched the OLD
-        // version whenever WPF teardown took longer than 3 s (copy fails on the
-        // locked exe, the error was ignored) — the same bug family as the V1
-        // 1.5.8–1.5.10 stale-version hotfixes.
-        // • retries the copy once per second for up to 60 s (the copy only
-        // succeeds once the old process has released the file — an implicit
-        // wait-for-exit), and
-        // • only relaunches when the copy actually succeeded; otherwise it
-        // leaves a marker log in %TEMP% and exits without starting anything.
-        // cmd expands %VAR% even inside double quotes, so any literal % in a
-        // path must be doubled or the copy targets a mangled path.
+        // The updater waits for THIS pid to exit before copying — a fixed sleep
+        // relaunched the old exe when shutdown took longer.
         string cur     = EscapeBatchPath(currentExe);
         string src     = EscapeBatchPath(newExe);
         string bat     = EscapeBatchPath(batPath);

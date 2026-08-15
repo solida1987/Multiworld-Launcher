@@ -12,6 +12,11 @@ So the package is an explicit list, and anything that looks like a second copy
 of the launcher is an error rather than a warning.
 
     python tools/pack_plugin.py Plugins/OpenTTD [-o dist]
+    python tools/pack_plugin.py ../Diablo-London-Plugin -m plugin.stable.json
+
+One project can ship more than one package. Diablo II has a stable and an
+experimental channel: the same assembly, two manifests naming two entry
+classes. --manifest picks which one this package is.
 """
 import argparse
 import io
@@ -51,12 +56,14 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("project_dir")
     ap.add_argument("-o", "--out", default="dist")
+    ap.add_argument("-m", "--manifest", default="plugin.json",
+                    help="manifest file inside the project (default plugin.json)")
     args = ap.parse_args()
 
     project = os.path.abspath(args.project_dir)
-    manifest_path = os.path.join(project, "plugin.json")
+    manifest_path = os.path.join(project, args.manifest)
     if not os.path.isfile(manifest_path):
-        print("no plugin.json in " + project)
+        print("no %s in %s" % (args.manifest, project))
         return 1
 
     manifest = json.load(io.open(manifest_path, encoding="utf-8"))
@@ -78,7 +85,10 @@ def main():
     if os.path.isfile(os.path.join(out_dir, deps)):
         wanted.append(deps)
 
-    missing = [f for f in wanted + REQUIRED
+    # REQUIRED names plugin.json, but this package's manifest may be called
+    # something else -- it is written into the zip under the required name.
+    required = [f for f in REQUIRED if f != "plugin.json"]
+    missing = [f for f in wanted + required
                if not os.path.isfile(os.path.join(out_dir, f))
                and not os.path.isfile(os.path.join(project, f))]
     if missing:

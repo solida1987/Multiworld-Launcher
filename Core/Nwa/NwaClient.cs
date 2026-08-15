@@ -14,20 +14,8 @@ namespace LauncherV2.Core.Nwa;
 // SNES game logic itself (poll WRAM for checks, write WRAM to deliver items),
 // reusing the addresses our alttp.lua / super_metroid.lua modules document.
 
-// Wire protocol (usb2snes/emulator-networkaccess, Protocol-1.0 Draft-v4):
-// • Server listens on TCP 48879 (0xBEEF), +1 per already-bound port.
-// • Command line: "KEYWORD arg1;arg2;...\n" — KEYWORD and the first arg are
-// separated by a single SPACE, remaining args by ';'.
-// prefixed with a lowercase 'b' (e.g.
-// • ASCII reply: leading byte '\n', then "key:value\n" lines, terminated by an
-// empty line (a bare '\n').
-// • Binary reply: leading byte '\0', then a 4-byte BIG-ENDIAN length, then
-// exactly that many data bytes.
-// • CORE_READ <mem>;<off>;<size>[;<off2>;<size2>...] → binary reply.
-// • bCORE_WRITE <mem>;<off>;<size> followed by a binary message
-// "\0<4-byte BE size><data>" → ASCII reply.
-// • SNES memory names: WRAM (0-based, offset 0xF000 == bus $7EF000), SRAM,
-// CARTROM, VRAM, OAM, CGRAM, APURAM, CPUBUS, APUBUS.
+// usb2snes/emulator-networkaccess Protocol-1.0: ASCII commands, binary
+// replies with a 4-byte big-endian length prefix.
 
 // Verified against a mock NWA server (Tools/NwaSelfTest).
 // (a real snes9x-emunwa attaching and reporting a real check) is the same

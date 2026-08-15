@@ -6,17 +6,8 @@ using System.Windows;
 
 namespace LauncherV2.Core.Plugins;
 
-// Every call into a third-party plugin is a call into code nobody reviewed.
-//
-// D2Plugin is ours; if it throws, the launcher falls over and that is fair,
-// because it is our bug and we want to see it. A plugin somebody else wrote
-// must not have that power. One bad plugin should lose its own game tile, not
-// take the whole library, the AP session and every other game down with it.
-//
-// So every member is wrapped. The first exception quarantines the plugin: it
-// stops being called, its tile shows why, and the rest of the launcher carries
-// on. Events matter as much as methods here — a plugin that throws inside
-// LocationsChecked would otherwise take the AP thread with it.
+// Wraps every call into plugin code. First exception quarantines the
+// plugin for the session: reported once, all later calls return defaults.
 
 public sealed class SafePluginProxy : IGamePlugin
 {
@@ -48,6 +39,9 @@ public sealed class SafePluginProxy : IGamePlugin
         Guard(() => inner.LocationsChecked += OnLocations);
         Guard(() => inner.GameExited       += OnExited);
         Guard(() => inner.GoalCompleted    += OnGoal);
+        Guard(() => inner.LogLine          += OnLogLine);
+        Guard(() => inner.LocationsMissing += OnMissing);
+        Guard(() => inner.StandaloneItemReceived += OnStandaloneItem);
     }
 
     private void Quarantine(Exception ex, string where)
@@ -99,10 +93,16 @@ public sealed class SafePluginProxy : IGamePlugin
     private void OnLocations(long[] ids) { try { LocationsChecked?.Invoke(ids); } catch (Exception ex) { Quarantine(ex, "LocationsChecked"); } }
     private void OnExited(int code)      { try { GameExited?.Invoke(code); }      catch (Exception ex) { Quarantine(ex, "GameExited"); } }
     private void OnGoal()                { try { GoalCompleted?.Invoke(); }       catch (Exception ex) { Quarantine(ex, "GoalCompleted"); } }
+    private void OnLogLine(string line)  { try { LogLine?.Invoke(line); }         catch (Exception ex) { Quarantine(ex, "LogLine"); } }
+    private void OnMissing(long[] ids)   { try { LocationsMissing?.Invoke(ids); } catch (Exception ex) { Quarantine(ex, "LocationsMissing"); } }
+    private void OnStandaloneItem(string s) { try { StandaloneItemReceived?.Invoke(s); } catch (Exception ex) { Quarantine(ex, "StandaloneItemReceived"); } }
 
     public event Action<long[]>? LocationsChecked;
     public event Action<int>?    GameExited;
     public event Action?         GoalCompleted;
+    public event Action<string>? LogLine;
+    public event Action<long[]>? LocationsMissing;
+    public event Action<string>? StandaloneItemReceived;
 
     // --- identity ---
 

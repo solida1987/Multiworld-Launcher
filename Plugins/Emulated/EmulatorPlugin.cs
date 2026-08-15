@@ -36,99 +36,17 @@ public sealed record RomIdentity(
     string? Md5,                // exact MD5, or null to accept any file of this size
     string  Label);            // "Pokémon Emerald (USA, Europe)"
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// EmulatorPlugin — base class for ROM-based AP games.
+// EmulatorPlugin — base class for ROM-based AP games (BizHawk + a per-game
+// Lua module under Plugins/Scripts/games/). The player's ROM is COPIED into
+// Games/ROMs/<GameId>/ and only the copy is ever touched.
 //
-// HOW ROM GAMES WORK IN V2
-// ─────────────────────────
-// When the user selects a ROM game (e.g. Pokemon FireRed):
-//
-//   1. Launcher checks if the correct emulator (BizHawk) is installed.
-//      If not, it downloads and installs it automatically.
-//
-//   2. User browses to their own ROM file (required — we never ship ROMs).
-//      ROM LIBRARY POLICY (§11 — never touch the user's original copy):
-//      the chosen file is COPIED into the launcher's own library at
-//      Games/ROMs/<GameId>/<original filename> and RomPath points at the
-//      COPY. The launcher operates only on its copy — the user's original
-//      file is never modified, moved or deleted. A same-name file already
-//      in the library is reused when the size matches (same file), and a
-//      different file under the same name gets a _2/_3/… suffix instead of
-//      overwriting. BizHawk reinstalls wipe only Emulators/BizHawk/ (with
-//      user-data preservation, P2-9) — Games/ROMs/ is a separate tree no
-//      install/uninstall path ever touches. The copy path is stored in the
-//      per-game settings file and remembered per-game.
-//
-//   3. Launcher starts BizHawk with:
-//        - The ROM file loaded
-//        - The generic AP connector Lua script injected via --lua=
-//          (Plugins/Scripts/bizhawk_ap_connector.lua — BizHawk has native Lua)
-//        - AP session credentials + pipe name + per-game module name written
-//          to ap_config.json in the BizHawk folder (absolute path also passed
-//          to the BizHawk process via the AP_CONFIG_PATH environment variable)
-//
-//   4. The connector loads the per-game module
-//      Plugins/Scripts/games/<LuaModuleName>.lua (memory map + check/goal
-//      logic), opens the launcher's named pipe PAIR through the CRT
-//      (io.open "\\\\.\\pipe\\<name>_c2s" / "..._s2c") and exchanges
-//      newline-framed text — same framing as D2Plugin's pipe bridge, but
-//      BYTE mode (CRT file handles cannot read message-mode pipes) and one
-//      pipe PER DIRECTION (see PIPE PROTOCOL below).
-//
-// PIPE PROTOCOL (newline-framed UTF-8 text, TWO byte-mode pipes)
-// ───────────────────────────────────────────────────────────────
-//   The launcher creates two pipe servers per launch; ap_config.json carries
-//   the base name <pipe_name> and the connector opens both ends "r+b":
-//     <pipe_name>_c2s   connector → launcher   "CHECK:<id1>,<id2>\n"
-//                                              "GOAL\n"
-//                                              "SYNC\n"  per-frame item poll
-//     <pipe_name>_s2c   launcher → connector   zero or more "ITEM:<id>\n"
-//                                              + one "SYNCEND\n", sent ONLY
-//                                              as the reply to a SYNC poll
-//   Request/response keeps the Lua side's blocking CRT reads bounded to one
-//   local round-trip (pure Lua cannot poll a pipe for readability, so
-//   unsolicited pushes would stall the emulator).
-//
-//   WHY TWO PIPES — a single duplex CRT stream ("r+b") obeys the ANSI
-//   update-mode rules: fflush between write→read, a seek between
-//   read→write. A pipe is not seekable, and the UCRT cannot complete the
-//   write→read handover without one: the first read after a write returns
-//   an INSTANT EOF with the stream error flag set and errno 0 (reproduced
-//   in isolation — this is the "connected → read failed one frame later"
-//   bridge drop the single-pipe v1 shipped with). One pipe per direction
-//   means each CRT stream only ever moves one way, so the direction rules
-//   never engage, on any CRT version. Both pipes are still created duplex
-//   (InOut): CRT "wb" carries create/truncate open dispositions that named
-//   pipes reject, so "r+b" (GENERIC_READ|WRITE, OPEN_EXISTING) is the one
-//   client open mode proven safe — the server grants both directions and
-//   each side simply never uses one of them.
-//
-// BRIDGE DIAGNOSTICS
-// ───────────────────
-//   Lua side: always-on <EmulatorDirectory>\ap_connector.log (truncated per
-//   start, SYNC roundtrips sampled). Launcher side: set AP_BRIDGE_TRACE=1 on
-//   the launcher process to mirror the bridge into
-//   <EmulatorDirectory>\bridge_trace.log.
-//
-// WHY BIZHAWK
-// ────────────
-//   • Lua scripting natively supported — no emulator code changes needed.
-//   • Multi-system: GBA, GBC, GB, NES, SNES, N64, Genesis, SMS, Atari 2600 …
-//   • AP community already ships BizHawk-based Lua AP clients for many games —
-//     we can reuse those scripts directly.
-//
-// SUBCLASS EXAMPLE (real ones live in Plugins/Emulated/Games/):
-//   sealed class PokemonEmeraldPlugin : EmulatorPlugin
-//   {
-//       public override string GameId         => "pokemon_emerald";
-//       public override string DisplayName    => "Pokémon Emerald";
-//       public override string ApWorldName    => "Pokemon Emerald";
-//       public override string Description    => "…";
-//       protected override string RomSystem   => "GBA";
-//       protected override string LuaScriptName => "bizhawk_ap_connector.lua";
-//       protected override string LuaModuleName => "pokemon_emerald";
-//   }
-// ═══════════════════════════════════════════════════════════════════════════════
+// Bridge: TWO byte-mode named pipes (<name>_c2s / <name>_s2c), newline-framed
+// UTF-8, client opens "r+b". One pipe per direction is load-bearing: a single
+// duplex CRT stream hits the ANSI write→read handover rules, which a pipe
+// cannot satisfy, and reads return instant EOF. Items are sent ONLY as the
+// reply to a SYNC poll ("ITEM:.." lines + "SYNCEND"), because pure Lua cannot
+// poll a pipe and unsolicited pushes would stall the emulator.
+// Diagnostics: ap_connector.log (Lua, always on); AP_BRIDGE_TRACE=1 (launcher).
 
 public abstract class EmulatorPlugin : IGamePlugin
 {
@@ -296,14 +214,8 @@ public abstract class EmulatorPlugin : IGamePlugin
     /// SYNC roundtrips answered this session (trace sampling).
     private long _syncCount;
 
-    /// The slot's FULL ordered item stream, by absolute server index.
-    /// ReceiveItemsAsync places items at their AP `index`; an index-0 packet
-    /// is the server's authoritative full resend (connect/reconnect) and
-    /// replaces the list. Kept for the whole AP session — NOT cleared per
-    /// launch — because save-state games (Pokémon Emerald's receive buffer
-    /// counts processed items inside the save) need the entire backlog from
-    /// index 0 replayed every launch so a resumed save can pick up exactly
-    /// where its own counter says it stopped.
+    // / The slot's FULL ordered item stream by absolute server index — replayed
+    // / from 0 on reconnect, so position, not novelty, decides what is new.
     private readonly List<ApNetworkItem> _itemsReceived = new();
     private readonly object _itemsLock = new();
 
@@ -317,6 +229,14 @@ public abstract class EmulatorPlugin : IGamePlugin
 
     /// Fired when the Lua script sends a "GOAL" message.
     public event Action? GoalCompleted;
+
+    // Nothing raises these yet -- an emulated game's own reporting all goes
+    // through the launcher today, and there is no standalone mode. The members
+    // exist because an interface event cannot carry a default, not because
+    // there is work behind them.
+    public event Action<string>? LogLine;
+    public event Action<long[]>? LocationsMissing;
+    public event Action<string>? StandaloneItemReceived;
 
     // ── UI-wired suppliers (assigned by MainWindow per session, same pattern
     //    as D2Plugin.GetSlotData) — let WriteApConfig hand the Lua module the
@@ -437,14 +357,8 @@ public abstract class EmulatorPlugin : IGamePlugin
             return;
         }
 
-        // 1. Start the named pipe servers BEFORE BizHawk so the Lua connector
-        //    can attach. BYTE mode (not message mode): the Lua side opens the
-        //    pipes through the CRT via io.open("...", "r+b"), and CRT file
-        //    handles do not speak message-mode framing. Both sides frame
-        //    messages with '\n' — PipeLoopAsync reassembles partial/multiple
-        //    lines per read. TWO pipes, one per direction, because a single
-        //    duplex CRT stream cannot switch read/write direction on a
-        //    non-seekable pipe (see PIPE PROTOCOL in the class header).
+        // Pipe servers must exist BEFORE BizHawk starts — the Lua side opens them
+        // with plain io.open and gets no retry.
 
         // Tear down leftovers from a previous launch first (an attach timeout
         // leaves servers listening with no loop to dispose them).
@@ -744,17 +658,8 @@ public abstract class EmulatorPlugin : IGamePlugin
 
     public Task ReceiveItemsAsync(ApNetworkItem[] items, int index, CancellationToken ct = default)
     {
-        // Items are kept in an index-addressed list rather than written to
-        // the pipe directly, because:
-        //   1. The Lua connector drains them with per-frame SYNC polls
-        //      (request/response), so its blocking CRT pipe reads always
-        //      complete in one local round-trip instead of stalling the core.
-        //   2. All pipe writes stay on the PipeLoopAsync thread —
-        //      NamedPipeServerStream does not support concurrent writers.
-        //   3. The AP `index` is load-bearing: game modules that track their
-        //      own processed-item count inside the save (Pokémon Emerald)
-        //      need every item at its absolute stream position, and an
-        //      index-0 packet is the server's authoritative full resend.
+        // Index-addressed item list: the Lua side asks "everything from index N",
+        // which survives reconnects and emulator restarts without double-grants.
         if (index < 0) return Task.CompletedTask;
 
         lock (_itemsLock)
@@ -1430,18 +1335,7 @@ public abstract class EmulatorPlugin : IGamePlugin
     public Task<NewsItem[]> GetNewsAsync(CancellationToken ct = default)
         => Task.FromResult(Array.Empty<NewsItem>());
 
-    // ── Named pipe receive loop ───────────────────────────────────────────────
-    //
-    // The pipes run in BYTE mode (the Lua client is a CRT file handle — see
-    // LaunchAsync), so messages are newline-framed text. A single ReadAsync may
-    // deliver several lines, half a line, or a line split across reads; the
-    // loop accumulates chars and only dispatches complete '\n'-terminated
-    // frames. Reads come from pipeIn (<base>_c2s), replies go to pipeOut
-    // (<base>_s2c) — this loop thread is the only writer on pipeOut.
-    //
-    // The pipe instances are parameters, not the fields: the loop must read
-    // from — and finally dispose — ITS OWN pipes even if a relaunch already
-    // swapped the fields to fresh server streams (same rule as D2Plugin).
+    // ── Named pipe receive loop ──────────────────────────────────────────
 
     private async Task PipeLoopAsync(
         NamedPipeServerStream pipeIn, NamedPipeServerStream pipeOut,
@@ -1528,16 +1422,8 @@ public abstract class EmulatorPlugin : IGamePlugin
             try { GoalCompleted?.Invoke(); }
             catch (Exception ex) { Trace($"GoalCompleted handler failed: {ex}"); }
         }
-        // "SYNC" — per-frame poll from the Lua connector. ALWAYS answered —
-        // zero queued items, AP not connected, whatever: the Lua side issued
-        // a blocking read and only this reply releases it. Every not-yet-
-        // relayed item goes out as an extended line
-        //   "ITEM:<id>|<index>|<player>|<flags>|<locationId>"
-        // (index = absolute position in the slot's item stream; the game
-        // module needs it for its save-side received-count handshake),
-        // terminated by "SYNCEND", in a single buffered write so the reply
-        // stays contiguous. A write failure here means the connector is
-        // gone — let the IOException reach PipeLoopAsync and end the loop.
+        // "SYNC" — per-frame poll. ALWAYS answered, even with just "SYNCEND":
+        // the Lua read blocks until the reply arrives.
         else if (msg == "SYNC")
         {
             var reply = new StringBuilder();
@@ -1637,14 +1523,7 @@ public abstract class EmulatorPlugin : IGamePlugin
         IProgress<(int Pct, string Msg)> progress,
         CancellationToken ct)
     {
-        // ── 1. Resolve the PINNED release URL from GitHub API ────────────────
-        // §3: apworlds are built against specific emulator behaviors, so we
-        // download the EXACT pinned tag for the selected backend (from
-        // EmulatorBackends) rather than chasing "latest" — which can break
-        // overnight. The pinned tag's win-x64 ZIP is resolved below; if that
-        // tag is unreachable we fall back to latest with a logged warning.
-        // Resolve through the SAME helper EmulatorDirectory uses, so the backend
-        // we download and the folder we extract into never disagree.
+        // ── 1. Resolve the PINNED BizHawk release URL ───────────────────────
         var backend = ResolveSelectedBackend();
         string repo  = backend.DownloadRepo;
         string tag   = backend.PinnedVersion;
@@ -1900,21 +1779,9 @@ public abstract class EmulatorPlugin : IGamePlugin
     private void WriteApConfig(ApSession session, string? pipeName = null,
                                string? launchRom = null)
     {
-        // Write a JSON sidecar that the Lua connector reads on startup.
-        //   pipe_name   → BASE name of this launch's pipe pair; the connector
-        //                 appends "_c2s" (its send pipe) and "_s2c" (its
-        //                 receive pipe) — see PIPE PROTOCOL in the class header
-        //   lua_module  → which Plugins/Scripts/games/<module>.lua to dofile()
-        //   script_dir  → absolute path of Plugins/Scripts/ so the connector can
-        //                 locate games/ without relying on its own script path
-        //                 (it still falls back to debug.getinfo if absent).
-        //   slot_number / locations / slot_data → multiworld context for the
-        //                 game module (own slot id, the slot's full server
-        //                 location-id set from the Connected packet, and the
-        //                 seed's game options). Null when AP never connected —
-        //                 modules must degrade to read-only safely.
-        //   rom         → the ROM actually launched (lets the module log
-        //                 patched-vs-vanilla without guessing).
+        // ap_config.json beside BizHawk: pipe name, module name, credentials.
+        // The absolute path also travels in the AP_CONFIG_PATH environment variable,
+        // because BizHawk's working directory is not reliably its own folder.
         string configPath = Path.Combine(EmulatorDirectory, "ap_config.json");
         File.WriteAllText(configPath, JsonSerializer.Serialize(new
         {

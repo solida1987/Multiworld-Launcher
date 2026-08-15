@@ -760,7 +760,9 @@
                 <ScrollViewer x:Name="PanelEmpty"
                               VerticalScrollBarVisibility="Auto"
                               HorizontalScrollBarVisibility="Disabled">
-                    <StackPanel Margin="28,20,28,32">
+                  <Grid MinHeight="{Binding ActualHeight,
+                                    RelativeSource={RelativeSource AncestorType=ScrollViewer}}">
+                    <StackPanel Margin="28,20,28,32" VerticalAlignment="Center">
 
                         <!--  Featured game hero  -->
                         <Grid x:Name="HomeHeroContainer"
@@ -854,22 +856,23 @@
                                     Padding="18,14"
                                     Width="420">
                                 <StackPanel>
-                                    <!-- Step 1: pick a game -->
+                                    <!-- Step 1: add a plugin -->
                                     <DockPanel x:Name="StepPickGame"
                                                Background="Transparent"
                                                Cursor="Hand"
                                                MouseLeftButtonDown="StepPickGame_Click"
-                                               ToolTip="Your games live in the sidebar — click one to open it">
+                                               ToolTip="Add a game to the launcher from a plugin file">
                                         <TextBlock x:Name="StepPickGameIcon"
                                                    Text="①" FontSize="14" Width="26"
                                                    VerticalAlignment="Center"
                                                    Foreground="{StaticResource BrushMuted}"/>
                                         <StackPanel>
-                                            <TextBlock Text="Pick a game from the library"
+                                            <TextBlock Text="Add a game as a plugin"
                                                        FontSize="12" FontWeight="SemiBold"
                                                        Foreground="{StaticResource BrushText}"/>
-                                            <TextBlock Text="Your games are listed in the sidebar on the left."
+                                            <TextBlock Text="The launcher ships with no games. Add one and it appears in the sidebar."
                                                        FontSize="10"
+                                                       TextWrapping="Wrap"
                                                        Foreground="{StaticResource BrushMuted}"
                                                        Margin="0,1,0,0"/>
                                         </StackPanel>
@@ -920,6 +923,13 @@
                                     </DockPanel>
                                 </StackPanel>
                             </Border>
+                            <Button x:Name="BtnHomeAddPlugin"
+                                    Content="Add plugin…"
+                                    Style="{StaticResource BtnSecondaryStyle}"
+                                    HorizontalAlignment="Center"
+                                    Margin="0,16,0,0"
+                                    Padding="18,6"
+                                    Click="BtnAddPlugin_Click"/>
                             <TextBlock Text="Tip: press Ctrl+K to jump to any game or action"
                                        FontSize="10"
                                        Foreground="{StaticResource BrushMuted}"
@@ -927,13 +937,9 @@
                                        Margin="0,12,0,0" Opacity="0.6"/>
                         </StackPanel>
 
-                        <!--  Browse all games  -->
-                        <Button x:Name="BtnHomeBrowseAll"
-                                Content="Browse all games →"
-                                Style="{StaticResource BtnSecondaryStyle}"
-                                HorizontalAlignment="Center"
-                                Margin="0,20,0,0"
-                                Click="BtnBrowse_Click"/>
+                        <!--  There is nothing to browse. The library holds the
+                              plugins the user added, and the launcher knows of
+                              no games beyond them.  -->
 
                         <!--  Logo attribution. CC BY-NC 4.0 asks that the credit
                               travel with the work, and a launcher showing the logo
@@ -951,6 +957,7 @@
                         </TextBlock>
 
                     </StackPanel>
+                  </Grid>
                 </ScrollViewer>
 
                 <!-- Game detail panel (visible once a game is selected) -->
@@ -1268,11 +1275,6 @@
                                                     Margin="10,0,0,0"
                                                     Visibility="Collapsed"
                                                     Click="BtnOverviewWebsite_Click"/>
-                                            <!-- Repair tools for a character save that a known
-                                                 game bug has damaged. Shown only for games that
-                                                 offer any (currently Diablo II). The menu is
-                                                 built in code so new repairs can be added
-                                                 without touching this layout. -->
                                             <!-- One button that gathers every log the
                                                  developer ever asks for (this game's and
                                                  the launcher's own) into a single zip the
@@ -1286,46 +1288,15 @@
                                                     Margin="10,0,0,0"
                                                     ToolTip="Gather every log file into one zip you can send to the developer"
                                                     Click="BtnOverviewCollectLogs_Click"/>
-                                            <!-- Seed check: reads a generated
-                                                 multiworld's spoiler and says whether
-                                                 the seed can actually be finished.
-                                                 Diablo II only, same row as Play so it
-                                                 is where you already are before you
-                                                 start. -->
-                                            <!-- Joining a multiworld means handing the host a
-                                                 settings file, and writing one by hand means
-                                                 copying a template and hoping ~150 keys are
-                                                 spelled the way the apworld spells them. This
-                                                 builds it from the apworld's own option list. -->
-                                            <Button x:Name="BtnOverviewMakeYaml"
-                                                    DockPanel.Dock="Right"
-                                                    Content="&#x1F4DD;  Create YAML"
-                                                    Style="{StaticResource BtnSecondaryStyle}"
-                                                    Margin="10,0,0,0"
-                                                    Visibility="Collapsed"
-                                                    ToolTip="Build your Archipelago YAML here and save it — no text editor needed"
-                                                    Click="BtnOverviewMakeYaml_Click"/>
-                                            <Button x:Name="BtnOverviewSeedCheck"
-                                                    DockPanel.Dock="Right"
-                                                    Content="&#x2714;  Check seed"
-                                                    Style="{StaticResource BtnSecondaryStyle}"
-                                                    Margin="10,0,0,0"
-                                                    Visibility="Collapsed"
-                                                    ToolTip="Check a generated seed for dead ends before you play it"
-                                                    Click="BtnOverviewSeedCheck_Click"/>
-                                            <Button x:Name="BtnOverviewUnbug"
-                                                    DockPanel.Dock="Right"
-                                                    Content="🛠  Unbug Save  ▾"
-                                                    Style="{StaticResource BtnSecondaryStyle}"
-                                                    Margin="10,0,0,0"
-                                                    Visibility="Collapsed"
-                                                    ToolTip="Fix a character that a known game bug has broken"
-                                                    Click="BtnOverviewUnbug_Click">
-                                                <Button.ContextMenu>
-                                                    <ContextMenu x:Name="UnbugMenu"
-                                                                 Placement="Bottom"/>
-                                                </Button.ContextMenu>
-                                            </Button>
+                                            <!-- Commands the selected game offers.
+                                                 The launcher draws one button per
+                                                 entry the plugin reports and knows
+                                                 nothing about what any of them do;
+                                                 a game that offers none leaves this
+                                                 row empty. -->
+                                            <StackPanel x:Name="OverviewCommandBar"
+                                                        DockPanel.Dock="Right"
+                                                        Orientation="Horizontal"/>
                                         </DockPanel>
                                     </Border>
 
@@ -1355,36 +1326,15 @@
                                                        Opacity="0.9"
                                                        LineHeight="18"
                                                        LineStackingStrategy="BlockLineHeight"/>
-                                            <TextBlock x:Name="TxtOverviewAboutMore"
-                                                       FontSize="12"
-                                                       Foreground="{StaticResource BrushText}"
-                                                       TextWrapping="Wrap"
-                                                       Opacity="0.75"
-                                                       LineHeight="18"
-                                                       LineStackingStrategy="BlockLineHeight"
-                                                       Margin="0,8,0,0"
-                                                       Visibility="Collapsed"/>
                                             <TextBlock x:Name="TxtOverviewApWorld"
                                                        FontSize="11"
                                                        Foreground="{StaticResource BrushMuted}"
                                                        Margin="0,10,0,0"/>
-                                            <TextBlock x:Name="TxtOverviewCreditsGameDev"
-                                                       FontSize="11"
-                                                       Foreground="{StaticResource BrushMuted}"
-                                                       Margin="0,4,0,0"
-                                                       Visibility="Collapsed"/>
-                                            <TextBlock x:Name="TxtOverviewCreditsApAuthor"
-                                                       FontSize="11"
-                                                       Foreground="{StaticResource BrushMuted}"
-                                                       Margin="0,2,0,0"
-                                                       Visibility="Collapsed"/>
-                                            <TextBlock x:Name="TxtOverviewCreditsApLogic"
-                                                       FontSize="11"
-                                                       FontWeight="SemiBold"
-                                                       Foreground="#E8B44A"
-                                                       Margin="0,4,0,0"
-                                                       TextWrapping="Wrap"
-                                                       Visibility="Collapsed"/>
+                                            <!-- One line per credit the game
+                                                 reports. Empty when it reports
+                                                 none. -->
+                                            <StackPanel x:Name="PanelOverviewCredits"
+                                                        Margin="0,4,0,0"/>
                                         </StackPanel>
                                     </Border>
 
@@ -2026,99 +1976,6 @@
 
                     </Grid>  <!-- end page content area -->
                 </Grid>  <!-- end PanelGame -->
-
-                <!--  Browse / Catalog panel  -->
-                <Grid x:Name="PanelBrowse" Visibility="Collapsed">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="56"/>
-                        <RowDefinition Height="*"/>
-                    </Grid.RowDefinitions>
-
-                    <Border Grid.Row="0"
-                            Background="#141720"
-                            BorderBrush="#1E2233"
-                            BorderThickness="0,0,0,1"
-                            Padding="16,0">
-                        <DockPanel>
-                            <Button DockPanel.Dock="Left"
-                                    Style="{StaticResource BtnSecondaryStyle}"
-                                    Content="← Back"
-                                    Padding="14,6"
-                                    VerticalAlignment="Center"
-                                    Click="BtnBrowseBack_Click"/>
-                            <TextBlock Text="BROWSE GAMES"
-                                       FontSize="13"
-                                       FontWeight="SemiBold"
-                                       Foreground="{StaticResource BrushText}"
-                                       VerticalAlignment="Center"
-                                       Margin="20,0"/>
-                            <Border x:Name="CatalogLoadingBadge"
-                                    Background="#141720" CornerRadius="2"
-                                    Padding="8,3" VerticalAlignment="Center"
-                                    Visibility="Collapsed">
-                                <TextBlock Text="Loading catalog..."
-                                           FontSize="11"
-                                           Foreground="{StaticResource BrushMuted}"/>
-                            </Border>
-                            <TextBox x:Name="TxtCatalogSearch"
-                                     DockPanel.Dock="Right"
-                                     Width="230"
-                                     VerticalAlignment="Center"
-                                     ToolTip="Search by name, author or tag..."
-                                     TextChanged="TxtCatalogSearch_Changed"/>
-                        </DockPanel>
-                    </Border>
-
-                    <ScrollViewer Grid.Row="1"
-                                  VerticalScrollBarVisibility="Auto">
-                        <WrapPanel x:Name="CatalogPanel"
-                                   Orientation="Horizontal"
-                                   Margin="16"/>
-                    </ScrollViewer>
-
-                    <!--  Game detail overlay (slides over the catalog list)  -->
-                    <Grid x:Name="PanelCatalogDetail"
-                          Grid.RowSpan="2"
-                          Visibility="Collapsed"
-                          Background="#0D1018">
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="56"/>
-                            <RowDefinition Height="*"/>
-                        </Grid.RowDefinitions>
-
-                        <!-- Detail header -->
-                        <Border Grid.Row="0"
-                                Background="#141720"
-                                BorderBrush="#1E2233"
-                                BorderThickness="0,0,0,1"
-                                Padding="16,0">
-                            <DockPanel>
-                                <Button DockPanel.Dock="Left"
-                                        x:Name="BtnDetailBack"
-                                        Style="{StaticResource BtnSecondaryStyle}"
-                                        Content="← Catalog"
-                                        Padding="14,6"
-                                        VerticalAlignment="Center"
-                                        Click="BtnDetailBack_Click"/>
-                                <TextBlock x:Name="TxtDetailTitle"
-                                           FontSize="13"
-                                           FontWeight="SemiBold"
-                                           Foreground="{StaticResource BrushText}"
-                                           VerticalAlignment="Center"
-                                           Margin="20,0"
-                                           TextTrimming="CharacterEllipsis"/>
-                            </DockPanel>
-                        </Border>
-
-                        <!-- Detail body -->
-                        <ScrollViewer Grid.Row="1"
-                                      VerticalScrollBarVisibility="Auto">
-                            <StackPanel x:Name="DetailContentPanel"
-                                        Margin="28,20,28,28"
-                                        MaxWidth="820"/>
-                        </ScrollViewer>
-                    </Grid>
-                </Grid>
 
                 <!--  Global Achievements panel (owner spec §4)  -->
                 <Grid x:Name="PanelAchievements" Visibility="Collapsed">

@@ -4,28 +4,27 @@ A desktop launcher for [Archipelago](https://archipelago.gg/) game
 integrations. It installs and updates an integration, holds the connection to a
 multiworld, and shows your checks and items live while you play.
 
-Games reach it as **plugins**: separate assemblies you add yourself, that the
+Games reach it as **plugins**: separate files you add yourself, that the
 launcher loads at runtime. This repository is the launcher — the host
-application and its plugin system. It does not host, list, index or link to
-plugins, and it never downloads one for you.
+application and its plugin system.
 
-There is no catalogue here to browse and no list of games to choose from. This
-launcher runs the integrations it supports, plus whatever plugins you add
-yourself.
+## It ships with no games
 
-## Supported games
+Not one. Install it and the library is empty until you add something.
 
-**Diablo II Archipelago** — [stable](https://github.com/solida1987/Diablo-II-Archipelago)
-and [experimental](https://github.com/solida1987/Diablo-II-Archipelago-experimental).
+That includes the games written by the same person who wrote this launcher.
+They are plugins like any other, downloaded from their own project and added
+by hand, and they get no special treatment here: no shortcut, no listing, no
+"recommended" section, no button that fetches one for you.
 
-Supported means the launcher and the integration are built together and
-released together, and that the launcher carries whatever code that integration
-needs. It also means the dependency runs both ways: that mod is built for this
-launcher and does not work without it.
+This is a deliberate line, and it costs the first-run experience something.
+The reason is simple: a launcher that ships or fetches games is a distribution
+channel for those games, and answerable for them. A launcher that loads a file
+the player brought is a tool. This one is a tool.
 
-That list is mine to decide, because I write both halves. Anything else reaches
-the launcher as a plugin, on the terms below — and a plugin is not endorsed,
-supported or vouched for by this project.
+So there is no catalogue to browse and no list to choose from — and this
+README will not point you at one either. If you are here, something else
+already sent you.
 
 ---
 
@@ -94,6 +93,59 @@ facts in front of you. Only add plugins from people you have reason to trust.
 
 ---
 
+## Building it yourself
+
+The full source is here, and the build is two commands.
+
+**You need:** the [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)
+and Windows. Nothing else — no Visual Studio, no restore steps of your own.
+
+```
+git clone https://github.com/solida1987/Multiworld-Launcher
+cd Multiworld-Launcher
+dotnet build -c Release
+```
+
+That produces a runnable launcher in
+`bin/Release/net8.0-windows/win-x64/`.
+
+To build the same self-contained package the releases ship:
+
+```
+dotnet publish -c Release -r win-x64 --self-contained true
+python Tools/pack_launcher.py bin/Release/net8.0-windows/win-x64/publish launcher_package.zip
+```
+
+`pack_launcher.py` is not just a zip. It excludes runtime state that a
+developer's build accumulates — the installed-games list, settings, crash logs —
+and then **verifies what actually landed in the archive**: that the excluded
+files are gone, that the executable is there and carries the expected version,
+and that every file under `Assets/` made it in. A missing asset is invisible at
+runtime (an icon silently falls back, a logo simply does not draw), so it is
+checked where it can be counted.
+
+### The gates
+
+Two scripts enforce what this launcher is, and both should pass before a
+release:
+
+```
+python Tools/lint_no_builtin_game.py
+python Tools/lint_no_game_index.py --package bin/Release/net8.0-windows/win-x64
+```
+
+- **`lint_no_builtin_game.py`** counts references to any specific game outside
+  its own plugin. The launcher must not know that a particular game exists.
+  Target: **0**.
+- **`lint_no_game_index.py`** fails if the code fetches a list of games from
+  anywhere, or if a list of games ships inside the package.
+
+`Tools/PluginCheck` is a separate project that takes a finished `.londonplugin`
+the whole way — inspect, install, load, cast, call — and reports whether the
+launcher can actually use it.
+
+---
+
 ## Writing a plugin
 
 **[PLUGIN_API.md](PLUGIN_API.md)** is the guide: the project layout, the
@@ -103,9 +155,8 @@ The short version: a plugin is a .NET class library implementing `IGamePlugin`,
 plus a `plugin.json` describing it, zipped as `.londonplugin`. It builds
 against this launcher but is never compiled into it.
 
-`Tools/PluginCheck` takes a finished package the whole way — inspect, install,
-load, cast, call — and tells you whether the launcher can actually use it.
-`Tools/pack_plugin.py` builds the package from a project's build output.
+`Tools/pack_plugin.py` builds the package from a project's build output, and
+`Tools/PluginCheck` (see above) tells you whether it will load.
 
 ### The rules come first
 
@@ -129,8 +180,9 @@ launcher a tool rather than a distribution channel.
 - **Playtime & achievements** tracking
 - **Launcher self-update** built in
 
-One game integration is currently compiled in, from before the plugin system
-existed. Everything new arrives as a plugin.
+Every one of those works the same for a plugin as it did for the game that
+used to be compiled in — that was the test the plugin system had to pass
+before the last built-in game was moved out.
 
 ---
 

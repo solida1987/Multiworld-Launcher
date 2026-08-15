@@ -7,17 +7,8 @@ using System.Windows.Threading;
 
 namespace LauncherV2.Core.Plugins;
 
-// The one moment where the player decides whether to run somebody else's code.
-//
-// Everything shown here was read out of the package without executing any of
-// it: the manifest, and a hash of the exact bytes. That is what makes the
-// dialog worth showing at all — by the time it appears, nothing from the
-// plugin has run, and pressing Cancel leaves nothing behind.
-//
-// The approve button is disabled for a moment on purpose. It is not a delay
-// for its own sake: a dialog that can be dismissed by the reflex that opened
-// the file picker is a dialog nobody reads, and then the whole consent model is
-// decoration. Built in code like the rest of the launcher's dialogs.
+// The consent moment: who wrote it, what it declares, the file hash.
+// Approve is disabled for a few seconds so reading is the default.
 
 internal sealed class PluginConsentDialog : Window
 {

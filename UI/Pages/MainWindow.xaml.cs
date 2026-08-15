@@ -49,14 +49,6 @@ public partial class MainWindow : Window
     private const int LocPageSize = LauncherV2.Core.LauncherConstants.LocPageSize;
     private string                      _hintsFilter     = "all"; // "all" | "for_me" | "in_my_world"
 
-    // --- Browse / catalog ---
-    private IReadOnlyList<CatalogEntry>? _catalogEntries;
-    private IReadOnlyList<CatalogTool>?  _catalogTools;
-    private string _catalogMainFilter     = "all";  // "all" | "available" | "official" | "unofficial"
-    private string _catalogPlatformFilter = "all";  // "all" or a normalized platform name
-    private string _catalogCategoryFilter = "all";  // "all" or a category name
-    // Platforms below this many games get no chip — they stay reachable via text search.
-    private const int PlatformChipMinGames = LauncherV2.Core.LauncherConstants.PlatformChipMinGames;
 
     // --- Sidebar card references (for active-state highlighting) ---
     private readonly Dictionary<string, Border> _gameCards = new();
@@ -67,17 +59,8 @@ public partial class MainWindow : Window
     // --- Active AP session info (set by global connect, used by LaunchGameAsync) ─
     private ApSession?   _currentSession;
 
-    // --- THE plugin of the live AP game session (P2-6): set when LaunchGameAsync
-    // wires it, cleared only once its game stops running.
-    // DeathLink forwarding and the D2 slot-data refresh bind to THIS — never
-    // to _selectedPlugin, which merely tracks what the sidebar displays
-    // (browsing another game mid-session used to corrupt all three).
-    // Handler lifetime: plugins are app-lifetime singletons, so the named
-    // AP-bridge handlers MUST be unsubscribed when the game session ends —
-    // stacked lambdas would fire once per past launch.
-    // across a mid-game AP teardown (manual sidebar disconnect): the game
-    // keeps running, and its checks must keep landing in the replay buffer
-    // below (P2-8). ---
+    // The plugin of the LIVE session — not the sidebar selection. Browsing
+    // another game must not detach the running one.
     private IGamePlugin? _runningPlugin;
 
     // --- Check replay buffer (P2-8): every location ID the game reports this
@@ -229,15 +212,7 @@ public partial class MainWindow : Window
         string reward = sep > 0 ? text[(sep + 2)..] : text;
         _tracker.RecordStandalone(loc, reward);
 
-        // Notification sounds used to hang entirely off the AP client's
-        // ItemReceived event, so a standalone run — which has no AP client at
-        // all and reports through the pipe instead — was completely silent.
-        //
-        // The mod's own notification text comes through verbatim: rewards read
-        // "Reward: <thing>", traps read "TRAP! <what happened>". Matching the
-        // trap prefix on the WHOLE line rather than on the split reward matters,
-        // because a trap line has no colon to split on and lands entirely in
-        // `reward` with `loc` left at its default.
+        // Check sounds route through one helper so standalone plays them too.
         PlayNotifySound(text.StartsWith("TRAP!", StringComparison.OrdinalIgnoreCase)
                         ? "trap" : "progression");
     }
@@ -282,21 +257,38 @@ public partial class MainWindow : Window
     // every AppendLog run lands in this single paragraph.
     private readonly Paragraph _logParagraph = new() { Margin = new Thickness(0) };
 
+    // Set during construction, flushed once the log exists. The constructor
+    // runs before AppendLog has anywhere to write, so anything worth saying
+    // that early has to wait rather than vanish.
+    private string? _pendingStartupWarning;
+
+    // The live-connection services handed to the running game. Detached and
+    // rebuilt per session, so a finished session's scout replies stop arriving.
+    private ApServices? _apServices;
+
     public MainWindow()
     {
         InitializeComponent();
 
-        // Home-page logo. Loaded from disk the same way the hero art is,
-        // rather than as an embedded resource, because Assets ship beside
-        // the executable as content.
+        // Home-page logo, loaded from Assets/ beside the exe. A failure is
+        // REPORTED via the startup warning — a silent catch hid a real deletion.
         try
         {
             string logo = Path.Combine(AppContext.BaseDirectory,
                                        "Assets", "logo.png");
-            if (File.Exists(logo) && LoadCachedBitmap(logo) is { } bmp)
+            if (!File.Exists(logo))
+                _pendingStartupWarning = "[Assets] logo.png is missing from " +
+                                         "Assets\\ — reinstall to restore it.";
+            else if (LoadCachedBitmap(logo) is { } bmp)
                 ImgHomeLogo.Source = bmp;
+            else
+                _pendingStartupWarning = "[Assets] logo.png could not be decoded.";
         }
-        catch { /* cosmetic only - never block startup on the logo */ }
+        catch (Exception ex)
+        {
+            // Never block startup on a logo — but say what happened.
+            _pendingStartupWarning = "[Assets] logo.png failed to load: " + ex.Message;
+        }
 
         // Log document: one paragraph, padded like the old TextBlock had.
         TxtLog.Document = new FlowDocument(_logParagraph)
@@ -341,6 +333,21 @@ public partial class MainWindow : Window
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
+        if (_pendingStartupWarning != null)
+        {
+            AppendLog(_pendingStartupWarning);
+            _pendingStartupWarning = null;
+        }
+
+        // Plugins that did not load. Reported here rather than at load time
+        // because the log does not exist yet when App loads them -- but they
+        // ARE reported, which is the whole point: a game that vanishes without
+        // a word is a support request.
+        int pluginProblemCount = App.PluginLoadProblems.Count;
+        foreach (string problem in App.PluginLoadProblems)
+            AppendLog("[Plugin] " + problem);
+        App.ClearPluginLoadProblems();
+
         // Bind the DataGrid to the observable collection
         TrackerGrid.ItemsSource = _trackerView;
 
@@ -406,6 +413,16 @@ public partial class MainWindow : Window
         // folders are in Windows Defender's exclusions so the mod isn't blocked or
         // deleted. Fire-and-forget — it waits for the UI to settle, never blocks.
         _ = EnsureDefenderExclusionsAtStartupAsync();
+
+        // Every plugin's log line lands in the launcher's log.
+        //
+        // Wired here rather than with the per-launch session events, because a
+        // plugin does things outside a session: a save repair runs with the
+        // game shut down, and its report would otherwise go nowhere. Plugins
+        // are app-lifetime singletons, so this happens once and is never
+        // unwired.
+        foreach (var p in GameRegistry.All)
+            p.LogLine += line => Dispatcher.Invoke(() => AppendLog(line));
 
         // Build sidebar respecting library order (favorites first)
         RebuildGameList();
@@ -481,7 +498,14 @@ public partial class MainWindow : Window
         // sidebar until the user clicked the game).
         RebuildGameList();
 
-        SetStatus("Ready.");
+        // "Ready." is the resting state, and it must not wipe a warning that
+        // is still true. A plugin that failed to load is exactly the case
+        // where the status bar has something better to say than nothing.
+        SetStatus(pluginProblemCount == 0
+            ? "Ready."
+            : pluginProblemCount == 1
+                ? "A plugin did not load — see the log."
+                : $"{pluginProblemCount} plugins did not load — see the log.");
 
         // Background: check for launcher self-update (silent, non-blocking).
         // Progress is wired here exactly once (P3-13) — subscribing inside the
@@ -547,7 +571,7 @@ public partial class MainWindow : Window
         {
             var emptyMsg = new TextBlock
             {
-                Text         = "Your library is empty.\nBrowse games to add some.",
+                Text         = "Your library is empty.\nAdd a plugin to put a game here.",
                 FontSize     = 11,
                 Foreground   = (Brush)FindResource("BrushMuted"),
                 TextWrapping = TextWrapping.Wrap,
@@ -620,12 +644,17 @@ public partial class MainWindow : Window
         _selectedPlugin = plugin;
 
         PanelEmpty.Visibility        = Visibility.Collapsed;
-        PanelBrowse.Visibility       = Visibility.Collapsed;
         PanelAchievements.Visibility = Visibility.Collapsed;
         PanelGame.Visibility         = Visibility.Visible;
 
         TxtGameName.Text     = plugin.DisplayName;
         TxtGameSubtitle.Text = plugin.Subtitle;
+
+        // The Items tab's action button belongs to the game. No dialog, no
+        // button -- a visible control that does nothing when clicked is worse
+        // than one that is not there.
+        BtnItemActions.Visibility = plugin.ItemActions != null
+            ? Visibility.Visible : Visibility.Collapsed;
 
         ImgGameIcon.Source = LoadCachedBitmap(plugin.IconPath);
 
@@ -634,9 +663,12 @@ public partial class MainWindow : Window
         // fall back to a subtle accent-tinted solid when no art exists.
         try
         {
-            string heroPath = Path.Combine(AppContext.BaseDirectory,
-                "Assets", "Heroes", $"{plugin.GameId}_hero.png");
-            if (!File.Exists(heroPath))
+            // The plugin names its own banner; the generic one stands in when
+            // it names none or the file it names is not there. Looking the art
+            // up by GameId under the launcher's own Assets was the launcher
+            // storing a game's picture for it.
+            string? heroPath = plugin.HeaderArtPath;
+            if (string.IsNullOrEmpty(heroPath) || !File.Exists(heroPath))
                 heroPath = Path.Combine(AppContext.BaseDirectory,
                     "Assets", "Heroes", "_generic_hero.png");
 
@@ -985,14 +1017,11 @@ public partial class MainWindow : Window
     // can ALWAYS be installed by the launcher, so ManualSetup never applies
     // here — map anything unknown to AutoInstall rather than dead-ending.
     private InstallCapability EffectiveInstallCapability(IGamePlugin plugin)
-    {
-        var entry = FindCatalogEntryForPlugin(plugin);
-        if (entry != null && entry.InstallCapability != InstallCapability.ManualSetup)
-            return entry.InstallCapability;
-        return plugin is Plugins.Emulated.EmulatorPlugin
-            ? InstallCapability.RomRequired
-            : InstallCapability.AutoInstall;
-    }
+        // The plugin's own answer. ManualSetup is never right here -- a game
+        // the launcher is showing is a game the launcher can install.
+        => plugin.InstallCapability == InstallCapability.ManualSetup
+               ? InstallCapability.AutoInstall
+               : plugin.InstallCapability;
 
     // True when the user already located a valid original install for this
     // AutoMod game (and the folder still exists).
@@ -1081,14 +1110,7 @@ public partial class MainWindow : Window
 
     // Playtime display (header badge + sidebar card tooltip)
 
-    // Show total playtime + last-played in the game header.
-    // Numbers are REAL tracked sessions (PlaytimeService) — never estimates.
-    // Never-played games keep the badge hidden rather than showing "Never
-    // played": the header's job is the Play call-to-action sitting right next
-    // to it, and on a fresh install every game would carry the same gray pill
-    // — pure noise with no information the Play button doesn't already convey.
-    // The never-played state IS stated explicitly where users look for info:
-    // the sidebar card tooltip (BuildGameCardToolTip).
+    // Playtime + last-played in the header, from the launcher's own records.
     private void RefreshPlaytimeBadge(IGamePlugin plugin)
     {
         if (!CheckAccess()) { Dispatcher.Invoke(() => RefreshPlaytimeBadge(plugin)); return; }
@@ -1305,7 +1327,7 @@ public partial class MainWindow : Window
             // The tab can be opened at any point in a session, including long
             // after connecting, so hand it the current hint state every time
             // rather than relying on a push it may have missed.
-            PushD2ApContext();
+            PushApSessionContext();
         }
         else
         {
@@ -1543,8 +1565,6 @@ public partial class MainWindow : Window
     // text, capability badge).
     // yet, the bundled local catalog is loaded ONCE in the background and the
     // page re-renders when it arrives.
-    private IReadOnlyList<CatalogEntry>? _overviewCatalog;
-    private bool _overviewCatalogLoading;
 
     // Link targets for the Overview action bar (set by RefreshOverview).
     private string? _overviewGetGameUrl;
@@ -1568,8 +1588,6 @@ public partial class MainWindow : Window
         TxtOverviewTitle.Text      = plugin.DisplayName;
         TxtOverviewSubtitle.Text   = plugin.Subtitle;
         OverviewHeroArt.Background = BuildOverviewHeroBrush(plugin);
-
-        var entry = FindCatalogEntryForPlugin(plugin);
 
         // Header badges share the same state-aware source — keep them in step
         // with the Overview (ROM import / install happen while both are visible).
@@ -1630,11 +1648,11 @@ public partial class MainWindow : Window
             // DO; suppress the duplicate "ROM needed" badge when the pill
             // already says "Bring your own ROM".
             bool capShown = false;
-            if (entry != null && !plugin.IsInstalled || (entry != null && !romReady))
+            if (!plugin.IsInstalled || !romReady)
             {
-                var (capLabel, capTip, capTint) = CapabilityPresentation(entry!);
+                var (capLabel, capTip, capTint) = CapabilityPresentation(plugin);
                 AddOverviewBadge(capLabel.ToUpperInvariant(), capTint, capTip);
-                capShown = entry!.InstallCapability == InstallCapability.RomRequired;
+                capShown = EffectiveInstallCapability(plugin) == InstallCapability.RomRequired;
             }
             foreach (var badge in plugin.GameBadges)
             {
@@ -1644,33 +1662,25 @@ public partial class MainWindow : Window
             }
         }
 
-        // --- Component badges (Diablo II only) ---
-        //
-        // One badge per component, coloured by what it means for the player:
-        //   green  it is there
-        //   amber  missing, but the game runs anyway
-        //   red    missing, and the game will not start
-        //
-        // Anything already sitting in the player's own Diablo II folder is
-        // copied across first, so they are never asked to download what they
-        // already own.
-        if (plugin is Plugins.DiabloII.D2Plugin d2Addons && plugin.IsInstalled)
+        // --- Component badges: green present / amber optional-missing / red
+        // blocking. Adopting call: the page draw is the moment to copy files the
+        // player already owns.
+        if (plugin.IsInstalled)
         {
-            foreach (var a in d2Addons.DetectAddonsAdopting())
+            foreach (var c in plugin.DetectComponentsAdopting())
             {
-                bool ok = a.Active;
-                bool blocking = !ok && a.Need == Plugins.DiabloII.D2Plugin.AddonNeed.Required;
+                bool blocking = !c.Present && c.Need == ComponentNeed.Required;
 
-                Color tint = ok       ? Color.FromRgb(0x22, 0xC5, 0x5E)   // green
-                           : blocking ? Color.FromRgb(0xEF, 0x44, 0x44)   // red
-                                      : Color.FromRgb(0xF5, 0x9E, 0x0B);  // amber
+                Color tint = c.Present ? Color.FromRgb(0x22, 0xC5, 0x5E)   // green
+                           : blocking  ? Color.FromRgb(0xEF, 0x44, 0x44)   // red
+                                       : Color.FromRgb(0xF5, 0x9E, 0x0B);  // amber
 
-                string mark  = ok ? "✓" : blocking ? "✕" : "!";
-                string label = mark + " " + a.Name.ToUpperInvariant();
+                string mark  = c.Present ? "✓" : blocking ? "✕" : "!";
+                string label = mark + " " + c.Name.ToUpperInvariant();
 
-                string tip = a.Status;
-                if (a.Advice != null) tip += Environment.NewLine + Environment.NewLine + a.Advice;
-                if (a.Url.Length > 0) tip += Environment.NewLine + a.Url;
+                string tip = c.Status;
+                if (c.Advice != null) tip += Environment.NewLine + Environment.NewLine + c.Advice;
+                if (c.Url    != null) tip += Environment.NewLine + c.Url;
 
                 AddOverviewBadge(label, tint, tip);
             }
@@ -1682,18 +1692,16 @@ public partial class MainWindow : Window
         // "Get the game ↗" — only while NOT installed and the catalog knows
         // where to get it (purchase link preferred, official site fallback).
         _overviewGetGameUrl = !plugin.IsInstalled
-            ? FirstNonEmpty(entry?.PurchaseUrl, entry?.Links?.PurchaseUrl,
-                            entry?.Links?.OfficialSite)
+            ? plugin.PurchaseUrl
             : null;
-        BtnOverviewGetGame.Content    = entry?.Free == true ? "Free — get it ↗" : "Get the game ↗";
+        BtnOverviewGetGame.Content    = plugin.IsFreeGame ? "Free — get it ↗" : "Get the game ↗";
         BtnOverviewGetGame.ToolTip    = _overviewGetGameUrl;
         BtnOverviewGetGame.Visibility = _overviewGetGameUrl != null
             ? Visibility.Visible : Visibility.Collapsed;
 
         // "Website ↗" — official site (or AP game page), hidden when it would
         // duplicate the Get-the-game target.
-        _overviewWebsiteUrl = FirstNonEmpty(entry?.Links?.OfficialSite,
-                                            entry?.Links?.ApGamePage);
+        _overviewWebsiteUrl = plugin.WebsiteUrl;
         if (_overviewWebsiteUrl != null && _overviewWebsiteUrl == _overviewGetGameUrl)
             _overviewWebsiteUrl = null;
         BtnOverviewWebsite.ToolTip    = _overviewWebsiteUrl;
@@ -1734,53 +1742,28 @@ public partial class MainWindow : Window
         TxtOverviewAbout.Visibility = about.Length > 0
             ? Visibility.Visible : Visibility.Collapsed;
 
-        // Append the catalog's richer description when it adds something.
-        string? extra = null;
-        if (!string.IsNullOrWhiteSpace(entry?.Description))
-        {
-            string catalogDesc = entry!.Description.Trim();
-            if (catalogDesc.Length > about.Length &&
-                !string.Equals(catalogDesc, about, StringComparison.Ordinal))
-                extra = catalogDesc;
-        }
-        TxtOverviewAboutMore.Text       = extra ?? "";
-        TxtOverviewAboutMore.Visibility = extra != null
-            ? Visibility.Visible : Visibility.Collapsed;
-
         TxtOverviewApWorld.Text = $"Archipelago world: {plugin.ApWorldName}";
 
         // --- Credits ---
-        var credits = LauncherV2.Core.GameCredits.Get(plugin.GameId);
-        if (credits.HasValue)
+        //
+        // One line per credit the plugin reports, however many that is. The
+        // launcher used to hold three named slots -- game developer, AP
+        // author, and one spare -- which is a guess about how many people
+        // work on a game and in what capacities.
+        PanelOverviewCredits.Children.Clear();
+        foreach (var credit in plugin.Credits)
         {
-            TxtOverviewCreditsGameDev.Text       = $"Game by: {credits.Value.GameDev}";
-            TxtOverviewCreditsGameDev.Visibility = Visibility.Visible;
-            if (credits.Value.ApAuthor != null)
+            PanelOverviewCredits.Children.Add(new TextBlock
             {
-                TxtOverviewCreditsApAuthor.Text       = $"AP integration by: {credits.Value.ApAuthor}";
-                TxtOverviewCreditsApAuthor.Visibility = Visibility.Visible;
-            }
-            else
-            {
-                TxtOverviewCreditsApAuthor.Visibility = Visibility.Collapsed;
-            }
-
-            var extraCredit = LauncherV2.Core.GameCredits.GetExtraCredit(plugin.GameId);
-            if (extraCredit.HasValue)
-            {
-                TxtOverviewCreditsApLogic.Text       = $"{extraCredit.Value.Role}: {extraCredit.Value.Name}";
-                TxtOverviewCreditsApLogic.Visibility = Visibility.Visible;
-            }
-            else
-            {
-                TxtOverviewCreditsApLogic.Visibility = Visibility.Collapsed;
-            }
-        }
-        else
-        {
-            TxtOverviewCreditsGameDev.Visibility  = Visibility.Collapsed;
-            TxtOverviewCreditsApAuthor.Visibility = Visibility.Collapsed;
-            TxtOverviewCreditsApLogic.Visibility  = Visibility.Collapsed;
+                Text         = $"{credit.Role}: {credit.Name}",
+                FontSize     = 11,
+                FontWeight   = credit.Highlight ? FontWeights.SemiBold : FontWeights.Normal,
+                Foreground   = credit.Highlight
+                                   ? new SolidColorBrush(Color.FromRgb(0xE8, 0xB4, 0x4A))
+                                   : (Brush)FindResource("BrushMuted"),
+                TextWrapping = TextWrapping.Wrap,
+                Margin       = new Thickness(0, credit.Highlight ? 4 : 2, 0, 0),
+            });
         }
 
         // --- Known issues ---
@@ -1798,7 +1781,7 @@ public partial class MainWindow : Window
     {
         PanelOverviewKnownIssues.Children.Clear();
 
-        var issues = LauncherV2.Core.GameKnownIssues.Get(plugin.GameId);
+        var issues = plugin.KnownIssues;
         if (issues.Count == 0)
         {
             BorderOverviewKnownIssues.Visibility = Visibility.Collapsed;
@@ -1896,14 +1879,7 @@ public partial class MainWindow : Window
         return new LinearGradientBrush(tinted, baseBg, 90.0);
     }
 
-    // Mirror the hidden header BtnPlay/BtnStandalone onto the Overview's
-    // floating action buttons — label, enabled state and tooltip.
-    // buttons are the state machine (§9); these are the only visible surface.
-    // Called from RefreshButtons (the single button-semantics authority),
-    // from RefreshOverview, and after every direct BtnPlay mutation on the
-    // launch/stop paths.
-    // The refusal text currently on the launch buttons, so the next pass can
-    // tell its own tooltip from one RefreshButtons put there.
+    // Overview Play mirrors the header BtnPlay — one state machine, no duplicate logic.
     private string? _launchBlockReason;
 
     // What each launch button's IsEnabled was before a missing requirement
@@ -1927,21 +1903,16 @@ public partial class MainWindow : Window
         BtnOverviewStandalone.ToolTip   = BtnStandalone.ToolTip
             ?? "Launch the game without an Archipelago connection";
 
-        // A missing requirement takes both buttons out of service and says so
-        // on the button itself. Letting someone press Play and then explaining
-        // in a dialog is a worse way to learn the same thing.
-        //
-        // The red is carried by Tag="blocked", which both button templates
-        // answer (§ styles at the top of the XAML) — not by local brushes.
-        // Local brushes lose: BtnPlayStyle's disabled trigger repaints its
-        // border by name, so a locally-set Background never reaches the screen.
-        // Clearing the Tag has to happen on every pass, or the buttons stay red
-        // after the player drops the missing file in and presses Check again.
+        // A missing requirement disables the buttons via Tag="blocked" (template
+        // triggers repaint by name, local brushes lose). Blocking is a loan: state
+        // is handed back on every pass.
         string? why = null;
-        if (_selectedPlugin is Plugins.DiabloII.D2Plugin d2Req && _selectedPlugin.IsInstalled)
+        if (_selectedPlugin != null && _selectedPlugin.IsInstalled)
         {
-            var blockers = d2Req.DetectAddons()
-                .Where(a => a.Need == Plugins.DiabloII.D2Plugin.AddonNeed.Required && !a.Active)
+            // The plain read, not the adopting one: this decides whether the
+            // buttons are usable, and it runs on every refresh.
+            var blockers = _selectedPlugin.DetectComponents()
+                .Where(c => c.Need == ComponentNeed.Required && !c.Present)
                 .ToList();
             if (blockers.Count > 0)
                 why = "Cannot launch — " + string.Join(", ", blockers.Select(b => b.Name))
@@ -1980,7 +1951,7 @@ public partial class MainWindow : Window
         }
         _launchBlockReason = why;
 
-        SyncUnbugButton();
+        SyncCommandBar();
     }
 
     // The Overview Play button is a front for the header BtnPlay — same
@@ -2033,74 +2004,41 @@ public partial class MainWindow : Window
     // future save repair lands, so adding one means adding an entry to
     // BuildUnbugMenu — no layout work, no new button competing for space.
 
-    // A single repair the user can run on one character save.
-    // <param name="Applies">Cheap check: does this save actually have the problem?
-    // Entries that apply to nothing are shown greyed out so the user can see the
-    // tool exists without being invited to run a no-op.</param>
-    private sealed record SaveRepair(
-        string Title,
-        string Describe,                       // shown in the confirm dialog
-        Func<string, bool> Applies,
-        Func<string, string?> Run);            // returns null on success, else why not
-
-    // Repairs offered for the selected game.
-    private List<SaveRepair> GetSaveRepairs(IGamePlugin? plugin)
+    // Draw the command row for the current selection.
+    //
+    // Rebuilt from scratch every pass rather than hidden and shown: a game may
+    // change what it offers as its state changes, and a stale button that
+    // still works is worse than one that is not there.
+    private void SyncCommandBar()
     {
-        var list = new List<SaveRepair>();
-        if (plugin is Plugins.DiabloII.D2Plugin d2)
+        OverviewCommandBar.Children.Clear();
+        if (_selectedPlugin == null) return;
+
+        foreach (var cmd in _selectedPlugin.GetCommands())
         {
-            list.Add(new SaveRepair(
-                "Remove a stuck Iron Golem",
-                "An Iron Golem stored in the save can make a character impossible to "
-              + "load (\"unable to enter game, bad hireable\"). This removes the stored "
-              + "golem so the character works again. Nothing else about the character "
-              + "changes, and a backup is kept next to the save.",
-                d2.SaveHasIronGolem,
-                d2.RepairIronGolemSave));
+            if (cmd.NeedsInstall && !_selectedPlugin.IsInstalled) continue;
 
-            list.Add(new SaveRepair(
-                "Generate a new map",
-                "Some characters get an invisible wall blocking the way, and relogging "
-              + "never clears it because the world layout is stored in the character. "
-              + "This rolls a fresh layout. Level, items and quests are untouched, and "
-              + "a backup is kept next to the save.",
-                _ => true,                      // always offerable
-                d2.RegenerateMapForSave));
+            var captured = cmd;
+            var btn = new Button
+            {
+                Content = cmd.Label,
+                Style   = (Style)FindResource("BtnSecondaryStyle"),
+                Margin  = new Thickness(10, 0, 0, 0),
+                ToolTip = cmd.Tooltip,
+            };
+            // A command that throws is the plugin's bug, not a reason for the
+            // launcher to fall over -- it goes in the log like anything else.
+            btn.Click += (_, __) =>
+            {
+                try { captured.Run(this); }
+                catch (Exception ex)
+                {
+                    AppendLog($"[Command] '{captured.Label.Trim()}' failed: {ex.Message}");
+                }
+            };
+            OverviewCommandBar.Children.Add(btn);
         }
-        return list;
     }
-
-    // Show/hide the Unbug button for the current selection.
-    private void SyncUnbugButton()
-    {
-        BtnOverviewUnbug.Visibility =
-            GetSaveRepairs(_selectedPlugin).Count > 0 && (_selectedPlugin?.IsInstalled ?? false)
-                ? Visibility.Visible : Visibility.Collapsed;
-
-        // The seed check reads a spoiler file, so it does not need the game
-        // installed — but it is Diablo II's, and showing it under another game
-        // would be nonsense.
-        BtnOverviewSeedCheck.Visibility =
-            _selectedPlugin is LauncherV2.Plugins.DiabloII.D2Plugin
-                ? Visibility.Visible : Visibility.Collapsed;
-
-        // Same reasoning, and it needs even less: you build a settings file
-        // BEFORE you have anything installed, which is exactly when a new
-        // player is trying to join someone else's multiworld.
-        BtnOverviewMakeYaml.Visibility = BtnOverviewSeedCheck.Visibility;
-    }
-
-    private void BtnOverviewSeedCheck_Click(object sender, RoutedEventArgs e)
-        => LauncherV2.Plugins.DiabloII.D2SeedCheckDialog.ShowFor(
-               this, SafeGameDir(_selectedPlugin));
-
-    private void BtnOverviewMakeYaml_Click(object sender, RoutedEventArgs e)
-        // Pass the channel: the experimental apworld knows options the stable
-        // one does not, and offering those under the stable game would write a
-        // YAML its apworld rejects at generation time.
-        => LauncherV2.Plugins.DiabloII.D2YamlDialog.ShowFor(
-               this,
-               _selectedPlugin?.GameId == "diablo2_archipelago_experimental");
 
     // Gather every log worth having into one zip and let the player choose
     // where it lands. The automatic report drops on the Desktop, which is
@@ -2154,87 +2092,6 @@ public partial class MainWindow : Window
         {
             AppendLog($"[Report] Could not collect the logs: {ex.Message}");
             ToastService.Show("Could not collect the logs", ex.Message, ToastKind.Error);
-        }
-    }
-
-    private void BtnOverviewUnbug_Click(object sender, RoutedEventArgs e)
-    {
-        var repairs = GetSaveRepairs(_selectedPlugin);
-        if (repairs.Count == 0) return;
-
-        var saves = FindCharacterSaves(_selectedPlugin);
-        UnbugMenu.Items.Clear();
-
-        if (saves.Count == 0)
-        {
-            UnbugMenu.Items.Add(new MenuItem { Header = "No characters found", IsEnabled = false });
-        }
-        else
-        {
-            foreach (var repair in repairs)
-            {
-                var top = new MenuItem { Header = repair.Title };
-                foreach (string save in saves)
-                {
-                    bool applies;
-                    try { applies = repair.Applies(save); } catch { applies = false; }
-                    var item = new MenuItem
-                    {
-                        Header    = Path.GetFileNameWithoutExtension(save) + (applies ? "" : "   (not affected)"),
-                        IsEnabled = applies,
-                        Tag       = save,
-                    };
-                    item.Click += (_, __) => RunSaveRepair(repair, save);
-                    top.Items.Add(item);
-                }
-                UnbugMenu.Items.Add(top);
-            }
-        }
-
-        UnbugMenu.PlacementTarget = BtnOverviewUnbug;
-        UnbugMenu.IsOpen = true;
-    }
-
-    // Every .d2s under the game's save tree (characters live in per-seed
-    // subfolders as well as the root Save folder).
-    private static List<string> FindCharacterSaves(IGamePlugin? plugin)
-    {
-        var found = new List<string>();
-        try
-        {
-            string? dir = plugin?.GameDirectory;
-            if (string.IsNullOrEmpty(dir)) return found;
-            string saveRoot = Path.Combine(dir, "Save");
-            if (!Directory.Exists(saveRoot)) return found;
-            found.AddRange(Directory.GetFiles(saveRoot, "*.d2s", SearchOption.AllDirectories));
-            found.Sort(StringComparer.OrdinalIgnoreCase);
-        }
-        catch { /* a missing/locked save folder just means nothing to offer */ }
-        return found;
-    }
-
-    private void RunSaveRepair(SaveRepair repair, string savePath)
-    {
-        string name = Path.GetFileNameWithoutExtension(savePath);
-        if (!ConfirmDialog.Show(this, repair.Title,
-                $"Character: {name}\n\n{repair.Describe}\n\nRun it now?",
-                "Repair", "Cancel"))
-            return;
-
-        string? error;
-        try { error = repair.Run(savePath); }
-        catch (Exception ex) { error = ex.Message; }
-
-        if (error == null)
-        {
-            AppendLog($"[Unbug] {repair.Title} — done for '{name}'.");
-            ConfirmDialog.ShowInfo(this, "Done",
-                $"'{name}' has been repaired. A backup of the original was saved next to it.");
-        }
-        else
-        {
-            AppendLog($"[Unbug] {repair.Title} — not applied to '{name}': {error}");
-            ConfirmDialog.ShowInfo(this, "Nothing was changed", error);
         }
     }
 
@@ -2497,48 +2354,6 @@ public partial class MainWindow : Window
 
     // --- Catalog metadata lookup ---
 
-    // Match this plugin to its Browse catalog entry (first-party games share
-    // ids between the two).
-    // lazily-loaded bundled copy.
-    // — RefreshOverview re-runs when the bundled copy arrives.
-    private CatalogEntry? FindCatalogEntryForPlugin(IGamePlugin plugin)
-    {
-        var source = _catalogEntries ?? _overviewCatalog;
-        if (source == null)
-        {
-            EnsureOverviewCatalogLoaded();
-            return null;
-        }
-        return source.FirstOrDefault(e =>
-            string.Equals(e.Id, plugin.GameId, StringComparison.OrdinalIgnoreCase));
-    }
-
-    // One-shot background load of the bundled catalog (local file — no
-    // network). On completion the Overview re-renders if it is still showing.
-    private void EnsureOverviewCatalogLoaded()
-    {
-        if (_overviewCatalogLoading) return;
-        _overviewCatalogLoading = true;
-
-        var wCts = _mainWindowCts;
-        _ = Task.Run(async () =>
-        {
-            string localPath = Path.Combine(AppContext.BaseDirectory,
-                "CatalogRepo", "catalog.json");
-            if (!File.Exists(localPath)) return;
-
-            var result = await GameCatalog.FetchFromFileAsync(localPath);
-            if (result.Games.Count == 0 || wCts.IsCancellationRequested) return;
-
-            await Dispatcher.InvokeAsync(() =>
-            {
-                _overviewCatalog = result.Games;
-                if (_currentTab == PageTab.Overview && _selectedPlugin != null)
-                    RefreshOverview(_selectedPlugin);
-            });
-        }, wCts.Token);
-    }
-
     private void BtnSession_Click(object sender, RoutedEventArgs e)
     {
         // Expand the sidebar connect panel and focus the server field.
@@ -2546,7 +2361,6 @@ public partial class MainWindow : Window
         BtnConnToggle.Content      = "Cancel";
         if (_selectedPlugin != null)
         {
-            PanelBrowse.Visibility       = Visibility.Collapsed;
             PanelAchievements.Visibility = Visibility.Collapsed;
             PanelGame.Visibility         = Visibility.Visible;
             PanelEmpty.Visibility        = Visibility.Collapsed;
@@ -3237,7 +3051,7 @@ public partial class MainWindow : Window
         {
             TxtHintCount.Text       = FormatHintPoints(pts);
             TxtHintCount.Visibility = Visibility.Visible;
-            PushD2ApContext();          // Map tab's per-check hint buttons
+            PushApSessionContext();          // Map tab's per-check hint buttons
             if (_currentTab == PageTab.Progression)
                 RefreshProgressionPanel();
         });
@@ -3525,227 +3339,12 @@ public partial class MainWindow : Window
         if (result.Added) RebuildGameList();
     }
 
-    private async void BtnBrowse_Click(object sender, RoutedEventArgs e)
-    {
-        PanelGame.Visibility         = Visibility.Collapsed;
-        PanelEmpty.Visibility        = Visibility.Collapsed;
-        PanelAchievements.Visibility = Visibility.Collapsed;
-        PanelBrowse.Visibility       = Visibility.Visible;
-
-        if (_catalogEntries == null)
-            await LoadCatalogAsync();
-        else
-            RenderCatalog(_catalogEntries, TxtCatalogSearch.Text);
-    }
-
-    private void BtnBrowseBack_Click(object sender, RoutedEventArgs e)
-    {
-        PanelBrowse.Visibility       = Visibility.Collapsed;
-        PanelAchievements.Visibility = Visibility.Collapsed;
-        if (_selectedPlugin != null)
-        {
-            PanelGame.Visibility  = Visibility.Visible;
-            PanelEmpty.Visibility = Visibility.Collapsed;
-        }
-        else
-        {
-            PanelEmpty.Visibility = Visibility.Visible;
-            PanelGame.Visibility  = Visibility.Collapsed;
-            RefreshHomePage();
-        }
-    }
-
-    private async Task LoadCatalogAsync()
-    {
-        CatalogLoadingBadge.Visibility = Visibility.Visible;
-        CatalogPanel.Children.Clear();
-
-        // Show skeleton cards while the catalog fetches
-        for (int i = 0; i < 8; i++)
-            CatalogPanel.Children.Add(BuildSkeletonCatalogCard());
-
-        try
-        {
-            var settings = SettingsStore.Load();
-            string url = settings.CatalogUrl ?? GameCatalog.DefaultCatalogUrl;
-
-            // Try hosted catalog first; fall back to the bundled local copy.
-            var result = await GameCatalog.FetchAsync(url);
-
-            if (result.Games.Count == 0)
-            {
-                // Network failed or catalog repo doesn't exist yet — load local bundle.
-                string localPath = Path.Combine(AppContext.BaseDirectory,
-                    "CatalogRepo", "catalog.json");
-                if (File.Exists(localPath))
-                {
-                    result = await GameCatalog.FetchFromFileAsync(localPath);
-                    AppendLog("[Catalog] Loaded from local bundle (offline mode).");
-                }
-            }
-
-            // Re-flag IsOfficial from CatalogRepo/official_games.txt — this is the
-            // single source of truth for the Browse "Official" filter (overrides
-            // every other is_official signal).
-            _catalogEntries = GameCatalog.ApplyOfficialList(result.Games);
-            _catalogTools   = result.Tools;
-            LogOfficialCoverage();
-
-            if (_catalogEntries.Count == 0)
-            {
-                CatalogPanel.Children.Add(new TextBlock
-                {
-                    Text          = "Could not load the game catalog.\nCheck your internet connection.",
-                    FontSize      = 14,
-                    Foreground    = (Brush)FindResource("BrushMuted"),
-                    TextAlignment = TextAlignment.Center,
-                    TextWrapping  = TextWrapping.Wrap,
-                    Margin        = new Thickness(40)
-                });
-            }
-            else
-            {
-                // Browse shows exactly what the hosted catalog carries. The old
-                // background merges (the archipelago.gg datapackage and the
-                // bundled community_games.txt) added a card for every game the
-                // AP server knows — this launcher only carries Diablo II, so
-                // nothing may be merged in beyond the catalog itself.
-                RenderCatalog(_catalogEntries, TxtCatalogSearch.Text);
-            }
-        }
-        catch (Exception ex)
-        {
-            // BtnBrowse_Click is async void — an unhandled throw from the catalog
-            // fetch/parse/render would crash the process.
-            AppendLog($"[Catalog] Load failed: {ex.Message}");
-            CatalogPanel.Children.Clear();
-            CatalogPanel.Children.Add(new TextBlock
-            {
-                Text          = "Could not load the game catalog.\nCheck your internet connection and try again.",
-                FontSize      = 14,
-                Foreground    = (Brush)FindResource("BrushMuted"),
-                TextAlignment = TextAlignment.Center,
-                TextWrapping  = TextWrapping.Wrap,
-                Margin        = new Thickness(40)
-            });
-        }
-        finally
-        {
-            // Always collapse the loading badge — even if an exception occurs.
-            CatalogLoadingBadge.Visibility = Visibility.Collapsed;
-        }
-    }
-
-    // Log how many official_games.txt names found a matching catalog entry.
-    // Genuinely useful diagnostics: a non-empty "unmatched" list means a name
-    // in official_games.txt has no card to flag (typo, or the catalog hasn't
-    // caught up). Should read "<total>/<total> matched".
-    private void LogOfficialCoverage()
-    {
-        var unmatched = GameCatalog.UnmatchedOfficialNames;
-        int total     = GameCatalog.OfficialCount;
-        int matched   = total - unmatched.Count;
-        string line   = $"[Catalog] Official: {matched}/{total} matched";
-        if (unmatched.Count > 0)
-            line += $"; unmatched: {string.Join(", ", unmatched)}";
-        AppendLog(line);
-    }
-
-    private void TxtCatalogSearch_Changed(object sender, TextChangedEventArgs e)
-    {
-        if (_catalogEntries != null)
-            RenderCatalog(_catalogEntries, TxtCatalogSearch.Text);
-    }
-
-    private void RenderCatalog(IReadOnlyList<CatalogEntry> all, string query)
-    {
-        CatalogPanel.Children.Clear();
-
-        // --- Filter chip bar (always at top) ---
-        CatalogPanel.Children.Add(BuildCatalogFilterBar(all));
-
-        // --- Apply text + main + platform + category filters (all AND) ---
-        IEnumerable<CatalogEntry> entries = string.IsNullOrWhiteSpace(query)
-            ? all
-            : GameCatalog.Search(all, query);
-
-        // Main filter: All / Available / Official / Unofficial (mutually exclusive).
-        // "Available" means the launcher itself can get you playing: released AND
-        // automatable (capability != ManualSetup) — see IsLauncherPlayable.
-        // Official-ness comes straight from official_games.txt (see ApplyOfficialList).
-        switch (_catalogMainFilter)
-        {
-            case "available":  entries = entries.Where(e => e.IsLauncherPlayable); break;
-            case "official":   entries = entries.Where(e => e.IsOfficial);         break;
-            case "unofficial": entries = entries.Where(e => !e.IsOfficial);        break;
-        }
-
-        // Platform filter composes (AND) with the main filter.
-        if (_catalogPlatformFilter != "all")
-            entries = entries.Where(e =>
-                GameCatalog.EntryHasPlatform(e, _catalogPlatformFilter));
-
-        // Category filter composes (AND) with both.
-        if (_catalogCategoryFilter != "all")
-            entries = entries.Where(e => e.Category.Equals(
-                _catalogCategoryFilter, StringComparison.OrdinalIgnoreCase));
-
-        var list = entries.ToList();
-
-        // --- Section split (honest install-capability semantics) ---
-        // Available Now — the launcher can actually get you playing.
-        // Coming Soon — plugin-gated integrations we are actively automating.
-        // Manual setup — everything else (incl.
-        var availableNow = new List<CatalogEntry>();
-        var comingSoon   = new List<CatalogEntry>();
-        var manualSetup  = new List<CatalogEntry>();
-        foreach (var e in list)
-        {
-            if      (e.IsLauncherPlayable)      availableNow.Add(e);
-            else if (IsPluginGatedComingSoon(e)) comingSoon.Add(e);
-            else                                 manualSetup.Add(e);
-        }
-
-        if (availableNow.Count > 0)
-        {
-            CatalogPanel.Children.Add(BuildSectionHeader($"Available Now  ({availableNow.Count})"));
-            foreach (var e in availableNow)
-                CatalogPanel.Children.Add(BuildCatalogCard(e));
-        }
-
-        if (comingSoon.Count > 0)
-        {
-            CatalogPanel.Children.Add(BuildSectionHeader($"Coming Soon  ({comingSoon.Count})"));
-            foreach (var e in comingSoon)
-                CatalogPanel.Children.Add(BuildCatalogCard(e));
-        }
-
-        if (manualSetup.Count > 0)
-        {
-            CatalogPanel.Children.Add(BuildSectionHeader($"Manual setup  ({manualSetup.Count})"));
-            foreach (var e in manualSetup)
-                CatalogPanel.Children.Add(BuildCatalogCard(e));
-        }
-
-        // Browse lists this launcher's own games and nothing else. It used to
-        // end with a directory of third-party Archipelago tools, which this
-        // launcher neither ships nor supports.
-    }
-
     // --- Capability presentation (shared by Browse cards + detail page) ---
 
-    // "COMING SOON" is reserved for integrations we are actively automating:
-    // a gated catalog status AND a compiled plugin in this launcher (the
-    // emulated trio). Every other unfinished entry is plain "Manual setup" —
-    // never a misleading coming-soon.
-    private static bool IsPluginGatedComingSoon(CatalogEntry e)
-        => e.Status == "coming_soon" && GameRegistry.Find(e.Id) != null;
-
-    // Capability label + one-sentence tooltip + tint color.
-    // truth for capability presentation — the Browse card pill and the detail
-    // page badge both render from this.
-    private static (string Label, string Tip, Color Tint) CapabilityPresentation(CatalogEntry entry)
-        => entry.InstallCapability switch
+    // Capability label + one-sentence tooltip + tint color, straight from the
+    // plugin's own answer.
+    private static (string Label, string Tip, Color Tint) CapabilityPresentation(IGamePlugin plugin)
+        => plugin.InstallCapability switch
         {
             InstallCapability.AutoInstall => (
                 "Auto-install",
@@ -3765,790 +3364,7 @@ public partial class MainWindow : Window
                 Color.FromRgb(0x8A, 0x90, 0xA8)),
         };
 
-    // Steam-like Browse card: art + name + platform/capability/FREE badges
-    // and a compact library toggle.
-    // credits, links, guides, actions) lives one click in, on the detail page.
-    // The WHOLE card is clickable and opens ShowCatalogDetail.
-    private UIElement BuildCatalogCard(CatalogEntry entry)
-    {
-        var gold    = (Brush)FindResource("BrushAccent");
-        var muted   = (Brush)FindResource("BrushMuted");
-        var success = (Brush)FindResource("BrushSuccess");
-
-        bool pluginGated = IsPluginGatedComingSoon(entry);
-
-        // Emphasis follows the section semantics: full strength when the
-        // launcher can get you playing, dimmed when gated, slightly muted for
-        // manual-setup entries (Discord-only dimmest — no download link at all).
-        double cardOpacity =
-            entry.Status == "discord_only" ? 0.60 :
-            pluginGated                    ? 0.75 :
-            entry.IsLauncherPlayable       ? 1.0  :
-            0.85;
-
-        var normalBg     = Color.FromRgb(0x14, 0x17, 0x20);
-        var normalBorder = Color.FromRgb(0x1E, 0x22, 0x33);
-        var hoverBg      = Color.FromRgb(0x1C, 0x20, 0x30);        // sidebar-card hover feel
-        var hoverBorder  = Color.FromArgb(0x66, 0xCC, 0xA8, 0x00); // accent @ ~40%
-
-        var border = new Border
-        {
-            Width           = 244,
-            Margin          = new Thickness(0, 0, 12, 12),
-            Background      = new SolidColorBrush(normalBg),
-            BorderBrush     = new SolidColorBrush(normalBorder),
-            BorderThickness = new Thickness(1),
-            CornerRadius    = new CornerRadius(4),
-            Cursor          = Cursors.Hand,
-            Opacity         = cardOpacity,
-        };
-
-        // Whole card opens the detail page.
-        // filter chips elsewhere; the library toggle marks its press Handled
-        // before it bubbles here, so toggling never opens the page.
-        var entryCapture = entry;
-        border.MouseLeftButtonDown += (_, _) => ShowCatalogDetail(entryCapture);
-        border.MouseEnter += (_, _) =>
-        {
-            border.BorderBrush = new SolidColorBrush(hoverBorder);
-            border.Background  = new SolidColorBrush(hoverBg);
-        };
-        border.MouseLeave += (_, _) =>
-        {
-            border.BorderBrush = new SolidColorBrush(normalBorder);
-            border.Background  = new SolidColorBrush(normalBg);
-        };
-
-        var outer = new StackPanel();
-
-        // --- Thumbnail strip (edge-to-edge at the top of the card) ---
-        // Source priority: explicit catalog URL → locally generated art probe
-        // (Assets/Thumbs/<id>_thumb.png) so newly generated thumbnails light
-        // up without touching catalog.json.
-        // monogram placeholder so the WrapPanel rows keep a coherent height.
-        string thumbSource = entry.ThumbnailUrl;
-        if (string.IsNullOrEmpty(thumbSource))
-        {
-            string probe = Path.Combine(AppContext.BaseDirectory,
-                "Assets", "Thumbs", $"{entry.Id}_thumb.png");
-            if (File.Exists(probe)) thumbSource = probe;
-
-            // Nothing of its own: fall back to the launcher's own logo
-            // rather than a lettered box. A game we have not drawn art
-            // for yet should still look like part of the launcher.
-            if (string.IsNullOrEmpty(thumbSource))
-            {
-                string generic = Path.Combine(AppContext.BaseDirectory,
-                    "Assets", "Thumbs", "_generic_thumb.png");
-                if (File.Exists(generic)) thumbSource = generic;
-            }
-        }
-
-        var thumbBorder = new Border
-        {
-            Height       = 128,
-            Background   = new SolidColorBrush(Color.FromRgb(0x0C, 0x10, 0x20)),
-            CornerRadius = new CornerRadius(4, 4, 0, 0),
-            ClipToBounds = true,
-        };
-        bool thumbLoaded = false;
-        if (!string.IsNullOrEmpty(thumbSource))
-        {
-            try
-            {
-                // Local thumbnails go through the decode-once cache (P3-3);
-                // http URLs keep WPF's async download path.
-                BitmapImage? thumbBmp = thumbSource.StartsWith("http", StringComparison.OrdinalIgnoreCase)
-                    ? new BitmapImage(new Uri(thumbSource, UriKind.Absolute))
-                    : LoadCachedBitmap(Path.IsPathRooted(thumbSource)
-                        ? thumbSource
-                        : Path.Combine(AppContext.BaseDirectory, thumbSource));
-                if (thumbBmp != null)
-                {
-                    var img = new Image
-                    {
-                        Stretch           = Stretch.UniformToFill,
-                        VerticalAlignment = VerticalAlignment.Center,
-                        Source            = thumbBmp,
-                    };
-                    img.ImageFailed += (_, _) =>
-                        thumbBorder.Background = new SolidColorBrush(Color.FromRgb(0x0C, 0x10, 0x20));
-                    thumbBorder.Child = img;
-                    thumbLoaded = true;
-                }
-            }
-            catch { /* fall through to the monogram placeholder */ }
-        }
-        if (!thumbLoaded)
-        {
-            thumbBorder.Child = new TextBlock
-            {
-                Text                = entry.DisplayName.Length > 0
-                                          ? entry.DisplayName[..1].ToUpperInvariant()
-                                          : "?",
-                FontSize            = 44,
-                FontWeight          = FontWeights.Bold,
-                Foreground          = new SolidColorBrush(Color.FromRgb(0x2A, 0x30, 0x50)),
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment   = VerticalAlignment.Center,
-            };
-        }
-        outer.Children.Add(thumbBorder);
-
-        var stack = new StackPanel { Margin = new Thickness(12, 10, 12, 12) };
-
-        // --- Title row: game name + compact library toggle (top-right) ---
-        var titleRow = new DockPanel { LastChildFill = true };
-
-        string entryId = entry.Id;
-        bool   inLib   = LibraryStore.IsInLibrary(entryId);
-
-        // Stubs (emulated games without check detection) and Discord-only games
-        // are not addable to the library — show a distinctive label instead.
-        var   entryPlugin   = GameRegistry.Find(entryId);
-        bool  checksStub    = entryPlugin is Plugins.Emulated.EmulatorPlugin eStub && !eStub.ChecksImplemented;
-        bool  discordOnly   = entry.Status == "discord_only";
-        bool  notAddable    = checksStub || discordOnly;
-
-        var libToggleText = new TextBlock
-        {
-            Text                = discordOnly ? "📢" : (checksStub ? "Soon" : (inLib ? "✓" : "+")),
-            FontSize            = (checksStub && !discordOnly) ? 8 : 11,
-            FontWeight          = FontWeights.SemiBold,
-            Foreground          = notAddable ? new SolidColorBrush(Color.FromRgb(0x55, 0x5C, 0x7A))
-                                             : (inLib ? success : muted),
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment   = VerticalAlignment.Center,
-        };
-        var libToggle = new Border
-        {
-            Width             = 24,
-            Height            = 24,
-            CornerRadius      = new CornerRadius(3),
-            Background        = new SolidColorBrush(Color.FromRgb(0x1A, 0x1E, 0x30)),
-            BorderBrush       = new SolidColorBrush(Color.FromRgb(0x2A, 0x30, 0x60)),
-            BorderThickness   = new Thickness(1),
-            Margin            = new Thickness(8, 0, 0, 0),
-            VerticalAlignment = VerticalAlignment.Top,
-            Cursor            = notAddable ? Cursors.Arrow : Cursors.Hand,
-            ToolTip           = discordOnly ? "Discord only — not available in the launcher"
-                                           : (checksStub ? "Check detection not yet implemented for this game"
-                                           : (inLib ? "Remove from Library" : "Add to Library")),
-            Child             = libToggleText,
-            Opacity           = notAddable ? 0.5 : 1.0,
-        };
-        // Swallow press AND release so the card click never fires from here.
-        libToggle.MouseLeftButtonDown += (_, e) =>
-        {
-            e.Handled = true;
-            if (notAddable) return;   // stubs and discord-only are not library-addable
-            if (LibraryStore.IsInLibrary(entryId))
-            {
-                LibraryStore.Remove(entryId);
-                libToggleText.Text       = "+";
-                libToggleText.Foreground = muted;
-                libToggle.ToolTip        = "Add to Library";
-            }
-            else
-            {
-                LibraryStore.Add(entryId);
-                AchievementStore.Instance.EvaluateAll();   // librarian ladder
-                libToggleText.Text       = "✓";
-                libToggleText.Foreground = success;
-                libToggle.ToolTip        = "Remove from Library";
-            }
-            RebuildGameList();
-        };
-        libToggle.MouseLeftButtonUp += (_, e) => e.Handled = true;
-        if (!checksStub)
-        {
-            libToggle.MouseEnter += (_, _) => libToggle.BorderBrush = gold;
-            libToggle.MouseLeave += (_, _) =>
-                libToggle.BorderBrush = new SolidColorBrush(Color.FromRgb(0x2A, 0x30, 0x60));
-        }
-        DockPanel.SetDock(libToggle, Dock.Right);
-        titleRow.Children.Add(libToggle);
-
-        titleRow.Children.Add(new TextBlock
-        {
-            Text         = entry.DisplayName,
-            FontSize     = 14,
-            FontWeight   = FontWeights.SemiBold,
-            Foreground   = gold,
-            TextWrapping = TextWrapping.Wrap,
-        });
-        stack.Children.Add(titleRow);
-
-        // --- Badge row: platform + capability pill (+ COMING SOON / FREE) ---
-        // The capability pill is on EVERY card so the user always knows what
-        // happens when they try to install; COMING SOON rides along only for
-        // plugin-gated integrations — see IsPluginGatedComingSoon.
-        var (capLabel, capTip, capTint) = CapabilityPresentation(entry);
-        var badges = new WrapPanel { Margin = new Thickness(0, 8, 0, 0) };
-
-        Border MakeBadge(string text, Color tint, bool tintedBg, string? tooltip = null) => new()
-        {
-            Background        = tintedBg
-                ? new SolidColorBrush(Color.FromArgb(0x25, tint.R, tint.G, tint.B))
-                : new SolidColorBrush(Color.FromRgb(0x0C, 0x10, 0x20)),
-            CornerRadius      = new CornerRadius(2),
-            Padding           = new Thickness(5, 2, 5, 2),
-            Margin            = new Thickness(0, 0, 4, 4),
-            VerticalAlignment = VerticalAlignment.Center,
-            ToolTip           = tooltip,
-            Child = new TextBlock
-            {
-                Text       = text,
-                FontSize   = 9,
-                FontWeight = tintedBg ? FontWeights.SemiBold : FontWeights.Normal,
-                Foreground = tintedBg ? new SolidColorBrush(tint) : muted,
-            },
-        };
-
-        badges.Children.Add(MakeBadge(entry.PrimaryPlatform.ToUpperInvariant(),
-                                      default, tintedBg: false));
-        badges.Children.Add(MakeBadge(capLabel, capTint, tintedBg: true, capTip));
-        if (pluginGated)
-            badges.Children.Add(MakeBadge("COMING SOON",
-                                          Color.FromRgb(0xF5, 0x9E, 0x0B), tintedBg: true));
-        if (entry.Free)
-            badges.Children.Add(MakeBadge("FREE",
-                                          Color.FromRgb(0x22, 0xC5, 0x5E), tintedBg: true));
-
-        stack.Children.Add(badges);
-        outer.Children.Add(stack);
-
-        border.Child        = outer;
-        border.ClipToBounds = true;
-        return border;
-    }
-
-    private static Border MakePill(string text, Brush fg)
-        => new()
-        {
-            Background      = new SolidColorBrush(Color.FromArgb(0x18, 0x1E, 0x22, 0x33)),
-            CornerRadius    = new CornerRadius(2),
-            Padding         = new Thickness(5, 2, 5, 2),
-            Margin          = new Thickness(0, 0, 4, 0),
-            VerticalAlignment = VerticalAlignment.Center,
-            Child = new TextBlock { Text = text, FontSize = 9, Foreground = fg }
-        };
-
     // Catalog game detail page
-
-    private void BtnDetailBack_Click(object sender, RoutedEventArgs e)
-    {
-        PanelCatalogDetail.Visibility = Visibility.Collapsed;
-        DetailContentPanel.Children.Clear();
-    }
-
-    private void ShowCatalogDetail(CatalogEntry entry)
-    {
-        var gold    = (Brush)FindResource("BrushAccent");
-        var muted   = (Brush)FindResource("BrushMuted");
-        var textBr  = (Brush)FindResource("BrushText");
-        var success = (Brush)FindResource("BrushSuccess");
-
-        TxtDetailTitle.Text = entry.DisplayName;
-        DetailContentPanel.Children.Clear();
-
-        // --- Hero area: title block + badges ---
-        var heroPanel = new StackPanel { Margin = new Thickness(0, 0, 0, 20) };
-
-        var titleRow = new WrapPanel { Margin = new Thickness(0, 0, 0, 8) };
-        titleRow.Children.Add(new TextBlock
-        {
-            Text         = entry.DisplayName,
-            FontSize     = 26,
-            FontWeight   = FontWeights.Bold,
-            Foreground   = gold,
-            TextWrapping = TextWrapping.Wrap,
-            Margin       = new Thickness(0, 0, 12, 0),
-        });
-        heroPanel.Children.Add(titleRow);
-
-        // Author
-        heroPanel.Children.Add(new TextBlock
-        {
-            Text       = $"by {entry.Author}",
-            FontSize   = 13,
-            Foreground = muted,
-            Margin     = new Thickness(0, 0, 0, 10),
-        });
-
-        // Badge row: status, capability, type, platform, free
-        var badgeRow = new WrapPanel { Margin = new Thickness(0, 0, 0, 4) };
-
-        void AddBadge(string text, Brush fg, Brush? bg = null, string? tooltip = null)
-        {
-            badgeRow.Children.Add(new Border
-            {
-                Background   = bg ?? new SolidColorBrush(Color.FromArgb(0x30, 0x1E, 0x22, 0x33)),
-                CornerRadius = new CornerRadius(3),
-                Padding      = new Thickness(8, 3, 8, 3),
-                Margin       = new Thickness(0, 0, 6, 6),
-                ToolTip      = tooltip,
-                Child = new TextBlock { Text = text, FontSize = 11, FontWeight = FontWeights.SemiBold, Foreground = fg }
-            });
-        }
-
-        // Status badge — honest semantics: AVAILABLE only when the launcher
-        // can actually get you playing; COMING SOON only when plugin-gated.
-        // Everything else lets the capability badge tell the story alone.
-        if (entry.IsLauncherPlayable)
-            AddBadge("AVAILABLE", success,
-                     new SolidColorBrush(Color.FromArgb(0x25, 0x22, 0xC5, 0x5E)));
-        else if (IsPluginGatedComingSoon(entry))
-            AddBadge("COMING SOON", new SolidColorBrush(Color.FromRgb(0xF5, 0x9E, 0x0B)),
-                     new SolidColorBrush(Color.FromArgb(0x25, 0xF5, 0x9E, 0x0B)));
-
-        // Capability badge — same label/tooltip/tint as the Browse card pill.
-        var (capLabel, capTip, capTint) = CapabilityPresentation(entry);
-        AddBadge(capLabel.ToUpperInvariant(),
-                 new SolidColorBrush(capTint),
-                 new SolidColorBrush(Color.FromArgb(0x25, capTint.R, capTint.G, capTint.B)),
-                 capTip);
-
-        if (entry.PluginType == GamePluginType.Native)
-            AddBadge("NATIVE PLUGIN", new SolidColorBrush(Color.FromRgb(0x22, 0xC5, 0x5E)),
-                     new SolidColorBrush(Color.FromArgb(0x25, 0x22, 0xC5, 0x5E)));
-
-        if (entry.Platforms.Length > 0)
-            foreach (var p in entry.Platforms)
-                AddBadge(p.ToUpperInvariant(), muted);
-
-        if (entry.Free)
-            AddBadge("FREE", new SolidColorBrush(Color.FromRgb(0x22, 0xC5, 0x5E)),
-                     new SolidColorBrush(Color.FromArgb(0x25, 0x22, 0xC5, 0x5E)));
-
-        if (entry.HintGame)
-            AddBadge("HINT GAME", new SolidColorBrush(Color.FromRgb(0x77, 0x8B, 0xFF)),
-                     new SolidColorBrush(Color.FromArgb(0x25, 0x77, 0x8B, 0xFF)));
-
-        heroPanel.Children.Add(badgeRow);
-
-        // ── "Get the game" action row — the page's primary actions ────────────
-        // Purchase / free acquisition, the page's single library toggle, and
-        // the installed chip when a registered plugin reports installed.
-        var actionRow = new WrapPanel { Margin = new Thickness(0, 10, 0, 0) };
-
-        if (entry.Free)
-        {
-            // Free game: green-tinted label-button.
-            // destination (official site preferred, else the purchase link).
-            string? freeTarget = !string.IsNullOrEmpty(entry.Links?.OfficialSite)
-                ? entry.Links!.OfficialSite
-                : entry.PurchaseUrl;
-            var freeChip = new Border
-            {
-                Background        = new SolidColorBrush(Color.FromArgb(0x28, 0x22, 0xC5, 0x5E)),
-                BorderBrush       = new SolidColorBrush(Color.FromArgb(0x60, 0x22, 0xC5, 0x5E)),
-                BorderThickness   = new Thickness(1),
-                CornerRadius      = new CornerRadius(3),
-                Padding           = new Thickness(14, 7, 14, 7),
-                Margin            = new Thickness(0, 0, 8, 8),
-                VerticalAlignment = VerticalAlignment.Center,
-                Child = new TextBlock
-                {
-                    Text       = string.IsNullOrEmpty(freeTarget) ? "Free game" : "Free — get it ↗",
-                    FontSize   = 12,
-                    FontWeight = FontWeights.SemiBold,
-                    Foreground = success,
-                },
-            };
-            if (!string.IsNullOrEmpty(freeTarget))
-            {
-                string ft = freeTarget!;
-                freeChip.Cursor  = Cursors.Hand;
-                freeChip.ToolTip = ft;
-                freeChip.MouseLeftButtonUp += (_, _) => OpenUrl(ft);
-            }
-            actionRow.Children.Add(freeChip);
-        }
-        else if (!string.IsNullOrEmpty(entry.PurchaseUrl))
-        {
-            var buyBtn = new Button
-            {
-                Content           = "Get the game ↗",
-                Style             = (Style)FindResource("BtnPlayStyle"),
-                Padding           = new Thickness(18, 7, 18, 7),
-                Margin            = new Thickness(0, 0, 8, 8),
-                VerticalAlignment = VerticalAlignment.Center,
-            };
-            string purchaseUrl = entry.PurchaseUrl;
-            buyBtn.Click += (_, _) => OpenUrl(purchaseUrl);
-            actionRow.Children.Add(buyBtn);
-        }
-
-        // Library toggle — the only Add/Remove control on this page.
-        bool isInLib = LibraryStore.IsInLibrary(entry.Id);
-        var detailLibBtn = new Button
-        {
-            Content           = isInLib ? "✓ In Library" : "+ Add to Library",
-            Style             = (Style)FindResource("BtnSecondaryStyle"),
-            Padding           = new Thickness(14, 6, 14, 6),
-            Margin            = new Thickness(0, 0, 8, 8),
-            Foreground        = isInLib ? success : textBr,
-            Cursor            = Cursors.Hand,
-            VerticalAlignment = VerticalAlignment.Center,
-        };
-        string detailId = entry.Id;
-        detailLibBtn.Click += (_, _) =>
-        {
-            if (LibraryStore.IsInLibrary(detailId))
-            {
-                LibraryStore.Remove(detailId);
-                detailLibBtn.Content    = "+ Add to Library";
-                detailLibBtn.Foreground = textBr;
-            }
-            else
-            {
-                LibraryStore.Add(detailId);
-                AchievementStore.Instance.EvaluateAll();   // librarian ladder
-                detailLibBtn.Content    = "✓ In Library";
-                detailLibBtn.Foreground = success;
-            }
-            RebuildGameList();
-        };
-        actionRow.Children.Add(detailLibBtn);
-
-        if (entry.IsInstalled)
-        {
-            actionRow.Children.Add(new Border
-            {
-                Background        = new SolidColorBrush(Color.FromArgb(0x30, 0x4C, 0xAF, 0x50)),
-                CornerRadius      = new CornerRadius(3),
-                Padding           = new Thickness(12, 6, 12, 6),
-                Margin            = new Thickness(0, 0, 8, 8),
-                VerticalAlignment = VerticalAlignment.Center,
-                Child = new TextBlock { Text = "✓ Installed", FontSize = 12, Foreground = success },
-            });
-        }
-
-        heroPanel.Children.Add(actionRow);
-
-        DetailContentPanel.Children.Add(heroPanel);
-
-        // --- Divider ---
-        DetailContentPanel.Children.Add(new Border
-        {
-            Height          = 1,
-            Background      = new SolidColorBrush(Color.FromRgb(0x1E, 0x22, 0x33)),
-            Margin          = new Thickness(0, 0, 0, 20),
-        });
-
-        // --- About (description + which AP world powers it) ---
-        if (!string.IsNullOrWhiteSpace(entry.Description))
-        {
-            bool hasApWorldLine = !string.IsNullOrEmpty(entry.ApWorldName);
-            DetailContentPanel.Children.Add(BuildDetailSectionLabel("About"));
-            DetailContentPanel.Children.Add(new TextBlock
-            {
-                Text         = entry.Description,
-                FontSize     = 13,
-                Foreground   = textBr,
-                TextWrapping = TextWrapping.Wrap,
-                LineHeight   = 20,
-                Margin       = new Thickness(0, 4, 0, hasApWorldLine ? 6 : 20),
-            });
-            if (hasApWorldLine)
-            {
-                DetailContentPanel.Children.Add(new TextBlock
-                {
-                    Text         = $"Archipelago world: {entry.ApWorldName}",
-                    FontSize     = 11,
-                    Foreground   = muted,
-                    TextWrapping = TextWrapping.Wrap,
-                    Margin       = new Thickness(0, 0, 0, 20),
-                });
-            }
-        }
-
-        // --- Capability explanation box ---
-        // Spells out exactly what clicking Install will and won't do for THIS
-        // entry — same sentences as the capability tooltip, plus the legal-ROM
-        // reminder for emulated games.
-        {
-            string explain = capTip;
-            if (entry.InstallCapability == InstallCapability.RomRequired)
-                explain += " You must provide your own legally-obtained ROM file.";
-
-            var capStack = new StackPanel();
-            capStack.Children.Add(new TextBlock
-            {
-                Text       = "INSTALLATION",
-                FontSize   = 10,
-                FontWeight = FontWeights.SemiBold,
-                Foreground = new SolidColorBrush(capTint),
-                Margin     = new Thickness(0, 0, 0, 4),
-            });
-            capStack.Children.Add(new TextBlock
-            {
-                Text         = explain,
-                FontSize     = 12,
-                Foreground   = textBr,
-                TextWrapping = TextWrapping.Wrap,
-                LineHeight   = 18,
-            });
-            DetailContentPanel.Children.Add(new Border
-            {
-                Background      = new SolidColorBrush(Color.FromArgb(0x12, capTint.R, capTint.G, capTint.B)),
-                BorderBrush     = new SolidColorBrush(Color.FromArgb(0x55, capTint.R, capTint.G, capTint.B)),
-                BorderThickness = new Thickness(1),
-                CornerRadius    = new CornerRadius(4),
-                Padding         = new Thickness(14, 10, 14, 10),
-                Margin          = new Thickness(0, 0, 0, 20),
-                Child           = capStack,
-            });
-        }
-
-        // --- Credits (the AP-world / mod author renders prominently) ---
-        if (entry.Credits.Length > 0)
-        {
-            DetailContentPanel.Children.Add(BuildDetailSectionLabel("Credits"));
-            var creditsPanel = new StackPanel { Margin = new Thickness(0, 6, 0, 20) };
-            foreach (var credit in entry.Credits)
-            {
-                bool isModCredit =
-                    credit.Role.Contains("AP world", StringComparison.OrdinalIgnoreCase) ||
-                    credit.Role.Contains("mod",      StringComparison.OrdinalIgnoreCase);
-
-                var row = new StackPanel
-                {
-                    Orientation = Orientation.Horizontal,
-                    Margin      = new Thickness(0, 0, 0, 4),
-                };
-                row.Children.Add(new TextBlock
-                {
-                    Text       = credit.Role + ": ",
-                    FontSize   = 12,
-                    Foreground = muted,
-                    MinWidth   = 130,
-                });
-                if (!string.IsNullOrEmpty(credit.Url))
-                {
-                    var link = new TextBlock
-                    {
-                        Text            = credit.Name,
-                        FontSize        = 12,
-                        FontWeight      = isModCredit ? FontWeights.Bold : FontWeights.Normal,
-                        Foreground      = gold,
-                        Cursor          = Cursors.Hand,
-                        TextDecorations = TextDecorations.Underline,
-                    };
-                    string creditUrl = credit.Url;
-                    link.MouseLeftButtonUp += (_, _) => OpenUrl(creditUrl);
-                    row.Children.Add(link);
-                }
-                else
-                {
-                    row.Children.Add(new TextBlock
-                    {
-                        Text       = credit.Name,
-                        FontSize   = 12,
-                        FontWeight = isModCredit ? FontWeights.Bold : FontWeights.Normal,
-                        Foreground = textBr,
-                    });
-                }
-                creditsPanel.Children.Add(row);
-            }
-            DetailContentPanel.Children.Add(creditsPanel);
-        }
-        else if (entry.IsCommunityGame && !string.IsNullOrEmpty(entry.InstallUrl))
-        {
-            // Community-list entry with no structured credits — point at the
-            // project page instead of pretending we know the author.
-            DetailContentPanel.Children.Add(BuildDetailSectionLabel("Credits"));
-            var fallbackRow = new StackPanel
-            {
-                Orientation = Orientation.Horizontal,
-                Margin      = new Thickness(0, 6, 0, 20),
-            };
-            fallbackRow.Children.Add(new TextBlock
-            {
-                Text       = "Mod author: ",
-                FontSize   = 12,
-                Foreground = muted,
-            });
-            var projectLink = new TextBlock
-            {
-                Text            = "see the project page",
-                FontSize        = 12,
-                Foreground      = gold,
-                Cursor          = Cursors.Hand,
-                TextDecorations = TextDecorations.Underline,
-            };
-            string projectUrl = entry.InstallUrl!;
-            projectLink.MouseLeftButtonUp += (_, _) => OpenUrl(projectUrl);
-            fallbackRow.Children.Add(projectLink);
-            DetailContentPanel.Children.Add(fallbackRow);
-        }
-
-        // --- Details meta: typical run length, players, category ---
-        // "Typical run length" is a property of the GAME, clearly labeled so it
-        // can never read as the user's own playtime (which is tracked for real).
-        var metaRow = new WrapPanel { Margin = new Thickness(0, 6, 0, 20) };
-        if (entry.EstPlaytimeMin > 0)
-        {
-            string t = entry.EstPlaytimeMin >= 60
-                ? $"Typical run length: ~{entry.EstPlaytimeMin / 60}h"
-                : $"Typical run length: ~{entry.EstPlaytimeMin}m";
-            metaRow.Children.Add(MakePill(t, muted));
-        }
-        if (!string.IsNullOrEmpty(entry.PlayerCount) && entry.PlayerCount != "1+")
-            metaRow.Children.Add(MakePill($"👥 {entry.PlayerCount} players", muted));
-        if (!string.IsNullOrEmpty(entry.Category))
-            metaRow.Children.Add(MakePill(entry.Category, muted));
-        if (metaRow.Children.Count > 0)
-        {
-            DetailContentPanel.Children.Add(BuildDetailSectionLabel("Details"));
-            DetailContentPanel.Children.Add(metaRow);
-        }
-
-        // --- Links ---
-        // No purchase link here — getting the game is the action row's job
-        // (top of the page), and duplicating it would just add noise.
-        var links = entry.Links;
-        bool hasAnyLink = links != null && (
-            !string.IsNullOrEmpty(links.ApGamePage) ||
-            !string.IsNullOrEmpty(links.OfficialSite) ||
-            !string.IsNullOrEmpty(links.ApGithub) ||
-            !string.IsNullOrEmpty(links.ApDiscord) ||
-            !string.IsNullOrEmpty(links.GameDiscord)) ||
-            !string.IsNullOrEmpty(entry.InstallUrl) ||
-            !string.IsNullOrEmpty(entry.VideoUrl);
-
-        if (hasAnyLink)
-        {
-            DetailContentPanel.Children.Add(BuildDetailSectionLabel("Links"));
-            var linksPanel = new WrapPanel { Margin = new Thickness(0, 8, 0, 20) };
-
-            void AddLink(string label, string url)
-            {
-                var btn = new Button
-                {
-                    Content = label,
-                    Style   = (Style)FindResource("BtnSecondaryStyle"),
-                    Padding = new Thickness(12, 5, 12, 5),
-                    Margin  = new Thickness(0, 0, 8, 8),
-                    Cursor  = Cursors.Hand,
-                };
-                btn.Click += (_, _) => OpenUrl(url);
-                linksPanel.Children.Add(btn);
-            }
-
-            if (!string.IsNullOrEmpty(links?.ApGamePage))       AddLink("AP Page ↗",        links.ApGamePage!);
-            if (!string.IsNullOrEmpty(links?.OfficialSite))     AddLink("Official Site ↗",   links.OfficialSite!);
-            if (!string.IsNullOrEmpty(links?.ApGithub))         AddLink("GitHub ↗",          links.ApGithub!);
-            if (!string.IsNullOrEmpty(links?.ApDiscord))        AddLink("AP Discord ↗",      links.ApDiscord!);
-            if (!string.IsNullOrEmpty(links?.GameDiscord))      AddLink("Game Discord ↗",    links.GameDiscord!);
-            if (!string.IsNullOrEmpty(entry.InstallUrl))        AddLink("Download / Install ↗", entry.InstallUrl!);
-            if (!string.IsNullOrEmpty(entry.VideoUrl))          AddLink("▶ Trailer", entry.VideoUrl!);
-
-            DetailContentPanel.Children.Add(linksPanel);
-        }
-
-        // --- Screenshots ---
-        if (entry.ScreenshotUrls.Length > 0)
-        {
-            DetailContentPanel.Children.Add(BuildDetailSectionLabel("Screenshots"));
-            var screenshotRow = new StackPanel
-            {
-                Orientation = Orientation.Horizontal,
-                Margin      = new Thickness(0, 0, 0, 20),
-            };
-            foreach (var screenshotUrl in entry.ScreenshotUrls.Take(4))
-            {
-                var frame = new Border
-                {
-                    Width        = 180,
-                    Height       = 101,
-                    Background   = new SolidColorBrush(Color.FromRgb(0x0C, 0x10, 0x20)),
-                    CornerRadius = new CornerRadius(4),
-                    Margin       = new Thickness(0, 0, 10, 0),
-                    ClipToBounds = true,
-                };
-                try
-                {
-                    var img = new Image
-                    {
-                        Stretch = Stretch.UniformToFill,
-                        Source  = new BitmapImage(new Uri(screenshotUrl, UriKind.Absolute)),
-                        Cursor  = Cursors.Hand,
-                    };
-                    string urlCapture = screenshotUrl;
-                    img.MouseLeftButtonUp += (_, _) => OpenUrl(urlCapture);
-                    img.ImageFailed += (_, _) => frame.Background = new SolidColorBrush(Color.FromRgb(0x0C, 0x10, 0x20));
-                    frame.Child = img;
-                }
-                catch { /* leave placeholder */ }
-                screenshotRow.Children.Add(frame);
-            }
-            var screenshotScroller = new ScrollViewer
-            {
-                HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
-                VerticalScrollBarVisibility   = ScrollBarVisibility.Disabled,
-                Margin = new Thickness(0, 8, 0, 20),
-            };
-            screenshotScroller.Content = screenshotRow;
-            DetailContentPanel.Children.Add(screenshotScroller);
-        }
-
-        // --- Tags ---
-        if (entry.Tags.Length > 0)
-        {
-            DetailContentPanel.Children.Add(BuildDetailSectionLabel("Tags"));
-            var tagWrap = new WrapPanel { Margin = new Thickness(0, 6, 0, 20) };
-            foreach (var tag in entry.Tags)
-            {
-                tagWrap.Children.Add(new Border
-                {
-                    Background   = new SolidColorBrush(Color.FromRgb(0x14, 0x17, 0x20)),
-                    BorderBrush  = new SolidColorBrush(Color.FromRgb(0x1E, 0x22, 0x33)),
-                    BorderThickness = new Thickness(1),
-                    CornerRadius = new CornerRadius(3),
-                    Padding      = new Thickness(8, 3, 8, 3),
-                    Margin       = new Thickness(0, 0, 6, 6),
-                    Child = new TextBlock { Text = tag, FontSize = 11, Foreground = muted }
-                });
-            }
-            DetailContentPanel.Children.Add(tagWrap);
-        }
-
-        // --- Install guide ---
-        if (!string.IsNullOrEmpty(entry.InstallGuide))
-        {
-            DetailContentPanel.Children.Add(BuildDetailSectionLabel("Install Guide"));
-            var guideBtn = new Button
-            {
-                Content = "📖 Open Install Guide",
-                Style   = (Style)FindResource("BtnSecondaryStyle"),
-                Padding = new Thickness(14, 6, 14, 6),
-                Margin  = new Thickness(0, 8, 0, 20),
-                Cursor  = Cursors.Hand,
-            };
-            string guideName  = entry.DisplayName;
-            string guideText  = entry.InstallGuide;
-            guideBtn.Click += (_, _) => OpenInstallGuide($"{guideName} — Install Guide", guideText);
-            DetailContentPanel.Children.Add(guideBtn);
-        }
-
-        // (No bottom Library section: the page's single Add/Remove toggle
-        // lives in the action row at the top — see actionRow above.)
-
-        // Show the panel with a quick fade-in
-        FadeInPage(PanelCatalogDetail);
-    }
-
-    private static TextBlock BuildDetailSectionLabel(string text)
-        => new()
-        {
-            Text       = text.ToUpperInvariant(),
-            FontSize   = 10,
-            FontWeight = FontWeights.SemiBold,
-            Foreground = new SolidColorBrush(Color.FromRgb(0x50, 0x58, 0x78)),
-            Margin     = new Thickness(0, 0, 0, 2),
-        };
 
     // <summary>
     // Full-width section divider for use inside the CatalogPanel WrapPanel.
@@ -4574,285 +3390,6 @@ public partial class MainWindow : Window
                 Foreground = muted,
             }
         };
-    }
-
-    // <summary>
-    // Full-width filter chip bar at the top of the catalog panel.
-    // Width=4000 forces it onto its own row in the WrapPanel (same trick as section headers).
-    // Clicking a chip updates the active status/category filter and immediately re-renders.
-    // </summary>
-    private UIElement BuildCatalogFilterBar(IReadOnlyList<CatalogEntry> all)
-    {
-        var muted = (Brush)FindResource("BrushMuted");
-
-        var container = new Border
-        {
-            Width  = 4000,
-            Margin = new Thickness(0, 0, 0, 4),
-        };
-
-        var wrap = new WrapPanel { Orientation = Orientation.Horizontal };
-
-        // --- Main filter chips (All / Available / Official / Unofficial) ---
-        // Mutually exclusive. "Official" / "Unofficial" are driven by
-        // official_games.txt (see GameCatalog.ApplyOfficialList); they show
-        // entries regardless of release status.
-        void AddMainChip(string label, string value, byte r, byte g, byte b)
-        {
-            bool active = _catalogMainFilter == value;
-            var chip = new Border
-            {
-                Margin          = new Thickness(0, 0, 6, 6),
-                Padding         = new Thickness(10, 4, 10, 4),
-                CornerRadius    = new CornerRadius(12),
-                Background      = active
-                    ? new SolidColorBrush(Color.FromArgb(0x30, r, g, b))
-                    : new SolidColorBrush(Color.FromArgb(0x10, 0x1E, 0x22, 0x33)),
-                BorderBrush     = active
-                    ? (Brush)new SolidColorBrush(Color.FromRgb(r, g, b))
-                    : new SolidColorBrush(Color.FromRgb(0x2A, 0x2F, 0x45)),
-                BorderThickness = new Thickness(1),
-                Cursor          = Cursors.Hand,
-            };
-            chip.Child = new TextBlock
-            {
-                Text       = label,
-                FontSize   = 11,
-                Foreground = active
-                    ? (Brush)new SolidColorBrush(Color.FromRgb(r, g, b))
-                    : muted,
-                FontWeight = active ? FontWeights.SemiBold : FontWeights.Normal,
-            };
-            string v = value;
-            chip.MouseLeftButtonDown += (_, _) =>
-            {
-                _catalogMainFilter = v;
-                RenderCatalog(_catalogEntries!, TxtCatalogSearch.Text);
-            };
-            wrap.Children.Add(chip);
-        }
-
-        AddMainChip("All",        "all",        0xB0, 0xB8, 0xFF);
-        AddMainChip("Available",  "available",  0x22, 0xC5, 0x5E);
-        AddMainChip("Official",   "official",   0xF5, 0xC8, 0x42);
-        AddMainChip("Unofficial", "unofficial", 0x9B, 0x8C, 0xF5);
-
-        void AddDivider() => wrap.Children.Add(new Border
-        {
-            Width             = 1,
-            Height            = 22,
-            Background        = new SolidColorBrush(Color.FromRgb(0x2A, 0x2F, 0x45)),
-            Margin            = new Thickness(4, 0, 10, 6),
-            VerticalAlignment = VerticalAlignment.Bottom,
-        });
-
-        AddDivider();
-
-        // --- Platform chips (normalized, ≥ PlatformChipMinGames games) ---
-        // Composes (AND) with the main filter and the category filter.
-        // platforms get no chip — the text search box matches Platforms too.
-        void AddPlatformChip(string label, string value)
-        {
-            bool active = _catalogPlatformFilter.Equals(value, StringComparison.OrdinalIgnoreCase);
-            var chip = new Border
-            {
-                Margin          = new Thickness(0, 0, 6, 6),
-                Padding         = new Thickness(10, 4, 10, 4),
-                CornerRadius    = new CornerRadius(12),
-                Background      = active
-                    ? new SolidColorBrush(Color.FromArgb(0x30, 0x2D, 0xD4, 0xBF))
-                    : new SolidColorBrush(Color.FromArgb(0x10, 0x1E, 0x22, 0x33)),
-                BorderBrush     = active
-                    ? (Brush)new SolidColorBrush(Color.FromRgb(0x2D, 0xD4, 0xBF))
-                    : new SolidColorBrush(Color.FromRgb(0x2A, 0x2F, 0x45)),
-                BorderThickness = new Thickness(1),
-                Cursor          = Cursors.Hand,
-            };
-            chip.Child = new TextBlock
-            {
-                Text       = label,
-                FontSize   = 11,
-                Foreground = active
-                    ? (Brush)new SolidColorBrush(Color.FromRgb(0x5E, 0xEA, 0xD4))
-                    : muted,
-                FontWeight = active ? FontWeights.SemiBold : FontWeights.Normal,
-            };
-            string v = value;
-            chip.MouseLeftButtonDown += (_, _) =>
-            {
-                _catalogPlatformFilter = v;
-                RenderCatalog(_catalogEntries!, TxtCatalogSearch.Text);
-            };
-            wrap.Children.Add(chip);
-        }
-
-        var platforms = GameCatalog.CommonPlatforms(all, PlatformChipMinGames);
-        AddPlatformChip("All", "all");
-        foreach (var p in platforms)
-            AddPlatformChip(p, p);
-
-        // An active filter for a platform that fell below the chip threshold
-        // (e.g. reached via an earlier, larger catalog) must stay visible so
-        // the user can see it and clear it.
-        if (_catalogPlatformFilter != "all" &&
-            !platforms.Contains(_catalogPlatformFilter, StringComparer.OrdinalIgnoreCase))
-            AddPlatformChip(_catalogPlatformFilter, _catalogPlatformFilter);
-
-        AddDivider();
-
-        // --- Category chips (top 10, alphabetical) ---
-        void AddCategoryChip(string label, string value)
-        {
-            bool active = _catalogCategoryFilter == value;
-            var chip = new Border
-            {
-                Margin          = new Thickness(0, 0, 6, 6),
-                Padding         = new Thickness(10, 4, 10, 4),
-                CornerRadius    = new CornerRadius(12),
-                Background      = active
-                    ? new SolidColorBrush(Color.FromArgb(0x30, 0x63, 0x66, 0xF1))
-                    : new SolidColorBrush(Color.FromArgb(0x10, 0x1E, 0x22, 0x33)),
-                BorderBrush     = active
-                    ? (Brush)new SolidColorBrush(Color.FromRgb(0x63, 0x66, 0xF1))
-                    : new SolidColorBrush(Color.FromRgb(0x2A, 0x2F, 0x45)),
-                BorderThickness = new Thickness(1),
-                Cursor          = Cursors.Hand,
-            };
-            chip.Child = new TextBlock
-            {
-                Text       = label,
-                FontSize   = 11,
-                Foreground = active
-                    ? (Brush)new SolidColorBrush(Color.FromRgb(0x9B, 0x9E, 0xFF))
-                    : muted,
-                FontWeight = active ? FontWeights.SemiBold : FontWeights.Normal,
-            };
-            string v = value;
-            chip.MouseLeftButtonDown += (_, _) =>
-            {
-                _catalogCategoryFilter = v;
-                RenderCatalog(_catalogEntries!, TxtCatalogSearch.Text);
-            };
-            wrap.Children.Add(chip);
-        }
-
-        AddCategoryChip("All", "all");
-        foreach (var cat in GameCatalog.Categories(all).Take(10))
-            AddCategoryChip(cat, cat);
-
-        container.Child = wrap;
-        return container;
-    }
-
-    // <summary>
-    // Catalog card for an AP ecosystem tool (tracker, client, utility, etc.).
-    // Same width as a game card so it fits naturally in the WrapPanel grid.
-    // </summary>
-    private UIElement BuildToolCard(CatalogTool tool)
-    {
-        var muted  = (Brush)FindResource("BrushMuted");
-        var textBr = (Brush)FindResource("BrushText");
-
-        // Badge color by tool type
-        Brush typeBadgeBrush = tool.Type switch
-        {
-            "tracker" => new SolidColorBrush(Color.FromRgb(0x63, 0x66, 0xF1)), // indigo
-            "client"  => new SolidColorBrush(Color.FromRgb(0x22, 0xC5, 0x5E)), // green
-            "social"  => new SolidColorBrush(Color.FromRgb(0xA8, 0x55, 0xF7)), // purple
-            "mobile"  => new SolidColorBrush(Color.FromRgb(0xF5, 0x9E, 0x0B)), // amber
-            "hint"    => new SolidColorBrush(Color.FromRgb(0xEF, 0x44, 0x44)), // red
-            _         => muted,                                                  // utility / default
-        };
-
-        var border = new Border
-        {
-            Width           = 244,
-            Margin          = new Thickness(0, 0, 12, 12),
-            Background      = new SolidColorBrush(Color.FromRgb(0x10, 0x13, 0x1C)),
-            BorderBrush     = new SolidColorBrush(Color.FromRgb(0x1E, 0x22, 0x33)),
-            BorderThickness = new Thickness(1),
-            CornerRadius    = new CornerRadius(4),
-        };
-
-        var stack = new StackPanel { Margin = new Thickness(14) };
-
-        // Type badge
-        var typeBadge = new Border
-        {
-            Background      = new SolidColorBrush(Color.FromArgb(0x20, 0x63, 0x66, 0xF1)),
-            CornerRadius    = new CornerRadius(2),
-            Padding         = new Thickness(6, 2, 6, 2),
-            Margin          = new Thickness(0, 0, 0, 8),
-            HorizontalAlignment = HorizontalAlignment.Left,
-        };
-        typeBadge.Child = new TextBlock
-        {
-            Text       = tool.Type.ToUpperInvariant(),
-            FontSize   = 9,
-            Foreground = typeBadgeBrush,
-            FontWeight = FontWeights.SemiBold,
-        };
-        stack.Children.Add(typeBadge);
-
-        // Name
-        stack.Children.Add(new TextBlock
-        {
-            Text         = tool.Name,
-            FontSize     = 13,
-            FontWeight   = FontWeights.SemiBold,
-            Foreground   = textBr,
-            TextWrapping = TextWrapping.Wrap,
-        });
-
-        // Description (truncated)
-        string descText = tool.Description.Length > 110
-            ? tool.Description[..107] + "..."
-            : tool.Description;
-        stack.Children.Add(new TextBlock
-        {
-            Text         = descText,
-            FontSize     = 11,
-            Foreground   = textBr,
-            TextWrapping = TextWrapping.Wrap,
-            Margin       = new Thickness(0, 6, 0, 10),
-            Opacity      = 0.7,
-        });
-
-        // URL button (if available)
-        if (!string.IsNullOrEmpty(tool.Url))
-        {
-            var btn = new Button
-            {
-                Content = "Visit →",
-                Style   = (Style)FindResource("BtnSecondaryStyle"),
-                Padding = new Thickness(12, 5, 12, 5),
-            };
-            string url = tool.Url;
-            btn.Click += (_, _) =>
-            {
-                try
-                {
-                    System.Diagnostics.Process.Start(
-                        new System.Diagnostics.ProcessStartInfo(url)
-                        { UseShellExecute = true });
-                }
-                catch { /* ignore */ }
-            };
-            stack.Children.Add(btn);
-        }
-        else
-        {
-            stack.Children.Add(new TextBlock
-            {
-                Text       = "Discord / community link",
-                FontSize   = 10,
-                Foreground = muted,
-                Opacity    = 0.6,
-            });
-        }
-
-        border.Child = stack;
-        return border;
     }
 
     // News feed
@@ -5965,14 +4502,13 @@ public partial class MainWindow : Window
     private void BtnAchievements_Click(object sender, RoutedEventArgs e)
         => ShowAchievementsPage();
 
-    // Bring the global achievements page to the front (over the game page,
-    // Browse and the empty state).
+    // Bring the global achievements page to the front (over the game page
+    // and the empty state).
     // into view — used by the Overview "All achievements →" teaser link.
     private void ShowAchievementsPage(string? focusGameId = null)
     {
         PanelGame.Visibility         = Visibility.Collapsed;
         PanelEmpty.Visibility        = Visibility.Collapsed;
-        PanelBrowse.Visibility       = Visibility.Collapsed;
         PanelAchievements.Visibility = Visibility.Visible;
 
         // Deep-link: pre-select that game's category.
@@ -6548,50 +5084,6 @@ public partial class MainWindow : Window
 
         var settings = SettingsStore.Load();
 
-        // Catalog URL row
-        var urlRow   = new DockPanel { Margin = new Thickness(0, 0, 0, 4) };
-        var urlLabel = new TextBlock
-        {
-            Text              = "Catalog URL",
-            FontSize          = 11,
-            Foreground        = fg,
-            VerticalAlignment = VerticalAlignment.Center,
-            Width             = 90,
-            Margin            = new Thickness(0, 0, 8, 0),
-        };
-        var saveBtn = new Button
-        {
-            Content     = "Save",
-            Width       = 55,
-            Padding     = new Thickness(0, 5, 0, 5),
-            Background  = new SolidColorBrush(Color.FromRgb(0x1A, 0x1E, 0x30)),
-            Foreground  = fg,
-            BorderBrush = new SolidColorBrush(Color.FromRgb(0x2A, 0x30, 0x50)),
-            Margin      = new Thickness(6, 0, 0, 0),
-        };
-        var urlBox = new TextBox
-        {
-            Text        = settings.CatalogUrl ?? GameCatalog.DefaultCatalogUrl,
-            FontSize    = 11,
-            Background  = new SolidColorBrush(Color.FromRgb(0x0C, 0x10, 0x20)),
-            Foreground  = fg,
-            BorderBrush = new SolidColorBrush(Color.FromRgb(0x1E, 0x22, 0x33)),
-            Padding     = new Thickness(6, 5, 6, 5),
-        };
-        saveBtn.Click += (_, _) =>
-        {
-            var s = SettingsStore.Load();
-            s.CatalogUrl     = urlBox.Text.Trim();
-            SettingsStore.Save(s);
-            _catalogEntries  = null;   // force reload next time Browse is opened
-            AppendLog("[Settings] Catalog URL saved — reopen Browse to refresh.");
-        };
-        DockPanel.SetDock(urlLabel, Dock.Left);
-        DockPanel.SetDock(saveBtn,  Dock.Right);
-        urlRow.Children.Add(urlLabel);
-        urlRow.Children.Add(saveBtn);
-        urlRow.Children.Add(urlBox);
-        SettingsPanel.Children.Add(urlRow);
 
         // Default AP Server row
         SettingsPanel.Children.Add(new TextBlock
@@ -7131,35 +5623,6 @@ public partial class MainWindow : Window
         return card;
     }
 
-    // <summary>Skeleton placeholder that matches a catalog card.</summary>
-    private UIElement BuildSkeletonCatalogCard()
-    {
-        var card = new Border
-        {
-            Width           = 244,
-            Margin          = new Thickness(0, 0, 12, 12),
-            Background      = new SolidColorBrush(Color.FromRgb(0x14, 0x17, 0x20)),
-            BorderBrush     = new SolidColorBrush(Color.FromRgb(0x1E, 0x22, 0x33)),
-            BorderThickness = new Thickness(1),
-            CornerRadius    = new CornerRadius(4),
-        };
-        // Matches the slim Steam-like card: edge-to-edge thumb + title + badges.
-        var outer = new StackPanel();
-        outer.Children.Add(new Border
-        {
-            Height       = 128,
-            Background   = new SolidColorBrush(Color.FromRgb(0x0C, 0x10, 0x20)),
-            CornerRadius = new CornerRadius(4, 4, 0, 0),
-        });
-        var sp = new StackPanel { Margin = new Thickness(12, 10, 12, 12) };
-        sp.Children.Add(SkeletonBar(0.70, 13));
-        sp.Children.Add(SkeletonBar(0.50, 9, 10));
-        outer.Children.Add(sp);
-        card.Child        = outer;
-        card.ClipToBounds = true;
-        return card;
-    }
-
     private async Task LoadNewsAsync(IGamePlugin plugin)
     {
         // Cancel any in-flight load so a previous game's news can't overwrite the new one.
@@ -7627,8 +6090,31 @@ public partial class MainWindow : Window
     }
 
     // Run a full install/update for one plugin.
-    // install actually completed — false on failure, cancellation, or when
-    // another install is already running (P2-11 single-install guard).
+    private bool EnsureBaseGameFolder(IGamePlugin plugin)
+    {
+        if (plugin.NeedsBaseGameFolder() is not { } request) return true;
+
+        if (!ConfirmDialog.Show(this, request.Title, request.Explanation,
+                                "Select folder…", "Cancel"))
+            return false;
+
+        var dlg = new Microsoft.Win32.OpenFolderDialog
+        {
+            Title            = request.PickerTitle,
+            InitialDirectory = request.InitialDirectory ?? "",
+        };
+        if (dlg.ShowDialog(this) != true) return false;
+
+        if (plugin.ValidateExistingInstall(dlg.FolderName) is { } why)
+        {
+            ConfirmDialog.ShowInfo(this, "Folder not recognized", why);
+            return false;
+        }
+
+        plugin.SetBaseGameFolder(dlg.FolderName);
+        return true;
+    }
+
     private async Task<bool> RunInstallAsync(IGamePlugin plugin)
     {
         // Single-install guard: installers share %TEMP% staging files, so a
@@ -7641,51 +6127,9 @@ public partial class MainWindow : Window
             return false;
         }
 
-        // D2Plugin: the mod installs into its OWN folder (Games/diablo2_archipelago)
-        // — never the user's Diablo II.
-        // Classic Diablo II lives so we can COPY the original Blizzard data files
-        // (MPQs) from it; the original is never modified.
-        // only prompt the user if that fails.
-        if (plugin is Plugins.DiabloII.D2Plugin d2pre
-            && !d2pre.IsInstalled
-            && !d2pre.IsOriginalD2Configured)
-        {
-            string? detected = d2pre.AutoDetectOriginalD2();
-            if (detected != null)
-            {
-                d2pre.OriginalD2Directory = detected;
-            }
-            else
-            {
-                bool pick = ConfirmDialog.Show(this,
-                    "Locate your original Diablo II",
-                    "Diablo II Archipelago is built from your own copy of Diablo II: " +
-                    "Lord of Destruction. Select the folder where Classic Diablo II is " +
-                    "installed — the launcher copies the needed game files from there " +
-                    "into its own folder and never modifies your original install.",
-                    "Select folder…", "Cancel");
-                if (!pick) return false;
-
-                var dlg = new Microsoft.Win32.OpenFolderDialog
-                {
-                    Title            = "Select your Classic Diablo II: Lord of Destruction folder",
-                    InitialDirectory = @"C:\Program Files (x86)",
-                };
-                if (dlg.ShowDialog(this) != true) return false;
-
-                string? err = d2pre.ValidateExistingInstall(dlg.FolderName);
-                if (err != null)
-                {
-                    ConfirmDialog.ShowInfo(this, "Folder not recognized", err);
-                    return false;
-                }
-                d2pre.OriginalD2Directory = dlg.FolderName;
-            }
-
-            var ls = SettingsStore.Load();
-            ls.DiabloIIPath = d2pre.OriginalD2Directory;
-            SettingsStore.Save(ls);
-        }
+        // A game that is a mod on top of a game the player owns needs to know
+        // where that copy is before it can install.
+        if (!EnsureBaseGameFolder(plugin)) return false;
 
         var installCts = new CancellationTokenSource();
         _installCts    = installCts;
@@ -7982,54 +6426,17 @@ public partial class MainWindow : Window
             if (!installed || !_selectedPlugin.IsInstalled) return;
         }
 
-        // the install dir must contain the copied original MPQs before launch.
-        // If they're missing (copy failed, or the original D2 source moved), make
-        // sure we know where the player's own Diablo II is, then re-run the install
-        // so the copy step runs again.
-        if (_selectedPlugin is Plugins.DiabloII.D2Plugin d2launch
-            && !d2launch.HasOriginalGameFiles())
+        // The install dir must contain the copied original files before launch.
+        // If they are missing (the copy failed, or the original moved), make
+        // sure we know where the player's own copy is and re-run the install so
+        // the copy step runs again.
+        if (_selectedPlugin is { } launchPlugin && !launchPlugin.HasBaseGameFiles())
         {
-            if (!d2launch.IsOriginalD2Configured)
-            {
-                string? detected2 = d2launch.AutoDetectOriginalD2();
-                if (detected2 != null)
-                {
-                    d2launch.OriginalD2Directory = detected2;
-                }
-                else
-                {
-                    bool pick = ConfirmDialog.Show(this,
-                        "Locate your original Diablo II",
-                        "The launcher needs your Classic Diablo II: Lord of Destruction " +
-                        "folder to copy the original game files from. Your original " +
-                        "install is never modified.",
-                        "Select folder…", "Cancel");
-                    if (!pick) return;
-
-                    var dlg2 = new Microsoft.Win32.OpenFolderDialog
-                    {
-                        Title            = "Select your Classic Diablo II: Lord of Destruction folder",
-                        InitialDirectory = @"C:\Program Files (x86)",
-                    };
-                    if (dlg2.ShowDialog(this) != true) return;
-
-                    string? err2 = d2launch.ValidateExistingInstall(dlg2.FolderName);
-                    if (err2 != null)
-                    {
-                        ConfirmDialog.ShowInfo(this, "Folder not recognized", err2);
-                        return;
-                    }
-                    d2launch.OriginalD2Directory = dlg2.FolderName;
-                }
-
-                var ls2 = SettingsStore.Load();
-                ls2.DiabloIIPath = d2launch.OriginalD2Directory;
-                SettingsStore.Save(ls2);
-            }
+            if (!EnsureBaseGameFolder(launchPlugin)) return;
 
             // Re-run install so the original files get copied into the mod folder.
-            bool reinstalled = await RunInstallAsync(d2launch);
-            if (!reinstalled || !d2launch.IsInstalled) return;
+            bool reinstalled = await RunInstallAsync(launchPlugin);
+            if (!reinstalled || !launchPlugin.IsInstalled) return;
         }
 
         // Switch to Play tab so the log is visible
@@ -8071,7 +6478,7 @@ public partial class MainWindow : Window
 
         // Antivirus often deletes D2Arch_Launcher.exe — offer a one-click repair
         // before dead-ending at launch (buttons not yet disabled, so cancel is clean).
-        if (!await EnsureD2ModFilesAsync(plugin)) return;
+        if (!await EnsureCriticalFilesAsync(plugin)) return;
 
         BtnStandalone.IsEnabled = false;
         BtnPlay.IsEnabled       = false;
@@ -8084,15 +6491,9 @@ public partial class MainWindow : Window
         {
             SetStatus("Verifying install...");
             AppendLog("[Verify] Checking install integrity...");
-            if (plugin is Plugins.DiabloII.D2Plugin d2Verify)
-                await VerifyAndRepairD2Async(d2Verify, CancellationToken.None);
-            else
-            {
-                bool vOk = await plugin.VerifyInstallAsync();
-                AppendLog(vOk ? "[Verify] OK." : "[Verify] WARNING: some files may be missing. Consider re-installing.");
-            }
+            await VerifyAndRepairAsync(plugin, CancellationToken.None);
 
-            if (RendererMissingBlocksLaunch(plugin)) return;
+            if (RequiredComponentBlocksLaunch(plugin)) return;
 
             await plugin.LaunchStandaloneAsync();
 
@@ -8114,35 +6515,26 @@ public partial class MainWindow : Window
             _locationTracker.Clear();
             // Feed the bundled location id→name table (no AP server to deliver a
             // DataPackage), so standalone checks show real names + categories.
-            if (plugin is Plugins.DiabloII.D2Plugin d2track
-                && d2track.GetLocationDataPackage() is { } d2data)
+            if (plugin.GetLocationDataPackage() is { } ownTable)
             {
-                _locationTracker.OnDataPackage(plugin.ApWorldName, d2data);
-                // No AP server → derive the FULL active location universe ourselves
-                // from the [settings] we just wrote + that table, so the tracker
-                // shows every UNCHECKED location + per-category totals (not only the
-                // checks that have fired) — exactly like an AP session.
-                // runs all difficulties (g_apMode=FALSE in the mod), so the universe
-                // is purely a function of the settings.
-                long[] universe = Plugins.DiabloII.D2LocationUniverse.ComputeActiveIds(
-                    d2track.GetStandaloneSettings(), d2data);
+                _locationTracker.OnDataPackage(plugin.ApWorldName, ownTable);
+                // No AP server → ask the game for the FULL active location
+                // universe, so the tracker shows every UNCHECKED location and
+                // per-category totals — not only the checks that have fired.
+                long[] universe = plugin.GetStandaloneLocationUniverse();
                 if (universe.Length > 0) _locationTracker.OnMissingLocations(universe);
             }
             _locationTracker.Changed -= OnLocationTrackerChanged;
             _locationTracker.Changed += OnLocationTrackerChanged;
             plugin.LocationsChecked  -= OnPluginLocationsChecked;
             plugin.LocationsChecked  += OnPluginLocationsChecked;
-            if (plugin is Plugins.DiabloII.D2Plugin d2miss)
-            {
-                d2miss.LocationsMissing -= OnPluginLocationsMissing;
-                d2miss.LocationsMissing += OnPluginLocationsMissing;
-                // Standalone rewards ("<location>: <reward>" pipe lines) go to
-                // the item tracker too — this wiring only existed on the AP
-                // launch path before, so a pure-standalone run silently
-                // dropped every reward from the Received tab.
-                d2miss.StandaloneItemReceived -= OnStandaloneItemReceived;
-                d2miss.StandaloneItemReceived += OnStandaloneItemReceived;
-            }
+            plugin.LocationsMissing -= OnPluginLocationsMissing;
+            plugin.LocationsMissing += OnPluginLocationsMissing;
+            // Standalone rewards go to the item tracker too — this wiring only
+            // existed on the AP launch path before, so a pure-standalone run
+            // silently dropped every reward from the Received tab.
+            plugin.StandaloneItemReceived -= OnStandaloneItemReceived;
+            plugin.StandaloneItemReceived += OnStandaloneItemReceived;
             OnLocationTrackerChanged();   // reset the tab counters to 0 for the new run
 
             _trayIcon.Show($"Playing {plugin.DisplayName} (standalone)");
@@ -8165,7 +6557,7 @@ public partial class MainWindow : Window
             AppendLog($"[Error] {ex.Message}");
             // If Windows Defender blocked the mod exe, offer to add a Defender
             // exclusion instead of just showing the dead-end error.
-            if (!await TryOfferDefenderExclusionAsync(plugin, ex))
+            if (!await plugin.TryHandleAntivirusBlockAsync(this, ex))
                 ConfirmDialog.ShowInfo(this, "Could not launch the game", ex.Message);
             BtnStandalone.IsEnabled = true;
             BtnPlay.IsEnabled       = true;
@@ -8185,8 +6577,7 @@ public partial class MainWindow : Window
         // Unwire the standalone tracker feed (the tracker keeps its final state
         // on screen until the next session clears it).
         plugin.LocationsChecked -= OnPluginLocationsChecked;
-        if (plugin is Plugins.DiabloII.D2Plugin d2miss)
-            d2miss.LocationsMissing -= OnPluginLocationsMissing;
+        plugin.LocationsMissing -= OnPluginLocationsMissing;
         if (ReferenceEquals(_runningPlugin, plugin)) _runningPlugin = null;
 
         // Playtime accounting — standalone sessions count too (no AP server,
@@ -8342,8 +6733,8 @@ public partial class MainWindow : Window
             // d2arch.ini [settings] DeathLinkReceive=1.
             // session's plugin (P2-6) — browsing another sidebar game must not
             // stop deaths from reaching the game.
-            if (_runningPlugin is Plugins.DiabloII.D2Plugin d2Run && d2Run.IsRunning)
-                _ = d2Run.SendDeathLinkToGameAsync(source, cause);
+            _ = _runningPlugin?.OnDeathLinkReceivedAsync(source, cause)
+                ?? Task.CompletedTask;
         });
 
         // --- Server countdown — one tick per second, 0 = GO ---
@@ -8360,14 +6751,7 @@ public partial class MainWindow : Window
         {
             if (_apClient != ap) return;
 
-            // Feed EVERY ItemSend into the tracker — this is what makes the
-            // "What I sent" filter real.
-            // us, so items we found for OTHER players were never recorded and
-            // the sent-counter sat at 0 no matter how many checks we cleared
-            // (reported ~400 checks in).
-            // this safe to overlap with the ReceivedItems path for items that
-            // ARE ours. This also gives the live Items feed the full
-            // multiworld traffic instead of just our own slice.
+            // Every ItemSend feeds the tracker — that is what fills the other players' columns.
             _tracker.RecordItems(
                 new[] { new ApNetworkItem(itemId, locationId, sendingSlot, itemFlags) },
                 receivingSlot);
@@ -8453,10 +6837,6 @@ public partial class MainWindow : Window
             if (_apClient != ap) return;
             if (ap.SlotData is JsonElement sd)
             {
-                if ((_runningPlugin ?? _selectedPlugin) is Plugins.DiabloII.D2Plugin d2Sd)
-                    d2Sd.WriteApSettingsFile(sd);
-                // The same hand-off for plugins, which the launcher cannot
-                // reach by a type check: it does not reference them.
                 (_runningPlugin ?? _selectedPlugin)?.OnSlotData(sd);
             }
 
@@ -8761,50 +7141,6 @@ public partial class MainWindow : Window
              : $"Slot {slot}";
     }
 
-    // --- D2 location id → name ---
-    // The apworld builds every location id the same way:
-    //     id = 42000 + quest_id + 1000 * difficulty
-    // so the mapping inverts cleanly, and D2LogicTables already carries
-    // name → quest_id. Building the reverse once beats shipping a second
-    // generated table that could drift away from the first.
-    private const long D2LocationBase = 42000;
-    private static Dictionary<int, string>? _d2QuestToName;
-
-    private void EnsureD2LocationNameMap()
-    {
-        if (_d2QuestToName != null) return;
-        var map = new Dictionary<int, string>();
-        foreach (var kv in Plugins.DiabloII.D2LogicTables.LocationQuest)
-        {
-            // The table holds all three difficulties under decorated names
-            // ("... (Nightmare)"); the plain one is the canonical label.
-            if (kv.Key.EndsWith(")", StringComparison.Ordinal) &&
-                (kv.Key.Contains("(Nightmare)", StringComparison.Ordinal) ||
-                 kv.Key.Contains("(Hell)", StringComparison.Ordinal)))
-                continue;
-            map[kv.Value] = kv.Key;
-        }
-        _d2QuestToName = map;
-    }
-
-    private string? D2ResolveLocationName(long locationId)
-    {
-        EnsureD2LocationNameMap();
-        long n = locationId - D2LocationBase;
-        if (n < 0) return null;
-        int diff = (int)(n / 1000);
-        int quest = (int)(n % 1000);
-        if (diff < 0 || diff > 2) return null;
-        if (_d2QuestToName == null ||
-            !_d2QuestToName.TryGetValue(quest, out string? name)) return null;
-        return diff switch
-        {
-            1 => name + " (Nightmare)",
-            2 => name + " (Hell)",
-            _ => name,
-        };
-    }
-
     // Status-bar 💡 hint text.
     // the ACTUAL point price of one hint — never the raw hint_cost percentage.
     private string FormatHintPoints(int pts)
@@ -8815,35 +7151,55 @@ public partial class MainWindow : Window
         return $"💡 Hints: {available} available · {pts}/{cost} pts";
     }
 
-    // Keep the Diablo II Map tab's hint/cheat controls in step with the live
-    // session. Called from every place the hint economy or the connection can
-    // move; it is cheap and idempotent, so over-calling is the safe failure.
-    private void PushD2ApContext()
-    {
-        if ((_runningPlugin ?? _selectedPlugin) is not Plugins.DiabloII.D2Plugin d2) return;
-        var ap = _apClient;
-        bool on = ap is { State: ApConnectionState.Connected };
-        d2.SetApActionContext(
-            on, on ? ap!.SlotName : "",
-            on ? ap!.HintPoints : 0,
-            on ? ap!.HintCostPoints : 0,
-            on ? t => ap!.SendSayAsync(t) : null);
-    }
-
-    // The Items tab's "Hint or cheat an item" entry point.
-    // game's own datapackage as the catalogue, so every name offered is one
-    // the server will accept verbatim.
-    private void BtnItemActions_Click(object sender, RoutedEventArgs e)
+    // Build the live session picture, or null when there is none.
+    //
+    // The item and location name sets are what THIS SEED has, not everything
+    // the game can define -- see ApSessionContext for why that matters.
+    private ApSessionContext? BuildApSessionContext()
     {
         var ap = _apClient;
         if (ap is not { State: ApConnectionState.Connected } || ap.ConnectedGame == null)
+            return null;
+
+        _dpGameItemNames.TryGetValue(ap.ConnectedGame, out var items);
+        _dpGameLocNames.TryGetValue(ap.ConnectedGame, out var locs);
+
+        var inSeed = new List<string>();
+        if (locs != null)
+            foreach (long id in ap.ConnectedChecked.Concat(ap.ConnectedMissing))
+                if (locs.TryGetValue(id, out var nm)) inSeed.Add(nm);
+
+        return new ApSessionContext(
+            ap.SlotName,
+            items?.Values.ToList() ?? new List<string>(),
+            inSeed,
+            ap.HintPoints,
+            ap.HintCostPoints,
+            t => ap.SendSayAsync(t));
+    }
+
+    // Keep the selected game's session-aware controls in step. Called from
+    // every place the hint economy or the connection can move; it is cheap and
+    // idempotent by contract, so over-calling is the safe failure.
+    private void PushApSessionContext()
+        => (_runningPlugin ?? _selectedPlugin)?.OnApSessionChanged(BuildApSessionContext());
+
+    // The Items tab's "Hint or cheat an item" entry point. What it opens is
+    // the game's; the launcher owns only the two reasons it cannot open yet.
+    private void BtnItemActions_Click(object sender, RoutedEventArgs e)
+    {
+        var plugin = _runningPlugin ?? _selectedPlugin;
+        if (plugin?.ItemActions is not { } open) return;
+
+        var session = BuildApSessionContext();
+        if (session == null)
         {
             MessageBox.Show(this,
                 "Connect to the Archipelago server first — hints and cheats are server commands.",
                 "Not connected", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
-        if (!_dpGameItemNames.TryGetValue(ap.ConnectedGame, out var items) || items.Count == 0)
+        if (session.ItemNames.Count == 0)
         {
             MessageBox.Show(this,
                 "The item list for this game has not arrived from the server yet. "
@@ -8851,21 +7207,7 @@ public partial class MainWindow : Window
                 "Item list not ready", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
-        // Offer only the checks this seed actually HAS.
-        // every location the game can define across all difficulties and option
-        // combinations; a given seed is a subset.
-        // server: 2730 in the package, 833 in a Full Hell seed — the other 1897
-        // come back "Location appears to not exist in this multiworld", which
-        // is a confusing thing to offer someone as a button.
-        _dpGameLocNames.TryGetValue(ap.ConnectedGame, out var locs);
-        var inSeed = new List<string>();
-        if (locs != null)
-            foreach (long id in ap.ConnectedChecked.Concat(ap.ConnectedMissing))
-                if (locs.TryGetValue(id, out var nm)) inSeed.Add(nm);
-
-        Plugins.DiabloII.D2ItemActionDialog.ShowFor(
-            this, items.Values, inSeed, ap.SlotName,
-            t => ap.SendSayAsync(t), ap.HintPoints, ap.HintCostPoints);
+        open(this, session);
     }
 
     // --- Hint pipeline (live PrintJSON + data-storage backlog) ---
@@ -9187,51 +7529,50 @@ public partial class MainWindow : Window
         plugin.LocationsChecked -= OnPluginLocationsChecked;
         plugin.GameExited       -= OnPluginGameExited;
         plugin.GoalCompleted    -= OnPluginGoalCompleted;
+        plugin.StandaloneItemReceived -= OnStandaloneItemReceived;
     }
 
-    // Before launching Diablo II, make sure the antivirus-prone mod files
-    // exist. Antivirus (especially Windows Defender) routinely quarantines
-    // D2Arch_Launcher.exe; rather than dead-ending at launch, offer a one-click
-    // repair that re-downloads + restores just the missing files.
-    // it's safe to launch (nothing missing, or repair succeeded), false otherwise.
-    private async Task<bool> EnsureD2ModFilesAsync(IGamePlugin plugin)
+    // Critical-file check right before launch: antivirus quarantine strikes
+    // between install and launch, so install-time checks prove nothing.
+    private async Task<bool> EnsureCriticalFilesAsync(IGamePlugin plugin)
     {
-        if (plugin is not Plugins.DiabloII.D2Plugin d2) return true;
-        var missing = d2.GetMissingCriticalFiles();
+        var missing = plugin.GetMissingCriticalFiles();
         if (missing.Count == 0) return true;
 
-        string list = string.Join("\n", missing.Select(m => "   • " + m));
+        string list  = string.Join("\n", missing.Select(m => "   • " + m));
+        string cause = plugin.MissingCriticalFilesCause is { } c
+            ? "\n\n" + c
+            : "";
+
         var ask = System.Windows.MessageBox.Show(this,
-            "Some Diablo II mod files are missing:\n\n" + list +
-            "\n\nThis is almost always your antivirus (especially Windows Defender) " +
-            "removing D2Arch_Launcher.exe as a false positive.\n\n" +
-            "Download and restore them now?",
-            "Mod files missing — repair?",
+            $"Some {plugin.DisplayName} files are missing:\n\n" + list + cause +
+            "\n\nDownload and restore them now?",
+            "Files missing — repair?",
             System.Windows.MessageBoxButton.YesNo, System.Windows.MessageBoxImage.Warning);
         if (ask != System.Windows.MessageBoxResult.Yes) return false;
 
         try
         {
             SwitchTab(PageTab.Play);
-            SetStatus("Repairing — downloading missing mod files...");
+            SetStatus("Repairing — downloading missing files...");
             var progress = new Progress<(int Pct, string Msg)>(p =>
             {
                 ProgressBar.Value = p.Pct;
                 SetStatus("Repairing — " + p.Msg);
             });
-            int restored = await d2.RepairMissingFilesAsync(progress);
+            int restored = await plugin.RepairMissingCriticalFilesAsync(progress);
             AppendLog($"[Repair] Restored {restored} file(s).");
 
-            var still = d2.GetMissingCriticalFiles();
+            var still = plugin.GetMissingCriticalFiles();
             if (still.Count > 0)
             {
                 System.Windows.MessageBox.Show(this,
-                    "The files downloaded but are still missing — your antivirus is " +
-                    "deleting them again as they're written. Add the game's install folder " +
-                    "to your antivirus exclusions, then try launching again.",
-                    "Repair blocked by antivirus",
+                    "The files downloaded but are still missing — something is "
+                    + "deleting them again as they are written. Add the game's install "
+                    + "folder to your antivirus exclusions, then try launching again.",
+                    "Repair blocked",
                     System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
-                SetStatus("Repair blocked by antivirus.");
+                SetStatus("Repair blocked.");
                 return false;
             }
             SetStatus("Repair complete.");
@@ -9241,29 +7582,17 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             AppendLog("[Repair] Failed: " + ex.Message);
-            System.Windows.MessageBox.Show(this,
-                "Could not download the missing files:\n\n" + ex.Message,
-                "Repair failed", System.Windows.MessageBoxButton.OK,
-                System.Windows.MessageBoxImage.Error);
             SetStatus("Repair failed.");
             return false;
         }
     }
 
-    // specific install verify with a detailed per-file report and an automatic
-    // download-repair pass.
-    // be missing" with the EXACT files at fault (name + reason), then tries to
-    // re-download them from the release package, and only falls back to a warning
-    // if that download fails.
-    // to start, but the player (and we) now see precisely what is wrong.
-    // The game cannot start without a DirectDraw wrapper, and we no longer ship
-    // one. Stop here with an explanation rather than let Diablo II throw its own
-    // "Error 22" box, which says nothing about the cause or the cure.
-    private bool RendererMissingBlocksLaunch(IGamePlugin plugin)
+    // Verify with per-file detail when the plugin can scan; coarse
+    // VerifyInstallAsync otherwise. Never blocks launch on a scan error.
+    private bool RequiredComponentBlocksLaunch(IGamePlugin plugin)
     {
-        if (plugin is not Plugins.DiabloII.D2Plugin d2) return false;
-        var blockers = d2.DetectAddonsAdopting()
-            .Where(a => a.Need == Plugins.DiabloII.D2Plugin.AddonNeed.Required && !a.Active)
+        var blockers = plugin.DetectComponentsAdopting()
+            .Where(c => c.Need == ComponentNeed.Required && !c.Present)
             .ToList();
         if (blockers.Count == 0) return false;
 
@@ -9274,25 +7603,29 @@ public partial class MainWindow : Window
         {
             AppendLog("[Blocked] " + b.Name + " — " + b.Status);
             if (b.Advice != null) AppendLog("          " + b.Advice);
-            if (b.Url.Length > 0) AppendLog("          " + b.Url);
+            if (b.Url    != null) AppendLog("          " + b.Url);
         }
         SetStatus("Cannot launch — " + string.Join(", ", blockers.Select(b => b.Name)));
         return true;
     }
 
-    private async Task VerifyAndRepairD2Async(Plugins.DiabloII.D2Plugin d2, CancellationToken ct)
+    private async Task VerifyAndRepairAsync(IGamePlugin plugin, CancellationToken ct)
     {
-        // The optional add-ons are installed by hand, so the one moment the
-        // player can be told whether that worked is right here, next to the
-        // install check they already read.
-        AppendLog("[Components] What the launcher can see:");
-        foreach (var a in d2.DetectAddonsAdopting())
-            AppendLog(String.Format("   [{0}]  {1,-20} {2}",
-                a.Active ? " ok " : a.Need == Plugins.DiabloII.D2Plugin.AddonNeed.Required ? "MISS" : " -- ",
-                a.Name, a.Status));
+        // Components a player installs by hand are worth listing here, next to
+        // the install check they are already reading. A game with none prints
+        // nothing rather than an empty heading.
+        var components = plugin.DetectComponentsAdopting();
+        if (components.Count > 0)
+        {
+            AppendLog("[Components] What the launcher can see:");
+            foreach (var c in components)
+                AppendLog(String.Format("   [{0}]  {1,-20} {2}",
+                    c.Present ? " ok " : c.Need == ComponentNeed.Required ? "MISS" : " -- ",
+                    c.Name, c.Status));
+        }
 
-        List<Plugins.DiabloII.D2Plugin.InstallProblem>? problems;
-        try { problems = await d2.ScanInstallProblemsAsync(ct); }
+        IReadOnlyList<IGamePlugin.InstallProblem>? problems;
+        try { problems = await plugin.ScanInstallProblemsAsync(ct); }
         catch (OperationCanceledException) { throw; }
         catch (Exception ex)
         {
@@ -9302,7 +7635,13 @@ public partial class MainWindow : Window
 
         if (problems == null)
         {
-            AppendLog("[Verify] Skipped — offline and no local manifest to check against.");
+            // No detailed scan available — either this game has none, or it
+            // could not reach its manifest. Fall back to the coarse check
+            // rather than saying nothing.
+            bool ok = await plugin.VerifyInstallAsync(ct);
+            AppendLog(ok ? "[Verify] OK — all files present and correct size."
+                         : "[Verify] WARNING: some files may be missing or corrupted. "
+                           + "Consider re-installing.");
             return;
         }
         if (problems.Count == 0)
@@ -9314,7 +7653,7 @@ public partial class MainWindow : Window
         // Name EXACTLY what is wrong, file by file.
         AppendLog($"[Verify] WARNING: {problems.Count} file(s) need attention:");
         foreach (var prob in problems)
-            AppendLog($"   • {prob.RelPath}  ({prob.Reason})");
+            AppendLog($"   • {prob.Path}  ({prob.Reason})");
 
         // Before just warning, check whether they can be downloaded and repair.
         AppendLog("[Verify] Checking whether these files can be downloaded...");
@@ -9326,8 +7665,8 @@ public partial class MainWindow : Window
         });
         try
         {
-            var (restored, notInPackage) = await d2.RepairFilesAsync(
-                problems.Select(pr => pr.RelPath), progress, ct);
+            var (restored, notInPackage) = await plugin.RepairFilesAsync(
+                problems.Select(pr => pr.Path), progress, ct);
 
             foreach (var f in restored) AppendLog("[Verify] Repaired: " + f);
 
@@ -9358,88 +7697,12 @@ public partial class MainWindow : Window
     // or unwanted software, via the specific Win32 error code it raises for that:
     // 225 = ERROR_VIRUS_INFECTED, 226 = ERROR_VIRUS_DELETED.
     
-    // the previous version also matched the substring "virus" in the
-    // exception message. But the launcher's OWN error text says "check your
-    // antivirus…", and "antiVIRUS" contains "virus" — so every ordinary startup
-    // failure or pipe timeout got mis-stamped as a Defender block.
-    // the infinite loop: real error → "Defender blocked it" dialog → user adds an
-    // exclusion → same real error next launch → forever.
-    // code Windows raises for an actual AV block is evidence-based and can't be
-    // triggered by our own wording.
-    private static bool IsAntivirusBlock(Exception ex)
-    {
-        for (Exception? e = ex; e != null; e = e.InnerException)
-        {
-            if (e is System.ComponentModel.Win32Exception w32 &&
-                (w32.NativeErrorCode == 225 || w32.NativeErrorCode == 226))
-                return true;
-        }
-        return false;
-    }
-
     // Loop-breaker for the Defender-exclusion offer: once we've offered it this
     // session we don't offer again.
     // after the user already added (or declined) an exclusion, the exclusion
     // clearly isn't the real problem — fall through to the genuine error instead
     // of re-showing the same dialog.
     private bool _defenderExclusionOfferedThisSession;
-
-    // When a launch failed because Defender blocked the mod exe, offer a one-click
-    // fix: add the game folder to Windows Defender's exclusion list (one admin/UAC
-    // click). Returns true if it handled the error (showed its own UI), false to
-    // fall through to the generic "could not launch" dialog.
-    private async Task<bool> TryOfferDefenderExclusionAsync(IGamePlugin plugin, Exception ex)
-    {
-        if (plugin is not Plugins.DiabloII.D2Plugin d2 || !IsAntivirusBlock(ex)) return false;
-
-        // Loop-breaker (T9): only offer the exclusion once per launcher session.
-        // If it still fails as an AV block after the user already dealt with the
-        // exclusion, the exclusion isn't the fix — surface the real error instead.
-        if (_defenderExclusionOfferedThisSession)
-        {
-            AppendLog("[Defender] Still blocked after an exclusion was already offered this "
-                + "session — showing the underlying error instead of re-prompting.");
-            return false;
-        }
-        _defenderExclusionOfferedThisSession = true;
-
-        string gameDir = d2.GameDirectory;
-        var ask = System.Windows.MessageBox.Show(this,
-            "Windows Defender blocked the mod from starting (false positive):\n\n" +
-            ex.Message +
-            "\n\nThe mod injects into Diablo II, which Defender flags as suspicious. " +
-            "I can add the game folder to Defender's exclusion list so it stops:\n\n" +
-            gameDir +
-            "\n\nWindows will ask for administrator permission. Add the exclusion now?",
-            "Add Windows Defender exclusion?",
-            System.Windows.MessageBoxButton.YesNo, System.Windows.MessageBoxImage.Warning);
-        if (ask != System.Windows.MessageBoxResult.Yes) return true;   // handled — user declined the fix
-
-        SetStatus("Adding Windows Defender exclusion...");
-        bool ok = await Task.Run(() => d2.AddDefenderExclusion());
-        if (ok)
-        {
-            // Defender may also have quarantined the exe — restore it if so.
-            try { if (d2.GetMissingCriticalFiles().Count > 0) await EnsureD2ModFilesAsync(plugin); }
-            catch { /* best effort */ }
-            AppendLog("[Defender] Exclusion added for " + gameDir);
-            System.Windows.MessageBox.Show(this,
-                "Added to Windows Defender's exclusions. Click Play / Launch again to start the game.",
-                "Exclusion added", System.Windows.MessageBoxButton.OK,
-                System.Windows.MessageBoxImage.Information);
-        }
-        else
-        {
-            System.Windows.MessageBox.Show(this,
-                "Couldn't add the exclusion automatically (the admin prompt may have been " +
-                "declined, or a third-party antivirus is active). Add it manually:\n\n" +
-                "Windows Security → Virus & threat protection → Manage settings → " +
-                "Exclusions → Add an exclusion → Folder:\n\n" + gameDir,
-                "Add the exclusion manually", System.Windows.MessageBoxButton.OK,
-                System.Windows.MessageBoxImage.Warning);
-        }
-        return true;
-    }
 
     // At startup, make sure the launcher's own folder + the Diablo II install are in
     // Windows Defender's exclusion list (Defender false-positives the mod injector and
@@ -9563,11 +7826,11 @@ public partial class MainWindow : Window
     private async Task LaunchGameAsync(IGamePlugin plugin)
     {
         // Antivirus often quarantines D2Arch_Launcher.exe — offer repair, not a dead end.
-        if (!await EnsureD2ModFilesAsync(plugin)) return;
+        if (!await EnsureCriticalFilesAsync(plugin)) return;
 
         // Checked before anything connects: there is no point joining a
         // multiworld and then discovering the game cannot open a window.
-        if (RendererMissingBlocksLaunch(plugin)) return;
+        if (RequiredComponentBlocksLaunch(plugin)) return;
 
         bool alreadyConnected = _apClient?.State == ApConnectionState.Connected;
 
@@ -9683,7 +7946,7 @@ public partial class MainWindow : Window
             {
                 TxtHintCount.Text       = FormatHintPoints(pts);
                 TxtHintCount.Visibility = Visibility.Visible;
-                PushD2ApContext();          // Map tab's per-check hint buttons
+                PushApSessionContext();          // Map tab's per-check hint buttons
                 if (_currentTab == PageTab.Progression)
                     RefreshProgressionPanel();
             });
@@ -9710,84 +7973,23 @@ public partial class MainWindow : Window
         plugin.LocationsChecked += OnPluginLocationsChecked;
         plugin.GameExited       += OnPluginGameExited;
         plugin.GoalCompleted    += OnPluginGoalCompleted;
+        // Rewards the game hands out itself. Wired on the AP path too, not
+        // only the standalone one: a game can deliver something without the
+        // server having routed it, and the Received tab should show it either
+        // way.
+        plugin.StandaloneItemReceived += OnStandaloneItemReceived;
         _runningPlugin = plugin;
 
-        // --- D2-specific pipe v2 extensions (assignment-style = idempotent) ---
-        if (plugin is Plugins.DiabloII.D2Plugin d2)
-        {
-            EnsureD2LocationNameMap();
-
-            // ITEM v2 sender names — the player map is UI-thread-only, so
-            // resolve via the dispatcher (items arrive on the AP receive loop).
-            d2.ResolvePlayerName = slot => Dispatcher.Invoke(() => ResolveApPlayerName(slot));
-
-            // Slot-data supplier — lets the plugin write ap_settings.dat
-            // BEFORE pushing STATE:CONNECTED (LoadAPSettings ordering).
-            d2.GetSlotData = () => _apClient?.SlotData;
-
-            // Seed-name supplier — the AP launch path derives a stable per-world
-            // seed from it for the data-file randomization (same-world reproducible).
-            d2.GetSeedName = () => _apClient?.SeedName;
-
-
-            // Post-attach resync — once the game's pipe connects, ask the AP
-            // server to resend the full item stream from index 0 so items the
-            // player received while still in the launcher (notably the
-            // precollected STARTING SKILLS) reach the DLL.
-            // earlier because the pipe wasn't connected yet.
-            d2.RequestApResync = () => _apClient?.SyncAsync() ?? Task.CompletedTask;
-
-            // --- Gate-key locator ---
-            // Lets the in-game tracker name the place a missing act key is
-            // sitting, instead of the player reading a spoiler file.
-            // create_as_hint stays 0: a free scout, never the player's points.
-            d2.RequestLocationScouts = ids =>
-                _apClient?.LocationScoutsAsync(ids, createAsHint: 0)
-                ?? Task.CompletedTask;
-
-            d2.GetOwnSlot = () => _apClient?.Slot ?? -1;
-
-            d2.GetCheckedLocations = () => Dispatcher.Invoke(
-                () => _locationTracker.GetCheckedIdSet().ToArray());
-
-            // Only unchecked locations can still be holding a key, so scouting
-            // the rest would be wasted traffic and a bigger self-spoiler.
-            d2.GetUncheckedLocations = () => Dispatcher.Invoke(() =>
-            {
-                var done = _locationTracker.GetCheckedIdSet();
-                return _locationTracker.GetAllIds()
-                                       .Where(id => !done.Contains(id))
-                                       .ToArray();
-            });
-
-            d2.ResolveLocationName = D2ResolveLocationName;
-
-            if (_apClient != null)
-            {
-                _apClient.LocationInfoReceived -= d2.OnLocationInfo;
-                _apClient.LocationInfoReceived += d2.OnLocationInfo;
-            }
-
-            // Standalone "Received" — NAMED handler, -= before += (the old
-            // inline lambda could never be unsubscribed, so N launches stacked
-            // N duplicate recordings; and pure-standalone runs never wired it
-            // at all — it now lives in the standalone launch path too).
-            d2.StandaloneItemReceived -= OnStandaloneItemReceived;
-            d2.StandaloneItemReceived += OnStandaloneItemReceived;
-
-            // DeathLink send-side: in-game death → AP Bounce, only when opted in.
-            d2.OnPlayerDied = cause =>
-            {
-                if (_apClient?.DeathLinkEnabled == true)
-                {
-                    _ = _apClient.SendDeathLinkAsync(
-                        string.IsNullOrWhiteSpace(cause) ? "died" : cause);
-                    // Achievement ladder: a death actually shared with the pack.
-                    AchievementStore.Instance.IncrementCounter(
-                        plugin.GameId, AchievementCounters.DeathsShared);
-                }
-            };
-        }
+        // --- Hand the game the live connection ---
+        //
+        // One object, not eleven assignments in an `if (plugin is D2Plugin)`
+        // block. What the game does with it is the game's business; the
+        // launcher's business ends at owning the socket.
+        _apServices?.Detach();
+        _apServices = _apClient == null ? null : new ApServices(
+            _apClient, Dispatcher, _locationTracker,
+            ResolveApPlayerName, plugin.GameId);
+        plugin.OnApServicesAttached(_apServices);
 
         // --- Emulated-game bridge suppliers (assignment-style = idempotent) ---
         // The Lua game modules need multiworld context the pipe protocol
@@ -9849,21 +8051,12 @@ public partial class MainWindow : Window
             var playToken = _playCts?.Token ?? CancellationToken.None;
             SetStatus("Verifying install...");
             AppendLog("[Verify] Checking install integrity...");
-            if (plugin is Plugins.DiabloII.D2Plugin d2VerifyPlay)
-                await VerifyAndRepairD2Async(d2VerifyPlay, playToken);
-            else
-            {
-                bool ok = await plugin.VerifyInstallAsync(playToken);
-                AppendLog(ok ? "[Verify] OK — all files present and correct size."
-                            : "[Verify] WARNING: some files may be missing or corrupted. Consider re-installing.");
-            }
+            await VerifyAndRepairAsync(plugin, playToken);
 
-            // Slot-data hand-off: write ap_settings.dat BEFORE the game starts
-            // so characters created this session bake the multiworld seed's
-            // settings, not the local d2arch.ini fallback.
-            if (plugin is Plugins.DiabloII.D2Plugin d2Pre &&
-                _apClient?.SlotData is JsonElement preSd)
-                d2Pre.WriteApSettingsFile(preSd);
+            // Slot-data hand-off BEFORE the game starts, so anything the
+            // game writes from it is on disk before it reads it back.
+            if (_apClient?.SlotData is JsonElement preSd)
+                plugin.OnSlotData(preSd);
 
             // --- ROM safety net ---
             // If an emulated game can't find the correct ROM (none imported, or
@@ -9970,7 +8163,7 @@ public partial class MainWindow : Window
             // already offered this session), show the real error in a dialog —
             // the standalone path already does; without this, the T9 loop-breaker
             // routed users to a silent log line they never saw.
-            if (!await TryOfferDefenderExclusionAsync(plugin, ex))
+            if (!await plugin.TryHandleAntivirusBlockAsync(this, ex))
             {
                 try
                 {
@@ -10875,25 +9068,6 @@ public partial class MainWindow : Window
                 sb.AppendLine($"{p.GameId,-22} running={p.IsRunning,-5} " +
                               $"version={p.InstalledVersion ?? "-"}");
         }
-        // List catalog entries that have no AP-world credit — helps identify
-        // games that need an AP author attributed (M-9).
-        if (_catalogEntries?.Count > 0)
-        {
-            var missingApAuthor = _catalogEntries
-                .Where(e => !e.Credits.Any(c =>
-                    c.Role.Contains("AP", StringComparison.OrdinalIgnoreCase) ||
-                    c.Role.Contains("world", StringComparison.OrdinalIgnoreCase)))
-                .OrderBy(e => e.DisplayName)
-                .ToList();
-            if (missingApAuthor.Count > 0)
-            {
-                sb.AppendLine();
-                sb.AppendLine($"--- Catalog entries missing AP world credit ({missingApAuthor.Count}) ---");
-                foreach (var e in missingApAuthor)
-                    sb.AppendLine($"  {e.Id,-30} {e.DisplayName}");
-            }
-        }
-
         sb.AppendLine();
         sb.AppendLine($"--- Last {_diagLogBuffer.Count} log lines ---");
         foreach (var line in _diagLogBuffer)
@@ -10955,7 +9129,7 @@ public partial class MainWindow : Window
         _lastApState = state;
         // Connecting arms the Map tab's hint/cheat buttons; disconnecting hides
         // them again, which is the honest state — they are server commands.
-        PushD2ApContext();
+        PushApSessionContext();
 
         // --- Status bar (bottom-right) ---
         TxtApState.Text = state switch
@@ -11296,14 +9470,7 @@ public partial class MainWindow : Window
         try { _trayIcon.Dispose(); } catch { }
         _shutdownComplete = true;
 
-        // The window can already be tearing down if app shutdown was initiated
-        // elsewhere (OS logoff, Application.Shutdown, tray "Exit") WHILE our async
-        // teardown was awaiting above — calling Close() then throws
-        // "...while a Window is closing".
-        // already on its way out, which is exactly the end state we wanted.
-        // method is fire-and-forget (OnClosing can't await), so any throw here
-        // becomes an unobserved task exception that the finalizer rethrows and
-        // crashes the process on exit.
+        // The window may already be tearing down — every UI touch here is guarded.
         try { Close(); }
         catch (InvalidOperationException) { /* window already closing — done */ }
     }
@@ -11539,9 +9706,6 @@ public partial class MainWindow : Window
         // Hide getting-started card once the user has installed games
         HomeGetStartedSection.Visibility = installed.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
 
-        // Update browse-all label with live count
-        int total = GameRegistry.All.Count();
-        BtnHomeBrowseAll.Content = $"Browse all {total} games →";
     }
 
     private Border BuildHomeRecentCard(IGamePlugin plugin)
@@ -11617,13 +9781,14 @@ public partial class MainWindow : Window
 
     private void StepPickGame_Click(object sender, MouseButtonEventArgs e)
     {
-        // Do-the-thing: open the first library game, or Browse when empty.
+        // Do-the-thing: open the first library game, or — with nothing in
+        // the library — the only step that can fill it.
         var firstId = LibraryStore.GetSortedGameIds().FirstOrDefault();
         var plugin  = firstId != null
             ? GameRegistry.All.FirstOrDefault(p => p.GameId == firstId)
             : null;
         if (plugin != null) SelectGame(plugin);
-        else                BtnBrowse_Click(sender, new RoutedEventArgs());
+        else                BtnAddPlugin_Click(sender, new RoutedEventArgs());
     }
 
     private void StepInstall_Click(object sender, MouseButtonEventArgs e)
@@ -11881,11 +10046,6 @@ public partial class MainWindow : Window
                 ShortcutsOverlay.Visibility = Visibility.Collapsed;
                 e.Handled = true;
             }
-            else if (PanelCatalogDetail.Visibility == Visibility.Visible)
-            {
-                PanelCatalogDetail.Visibility = Visibility.Collapsed;
-                e.Handled = true;
-            }
             return;
         }
 
@@ -11933,12 +10093,11 @@ public partial class MainWindow : Window
         }
     }
 
-    // Bring the game page to the front (over Browse/Achievements/empty state)
+    // Bring the game page to the front (over Achievements/empty state)
     // and switch tab.
     private void OpenGameTab(PageTab tab)
     {
         if (_selectedPlugin == null) return;
-        PanelBrowse.Visibility       = Visibility.Collapsed;
         PanelAchievements.Visibility = Visibility.Collapsed;
         PanelEmpty.Visibility        = Visibility.Collapsed;
         PanelGame.Visibility         = Visibility.Visible;
@@ -11996,9 +10155,9 @@ public partial class MainWindow : Window
                 plugin.DisplayName, plugin.Subtitle, hint, () => SelectGame(captured)));
         }
 
-        list.Add(new QuickSwitchEntry("Browse Games",
-            "Open the Archipelago game catalog", "Action",
-            () => BtnBrowse_Click(this, new RoutedEventArgs())));
+        list.Add(new QuickSwitchEntry("Add plugin",
+            "Add a game to the launcher from a plugin file", "Action",
+            () => BtnAddPlugin_Click(this, new RoutedEventArgs())));
         list.Add(new QuickSwitchEntry("Achievements",
             "Every trophy across all games", "Action",
             () => ShowAchievementsPage()));
