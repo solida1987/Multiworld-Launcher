@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Gate: a .londonplugin must actually load.                             -->
+  <!--                                                                       -->
+  <!-- Everything else about a plugin can be checked by reading files. This   -->
+  <!-- cannot: whether the plugin's IGamePlugin is the SAME type as the       -->
+  <!-- launcher's only shows up when the cast runs. A plugin that carries its -->
+  <!-- own copy of the launcher assembly compiles, packages, installs, and    -->
+  <!-- then fails to cast with a message saying the type does not implement   -->
+  <!-- an interface it visibly implements.                                    -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <RootNamespace>LauncherV2.Tools.PluginCheck</RootNamespace>
+    <AssemblyName>PluginCheck</AssemblyName>
+
+    <!-- The launcher publishes self-contained, and a self-contained exe can    -->
+    <!-- only be referenced by another one (NETSDK1151). Matching it here also  -->
+    <!-- means this gate runs against the same runtime the players get.         -->
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\LauncherV2.csproj" />
+  </ItemGroup>
+
+</Project>
