@@ -1,0 +1,1038 @@
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- oot.lua — game module for the Archipelago BizHawk connector.
+--           The Legend of Zelda: Ocarina of Time (Nintendo 64) — "Ocarina of Time"
+--
+-- STATUS: location DETECTION + goal are REAL and SOURCE-DERIVED from the OFFICIAL
+-- AP-main world worlds/oot (ArchipelagoMW/Archipelago, world_version 7.0.0,
+-- archipelago.json game "Ocarina of Time", minimum_ap_version 0.6.4) and its
+-- BizHawk N64 connector data/lua/connector_oot.lua (script_version 3). The
+-- 637-entry location table was GENERATED, not hand-copied:
+--   • the AP location ids come from the world's OWN id algorithm in
+--     worlds/oot/Location.py (location_id_offset 67000, the loctypes_70 /
+--     locnames_pre_70 stable-sort, non_indexed types dropped) — i.e. exactly the
+--     network_data_package["games"]["Ocarina of Time"]["location_name_to_id"] the
+--     real OoTClient.py resolves check NAMES against; and
+--   • each location's flag-read recipe is taken verbatim from connector_oot.lua's
+--     read_*_checks helpers (scene_check / skulltula_check / event_check /
+--     item_get_info_check / info_table_check / shop_check / boss_item_check /
+--     big_poe / big_goron_sword / fishing / membership), mind N64 big-endian.
+-- Loads crash-free on any ROM; self-disables until a loaded OoT save context is
+-- present (no phantom checks on the title screen / a non-OoT cartridge).
+--
+-- MEMORY MODEL (BizHawk N64 "RDRAM" domain — matches connector_oot.lua)
+-- ──────────────────────────────────────────────────────────────────────────
+--   connector_oot.lua reads N64 work RAM through BizHawk's `mainmemory` (== the
+--   "RDRAM" Lua memory domain), with every offset measured from N64 RAM start and
+--   every multi-byte field read big-endian (mainmemory.read_u16_be / read_u32_be).
+--   This module reads the SAME "RDRAM" domain and assembles u16/u32 big-endian
+--   from read_u8 (byte at the lowest address = most-significant), so it never
+--   depends on a core's read_u16/u32 endianness. Single-byte flag reads need no
+--   byte order. (Same approach as the shipped cv64 / banjo_tooie N64 modules.)
+--
+--   SAVE CONTEXT (connector_oot.lua, exact — all relative to RAM start):
+--     save_context        = 0x11A5D0
+--     equipment           = save + 0x070  (0x11A640)  u32  (Biggoron sword = bit 0x8)
+--     shop_context        = save + 0x5B4  (0x11AB84)  u32  (bit shop*4+item)
+--     scene_flags         = save + 0x0D4  (0x11A6A4)  Array, 0x1C bytes / scene;
+--                             chests @ +0x0 (u32), collectibles/freestanding @ +0xC
+--                             (u32), scrubs @ +0x10 (u32) — all big-endian
+--     skulltula_flags     = save + 0xE9C  (0x11B46C)  u8 array, scene REMAPPED by
+--                             (i+3) - 2*(i%4)
+--     big_poe_points      = save + 0xEBC  (0x11B48C)  u32  (>= 100*NUM_BIG_POES)
+--     event_context       = save + 0xED4  (0x11B4A4)  u16 rows: read_u16_be(+2*major)
+--     fishing_context     = save + 0xEC0  (0x11B490)  u32  (child bit 10 / adult 11)
+--     item_get_inf        = save + 0xEF0  (0x11B4C0)  u8 array
+--     inf_table           = save + 0xEF8  (0x11B4C8)  u8 array
+--   Bits are LSB-first (connector uses bit.check(value, pos) → (value>>pos)&1).
+--
+--   THE TABLES (generated): a location id maps to ONE recipe; six compact per-kind
+--   tables (SCENE / SKULL / EVENT / ITEMGOT / INFTAB / SHOP) plus a SPECIAL list
+--   (Biggoron, 10 Big Poes, child/adult fishing, Gerudo membership card, and the
+--   three Deku-Scrub locations whose connector formula is `flag OR scrub_sanity`,
+--   carried as an OR list). Vanilla AND Master-Quest dungeon-chest names are BOTH
+--   present, each keyed by its own id; the server's location set gates which apply
+--   (wanted()), so the runtime Master-Quest table the connector consults is not
+--   needed for read-only detection (a name absent from the seed is never reported).
+--
+--   NOT MODELLED (by design, read-only): connector_oot.lua also has an INSTANT
+--   path that reads-then-ZEROES a volatile scratch buffer at 0x40002C
+--   (check_temp_context) to report a check a frame or two before it lands in the
+--   save, and a slot-data-driven collectible/pot/crate path (collectibleOverrides
+--   / collectibleOffsets) that pointer-chases the rando context. Both REQUIRE
+--   writing RAM (zeroing the scratch, or are keyed by slot_data the launcher does
+--   not forward into this read-only module), and a wrong RDRAM write corrupts the
+--   live game — so this module reads ONLY the permanent save-context side of every
+--   check (the left operand of each `... or check_temp_context(...)`). Every such
+--   check is still detected the moment the game writes it to the save (zone reload
+--   / save), only a handful of frames later than the connector's scratch peek. The
+--   pot/crate/beehive "collectible" locations (the world's 7.0 additions) are not
+--   in this table; they are the documented coverage gap.
+--
+--   GOAL (connector_oot.lua is_game_complete, exact): read_u32_be(0x1CA208) is a
+--   pointer to the current scene; the game is complete when it equals
+--     0x80383C10  (credits pointer set by a completed Triforce Hunt) OR
+--     0x80382720  (the Ganon-defeated cutscene pointer).
+--   Either is the win — Ganon defeated or Triforce Hunt fulfilled.
+--
+--   LOADED GATE (connector_oot.lua InSafeState / get_current_game_mode): the
+--   connector only scans while the game is in a "loaded" mode (Normal Gameplay /
+--   Cutscene / Paused / Dying). Pure-Lua we cannot perfectly reproduce that mode
+--   machine without the rando-context pointer chase, so we gate conservatively on
+--   the save context looking live: max_health (save+0x2E) is a sane non-zero value
+--   and >= cur_health (save+0x30). On the title / file-select screen the save
+--   struct is zeroed, so this never reports phantom checks; once a file is loaded
+--   it is true. (Goal does not use this gate — it reads the scene pointer directly,
+--   exactly like the connector.)
+--
+-- WHAT THIS DOES
+--   • poll(): once a loaded save context is detected, evaluate every known
+--     location id by its recipe → AP location ids, gated to the slot's server set.
+--   • is_goal_complete(): scene pointer == Triforce-Hunt-credits OR Ganon-defeated.
+--   • receive_item(): NO-OP (documented). items_handling = 0b001 (full LOCAL) — the
+--     AP-patched OoT ROM grants its OWN found items, so a solo seed plays fully and
+--     every check is reported. Delivering REMOTE multiworld items is the connector's
+--     guarded RDRAM write path (coop_context incoming_item/player handshake +
+--     internal received-item counter at save+0x90, with deathlink kill writes); that
+--     write path needs in-emulator verification before it is wired, so it is left
+--     out rather than shipped unverified (a wrong RDRAM write corrupts the save).
+--
+-- MODULE CONTRACT (called by bizhawk_ap_connector.lua)
+--   M.init(ctx) / M.poll() -> {ids} / M.is_goal_complete() -> bool /
+--   M.receive_item(item_id, meta)
+-- ═══════════════════════════════════════════════════════════════════════════════
+
+local M = {}
+M.name = "oot"
+
+local ADDRESSES_VERIFIED = true   -- tables generated from worlds/oot + connector_oot.lua
+
+-- ── Memory domain (BizHawk N64) ───────────────────────────────────────────────
+local RDRAM = "RDRAM"   -- console work RAM (the OoT save context lives here)
+
+-- ── Save-context offsets (connector_oot.lua, exact — from N64 RAM start) ───────
+local SAVE_CONTEXT   = 0x11A5D0
+local EQUIPMENT      = SAVE_CONTEXT + 0x070   -- u32 (Biggoron sword bit 0x8)
+local SHOP_CONTEXT   = SAVE_CONTEXT + 0x5B4   -- u32
+local SCENE_FLAGS    = SAVE_CONTEXT + 0x0D4   -- 0x1C bytes per scene
+local SKULLTULA_FLAGS= SAVE_CONTEXT + 0xE9C   -- u8 array (scene remapped)
+local BIG_POE_POINTS = SAVE_CONTEXT + 0xEBC   -- u32
+local EVENT_CONTEXT  = SAVE_CONTEXT + 0xED4   -- u16 rows
+local FISHING_CONTEXT= SAVE_CONTEXT + 0xEC0   -- u32
+local ITEM_GET_INF   = SAVE_CONTEXT + 0xEF0   -- u8 array
+local INF_TABLE      = SAVE_CONTEXT + 0xEF8   -- u8 array
+
+local SCENE_STRIDE   = 0x1C
+local NUM_BIG_POES_REQUIRED = 10   -- connector reads this from the rando ROM context
+                                   -- (default 10); the 100x threshold is 1000.
+
+-- Loaded-gate fields
+local MAX_HEALTH_ADDR = SAVE_CONTEXT + 0x2E   -- u16
+local CUR_HEALTH_ADDR = SAVE_CONTEXT + 0x30   -- u16
+local MAX_HEALTH_SANE = 0x1400                 -- 20 hearts * 0x10 per heart * (cap guard)
+
+-- Goal (connector_oot.lua is_game_complete)
+local SCENE_POINTER_ADDR     = 0x1CA208
+local GOAL_TRIFORCE_HUNT_PTR = 0x80383C10
+local GOAL_GANON_DEFEAT_PTR  = 0x80382720
+
+-- ╔═══════════════════════════════════════════════════════════════════════════╗
+-- BEGIN GENERATED TABLES (gen_lua_table.py) — DO NOT EDIT BY HAND
+-- 637 locations from worlds/oot LocationList.py (authoritative
+-- location_name_to_id) x connector_oot.lua permanent-flag formulas.
+local SCENE = {   -- [ap_id]={scene, dataoff, bit}  -> u32_be(scene_flags+0x1C*scene+off)
+  [67022]={0x28,0x0,0x0},
+  [67023]={0x28,0x0,0x1},
+  [67024]={0x28,0x0,0x2},
+  [67025]={0x28,0x0,0x3},
+  [67026]={0x55,0x0,0x0},
+  [67027]={0x3E,0x0,0xC},
+  [67028]={0x34,0xC,0x18},
+  [67043]={0x3E,0x0,0x14},
+  [67048]={0x5B,0x10,0x2},
+  [67049]={0x5B,0x10,0x1},
+  [67051]={0x1F,0x10,0x4},
+  [67055]={0x3E,0x0,0x11},
+  [67056]={0x18,0x10,0x9},
+  [67057]={0x18,0x10,0x8},
+  [67060]={0x3E,0x0,0x0},
+  [67061]={0x3E,0xC,0x1},
+  [67062]={0x3E,0x0,0x2},
+  [67063]={0x3E,0x0,0x3},
+  [67065]={0x3E,0xC,0x19},
+  [67107]={0x4C,0xC,0x1},
+  [67108]={0x26,0x10,0x1},
+  [67109]={0x26,0x10,0x4},
+  [67110]={0x26,0x10,0x6},
+  [67111]={0x36,0xC,0x18},
+  [67112]={0x36,0xC,0x19},
+  [67113]={0x4C,0xC,0x19},
+  [67114]={0x4C,0xC,0x18},
+  [67121]={0x37,0xC,0x1},
+  [67122]={0x48,0xC,0x1},
+  [67124]={0x3E,0x0,0x8},
+  [67125]={0x3E,0x0,0xA},
+  [67132]={0x37,0xC,0x18},
+  [67155]={0x40,0x0,0x0},
+  [67156]={0x3F,0x0,0x0},
+  [67157]={0x41,0x0,0x0},
+  [67158]={0x53,0xC,0x4},
+  [67159]={0x53,0xC,0x8},
+  [67160]={0x48,0x0,0x0},
+  [67161]={0x48,0xC,0x7},
+  [67164]={0x60,0xC,0x1E},
+  [67165]={0x60,0x0,0x1},
+  [67166]={0x3E,0x0,0x17},
+  [67167]={0x3B,0x4,0x18},
+  [67169]={0x3E,0xC,0x18},
+  [67175]={0x62,0xC,0x1F},
+  [67178]={0x62,0xC,0x1},
+  [67179]={0x62,0x0,0x0},
+  [67180]={0x62,0x0,0x1},
+  [67181]={0x62,0x0,0x2},
+  [67182]={0x25,0x10,0x1},
+  [67183]={0x25,0x10,0x4},
+  [67184]={0x25,0x10,0x6},
+  [67195]={0x61,0xC,0x8},
+  [67196]={0x61,0xC,0x2},
+  [67197]={0x3E,0x0,0x1A},
+  [67198]={0x3B,0x4,0x10},
+  [67199]={0x61,0x10,0x6},
+  [67200]={0x23,0x10,0x1},
+  [67201]={0x23,0x10,0x4},
+  [67202]={0x23,0x10,0x6},
+  [67205]={0x54,0xC,0x1},
+  [67206]={0x3E,0x0,0x9},
+  [67209]={0x54,0xC,0x4},
+  [67210]={0x54,0xC,0xB},
+  [67211]={0x15,0x10,0x9},
+  [67212]={0x15,0x10,0x8},
+  [67218]={0x58,0x0,0x0},
+  [67230]={0x59,0xC,0x1},
+  [67231]={0x59,0xC,0x14},
+  [67239]={0x57,0xC,0x1E},
+  [67240]={0x57,0x0,0x0},
+  [67241]={0x19,0x10,0x1},
+  [67242]={0x19,0x10,0x4},
+  [67243]={0x19,0x10,0x6},
+  [67249]={0x5A,0xC,0x2},
+  [67250]={0x5A,0xC,0x1},
+  [67251]={0x5A,0x0,0x0},
+  [67252]={0x1A,0x10,0x9},
+  [67253]={0x1A,0x10,0x8},
+  [67254]={0x5A,0xC,0x18},
+  [67259]={0x5D,0x0,0x0},
+  [67264]={0xC,0xC,0xC},
+  [67265]={0xC,0xC,0xF},
+  [67266]={0xC,0xC,0xA},
+  [67267]={0xC,0xC,0xE},
+  [67269]={0x5E,0xC,0x1},
+  [67270]={0x5E,0x0,0x0},
+  [67273]={0x5C,0xC,0xD},
+  [67274]={0x27,0x10,0x9},
+  [67275]={0x27,0x10,0x8},
+  [67279]={0x3B,0x4,0x8},
+  [67281]={0x0,0x0,0x3},
+  [67282]={0x0,0x0,0x5},
+  [67283]={0x0,0x0,0x1},
+  [67284]={0x0,0x0,0x2},
+  [67285]={0x0,0x0,0x6},
+  [67286]={0x0,0x0,0x4},
+  [67291]={0x0,0x0,0x3},
+  [67292]={0x0,0x0,0x6},
+  [67293]={0x0,0x0,0x2},
+  [67294]={0x0,0x0,0x1},
+  [67295]={0x0,0x0,0x4},
+  [67296]={0x0,0x0,0x5},
+  [67297]={0x0,0x0,0x0},
+  [67298]={0x0,0x10,0x5},
+  [67303]={0x11,0xC,0x1F},
+  [67304]={0x1,0x0,0x8},
+  [67305]={0x1,0x0,0x5},
+  [67306]={0x1,0x0,0x6},
+  [67307]={0x1,0x0,0x4},
+  [67308]={0x1,0x0,0xA},
+  [67309]={0x1,0x10,0x2},
+  [67310]={0x1,0x10,0x5},
+  [67311]={0x1,0x10,0x1},
+  [67312]={0x1,0x10,0x4},
+  [67318]={0x1,0x0,0x0},
+  [67319]={0x1,0x0,0x4},
+  [67320]={0x1,0x0,0x3},
+  [67321]={0x1,0x0,0x2},
+  [67322]={0x1,0x0,0x5},
+  [67323]={0x1,0x0,0x1},
+  [67324]={0x1,0x10,0x4},
+  [67325]={0x1,0x10,0x2},
+  [67326]={0x1,0x10,0x8},
+  [67327]={0x1,0x10,0x5},
+  [67333]={0x12,0x0,0x0},
+  [67334]={0x12,0xC,0x1F},
+  [67335]={0x2,0x0,0x1},
+  [67336]={0x2,0x0,0x2},
+  [67337]={0x2,0x0,0x4},
+  [67338]={0x2,0x10,0x1},
+  [67343]={0x2,0x0,0x3},
+  [67344]={0x2,0x0,0x5},
+  [67345]={0x2,0x0,0x2},
+  [67346]={0x2,0x0,0x0},
+  [67347]={0x2,0x0,0x8},
+  [67348]={0x2,0x0,0x4},
+  [67349]={0x2,0x0,0x1},
+  [67350]={0x2,0x0,0x6},
+  [67351]={0x2,0x0,0x9},
+  [67352]={0x2,0x0,0x7},
+  [67353]={0x2,0x0,0xA},
+  [67354]={0x2,0xC,0x18},
+  [67359]={0x13,0xC,0x1F},
+  [67360]={0x8,0x0,0x8},
+  [67361]={0x8,0x0,0x2},
+  [67362]={0x8,0x0,0x4},
+  [67363]={0x8,0x0,0x9},
+  [67364]={0x8,0xC,0x1},
+  [67365]={0x8,0x0,0x1},
+  [67366]={0x8,0x0,0xE},
+  [67367]={0x8,0x0,0x5},
+  [67368]={0x8,0x0,0xA},
+  [67369]={0x8,0x0,0xC},
+  [67370]={0x8,0x0,0x7},
+  [67371]={0x8,0x0,0x10},
+  [67372]={0x8,0x0,0x14},
+  [67373]={0x8,0x0,0x3},
+  [67377]={0x8,0x0,0x3},
+  [67378]={0x8,0xC,0x1},
+  [67379]={0x8,0x0,0x2},
+  [67380]={0x8,0xC,0x2},
+  [67381]={0x8,0x0,0x1},
+  [67385]={0x3,0x0,0x3},
+  [67386]={0x3,0x0,0x0},
+  [67387]={0x3,0x0,0x5},
+  [67388]={0x3,0x0,0x1},
+  [67389]={0x3,0x0,0x9},
+  [67390]={0x3,0x0,0x4},
+  [67391]={0x3,0x0,0xE},
+  [67392]={0x3,0x0,0x2},
+  [67393]={0x3,0x0,0xD},
+  [67394]={0x3,0x0,0xC},
+  [67395]={0x3,0x0,0xF},
+  [67396]={0x3,0x0,0x7},
+  [67397]={0x3,0x0,0xB},
+  [67403]={0x3,0x0,0x3},
+  [67404]={0x3,0x0,0x0},
+  [67405]={0x3,0x0,0x9},
+  [67406]={0x3,0x0,0x1},
+  [67407]={0x3,0x0,0x5},
+  [67408]={0x3,0x0,0xE},
+  [67409]={0x3,0x0,0x2},
+  [67410]={0x3,0x0,0xD},
+  [67411]={0x3,0x0,0xC},
+  [67412]={0x3,0x0,0xF},
+  [67413]={0x3,0x0,0x6},
+  [67414]={0x3,0x0,0xB},
+  [67420]={0x14,0xC,0x1F},
+  [67421]={0x4,0x0,0x1},
+  [67422]={0x4,0x0,0x0},
+  [67423]={0x4,0x0,0xC},
+  [67424]={0x4,0x0,0x4},
+  [67425]={0x4,0x0,0x2},
+  [67426]={0x4,0x0,0x3},
+  [67427]={0x4,0x0,0x8},
+  [67428]={0x4,0x0,0xA},
+  [67429]={0x4,0x0,0xB},
+  [67430]={0x4,0x0,0x6},
+  [67431]={0x4,0x0,0xD},
+  [67432]={0x4,0x0,0x7},
+  [67433]={0x4,0x0,0x5},
+  [67434]={0x4,0x0,0x9},
+  [67440]={0x4,0x0,0x2},
+  [67441]={0x4,0x0,0x0},
+  [67442]={0x4,0x0,0xC},
+  [67443]={0x4,0x0,0x7},
+  [67444]={0x4,0x0,0x1},
+  [67445]={0x4,0x0,0x4},
+  [67446]={0x4,0x0,0x8},
+  [67447]={0x4,0x0,0xB},
+  [67448]={0x4,0x0,0x6},
+  [67449]={0x4,0x0,0x3},
+  [67450]={0x4,0xC,0x1C},
+  [67451]={0x4,0x0,0x5},
+  [67457]={0x15,0xC,0x1F},
+  [67458]={0x5,0x0,0x9},
+  [67459]={0x5,0x0,0x2},
+  [67460]={0x5,0x0,0x0},
+  [67461]={0x5,0x0,0x1},
+  [67462]={0x5,0x0,0x5},
+  [67463]={0x5,0x0,0x6},
+  [67464]={0x5,0x0,0x8},
+  [67465]={0x5,0x0,0x7},
+  [67466]={0x5,0x0,0x3},
+  [67467]={0x5,0x0,0xA},
+  [67473]={0x5,0x0,0x0},
+  [67474]={0x5,0x0,0x2},
+  [67475]={0x5,0x0,0x1},
+  [67476]={0x5,0x0,0x6},
+  [67477]={0x5,0x0,0x5},
+  [67478]={0x5,0xC,0x1},
+  [67484]={0x16,0xC,0x1F},
+  [67485]={0x7,0x0,0x1},
+  [67486]={0x7,0x0,0x7},
+  [67487]={0x7,0x0,0x3},
+  [67488]={0x7,0x0,0x2},
+  [67489]={0x7,0x0,0xC},
+  [67490]={0x7,0x0,0x16},
+  [67491]={0x7,0x0,0x5},
+  [67492]={0x7,0x0,0x6},
+  [67493]={0x7,0x0,0x4},
+  [67494]={0x7,0x0,0x9},
+  [67495]={0x7,0xC,0x1},
+  [67496]={0x7,0x0,0x15},
+  [67497]={0x7,0x0,0x8},
+  [67498]={0x7,0x0,0x14},
+  [67499]={0x7,0x0,0xA},
+  [67500]={0x7,0x0,0xB},
+  [67501]={0x7,0x0,0xD},
+  [67507]={0x7,0x0,0x3},
+  [67508]={0x7,0x0,0x2},
+  [67509]={0x7,0x0,0xE},
+  [67510]={0x7,0x0,0x1},
+  [67511]={0x7,0x0,0x7},
+  [67512]={0x7,0x0,0x16},
+  [67513]={0x7,0x0,0xC},
+  [67514]={0x7,0x0,0xF},
+  [67515]={0x7,0x0,0x5},
+  [67516]={0x7,0x0,0x6},
+  [67517]={0x7,0x0,0x4},
+  [67518]={0x7,0x0,0x9},
+  [67519]={0x7,0x0,0x10},
+  [67520]={0x7,0x0,0x15},
+  [67521]={0x7,0x0,0x14},
+  [67522]={0x7,0x0,0x8},
+  [67523]={0x7,0x0,0xB},
+  [67524]={0x7,0x0,0xA},
+  [67525]={0x7,0xC,0x6},
+  [67526]={0x7,0x0,0xD},
+  [67532]={0x18,0xC,0x1F},
+  [67533]={0x6,0x0,0x8},
+  [67534]={0x6,0x0,0x0},
+  [67535]={0x6,0x0,0x6},
+  [67536]={0x6,0x0,0xC},
+  [67537]={0x6,0x0,0x3},
+  [67538]={0x6,0x0,0x1},
+  [67539]={0x6,0x0,0x1A},
+  [67540]={0x6,0x0,0x1F},
+  [67541]={0x6,0x0,0x1B},
+  [67542]={0x6,0x0,0x1E},
+  [67543]={0x6,0x0,0x0},
+  [67544]={0x6,0x0,0x8},
+  [67545]={0x6,0x0,0x6},
+  [67546]={0x6,0x0,0xC},
+  [67547]={0x6,0x0,0x3},
+  [67548]={0x6,0x0,0x1C},
+  [67549]={0x6,0x0,0x1},
+  [67550]={0x5C,0x0,0xB},
+  [67551]={0x6,0x0,0x4},
+  [67552]={0x6,0x0,0x7},
+  [67553]={0x6,0x0,0xD},
+  [67554]={0x6,0x0,0xE},
+  [67555]={0x6,0x0,0xF},
+  [67556]={0x6,0x0,0x2},
+  [67557]={0x6,0x0,0x5},
+  [67558]={0x6,0x0,0x14},
+  [67559]={0x6,0x0,0x15},
+  [67560]={0x6,0x0,0x1D},
+  [67561]={0x6,0x0,0xF},
+  [67562]={0x6,0x0,0x2},
+  [67563]={0x6,0x0,0x4},
+  [67564]={0x6,0x0,0x7},
+  [67565]={0x6,0x0,0x19},
+  [67566]={0x6,0x0,0x18},
+  [67567]={0x6,0x0,0x5},
+  [67568]={0x5C,0x0,0x9},
+  [67569]={0x6,0x0,0xA},
+  [67570]={0x6,0x0,0x12},
+  [67571]={0x6,0x0,0x12},
+  [67582]={0x17,0xC,0x1F},
+  [67583]={0x9,0x0,0x0},
+  [67584]={0x9,0x0,0x1},
+  [67585]={0x9,0x0,0x2},
+  [67589]={0x9,0xC,0x1},
+  [67590]={0x9,0x0,0x1},
+  [67591]={0x9,0x0,0x0},
+  [67592]={0x9,0xC,0x1},
+  [67593]={0x9,0x0,0x2},
+  [67597]={0xB,0x0,0x13},
+  [67598]={0xB,0x0,0x7},
+  [67599]={0xB,0x0,0x0},
+  [67600]={0xB,0x0,0x11},
+  [67601]={0xB,0x0,0xF},
+  [67602]={0xB,0x0,0xE},
+  [67603]={0xB,0x0,0x14},
+  [67604]={0xB,0x0,0x2},
+  [67605]={0xB,0x0,0x3},
+  [67606]={0xB,0x0,0x4},
+  [67607]={0xB,0x0,0x12},
+  [67608]={0xB,0x0,0x10},
+  [67609]={0xB,0xC,0x1},
+  [67610]={0xB,0x0,0x5},
+  [67611]={0xB,0x0,0x8},
+  [67612]={0xB,0x0,0xD},
+  [67613]={0xB,0x0,0x1},
+  [67614]={0xB,0x0,0xB},
+  [67615]={0xB,0x0,0x6},
+  [67616]={0xB,0x0,0xA},
+  [67617]={0xB,0x0,0x9},
+  [67618]={0xB,0x0,0xC},
+  [67619]={0xB,0x0,0x13},
+  [67620]={0xB,0x0,0x7},
+  [67621]={0xB,0x0,0x0},
+  [67622]={0xB,0x0,0x11},
+  [67623]={0xB,0x0,0x2},
+  [67624]={0xB,0x0,0x3},
+  [67625]={0xB,0x0,0x4},
+  [67626]={0xB,0x0,0x12},
+  [67627]={0xB,0x0,0xE},
+  [67628]={0xB,0x0,0x5},
+  [67629]={0xB,0x0,0x8},
+  [67630]={0xB,0x0,0xD},
+  [67631]={0xB,0x0,0x1},
+  [67632]={0xB,0x0,0xB},
+  [67633]={0xB,0x0,0x6},
+  [67634]={0xB,0x0,0x9},
+  [67635]={0xB,0x0,0xA},
+  [67636]={0xD,0x0,0x9},
+  [67637]={0xD,0x0,0x7},
+  [67638]={0xD,0x0,0x6},
+  [67639]={0xD,0x0,0x8},
+  [67640]={0xD,0x0,0x5},
+  [67641]={0xD,0x0,0xC},
+  [67642]={0xD,0x0,0xB},
+  [67643]={0xD,0x0,0xD},
+  [67644]={0xD,0x0,0xE},
+  [67645]={0xD,0x0,0xA},
+  [67646]={0xD,0x0,0xF},
+  [67647]={0xD,0x0,0x10},
+  [67648]={0xD,0x0,0x11},
+  [67649]={0xD,0x0,0x12},
+  [67650]={0xD,0x0,0x14},
+  [67651]={0xD,0x10,0x9},
+  [67652]={0xD,0x10,0x6},
+  [67653]={0xD,0x10,0x4},
+  [67654]={0xD,0x10,0x8},
+  [67655]={0xD,0xC,0x1},
+  [67656]={0xD,0x0,0x2},
+  [67657]={0xD,0x0,0x3},
+  [67658]={0xD,0x0,0x1},
+  [67659]={0xD,0x0,0x0},
+  [67660]={0xD,0x0,0x5},
+  [67661]={0xD,0x0,0x4},
+  [67662]={0xD,0x0,0xA},
+  [67663]={0xD,0x0,0x14},
+  [67664]={0xD,0x0,0x9},
+  [67665]={0xD,0x0,0x8},
+  [67666]={0xD,0x0,0x7},
+  [67667]={0xD,0x0,0x6},
+  [67668]={0xD,0x10,0x9},
+  [67669]={0xD,0x10,0x6},
+  [67670]={0xD,0x10,0x4},
+  [67671]={0xD,0x10,0x8},
+  [67672]={0xD,0x10,0x1},
+  [67673]={0xA,0x0,0xB},
+  [67774]={0x2D,0xC,0x1},
+}
+local SKULL = {   -- [ap_id]={scene, bit}  -> u8(skulltula_flags+remap(scene))
+  [67029]={0xC,0x1},
+  [67030]={0xC,0x0},
+  [67031]={0xC,0x2},
+  [67052]={0xD,0x0},
+  [67053]={0xD,0x1},
+  [67054]={0xD,0x2},
+  [67058]={0xD,0x3},
+  [67066]={0xA,0x0},
+  [67067]={0xA,0x1},
+  [67075]={0xE,0x3},
+  [67104]={0xE,0x2},
+  [67105]={0xE,0x1},
+  [67115]={0xB,0x2},
+  [67116]={0xB,0x3},
+  [67117]={0xB,0x1},
+  [67118]={0xB,0x0},
+  [67133]={0x10,0x5},
+  [67134]={0x10,0x1},
+  [67135]={0x10,0x2},
+  [67136]={0x10,0x4},
+  [67137]={0x10,0x3},
+  [67138]={0x10,0x6},
+  [67162]={0x10,0x0},
+  [67163]={0x10,0x7},
+  [67170]={0xF,0x2},
+  [67171]={0xF,0x1},
+  [67172]={0xF,0x3},
+  [67173]={0xF,0x4},
+  [67185]={0xF,0x5},
+  [67186]={0xF,0x6},
+  [67203]={0xF,0x7},
+  [67204]={0xF,0x0},
+  [67213]={0x11,0x1},
+  [67214]={0x11,0x0},
+  [67215]={0x11,0x4},
+  [67216]={0x11,0x3},
+  [67220]={0x11,0x6},
+  [67232]={0x11,0x2},
+  [67233]={0x11,0x7},
+  [67234]={0x11,0x5},
+  [67244]={0x12,0x0},
+  [67245]={0x12,0x2},
+  [67246]={0x12,0x1},
+  [67247]={0x12,0x3},
+  [67248]={0x12,0x4},
+  [67255]={0x13,0x1},
+  [67256]={0x13,0x0},
+  [67257]={0x13,0x3},
+  [67258]={0x13,0x2},
+  [67262]={0x14,0x1},
+  [67263]={0x14,0x0},
+  [67271]={0x15,0x1},
+  [67276]={0x15,0x0},
+  [67277]={0x15,0x3},
+  [67278]={0x15,0x2},
+  [67280]={0xE,0x0},
+  [67287]={0x0,0x3},
+  [67288]={0x0,0x2},
+  [67289]={0x0,0x1},
+  [67290]={0x0,0x0},
+  [67299]={0x0,0x1},
+  [67300]={0x0,0x3},
+  [67301]={0x0,0x2},
+  [67302]={0x0,0x0},
+  [67313]={0x1,0x4},
+  [67314]={0x1,0x1},
+  [67315]={0x1,0x2},
+  [67316]={0x1,0x0},
+  [67317]={0x1,0x3},
+  [67328]={0x1,0x1},
+  [67329]={0x1,0x4},
+  [67330]={0x1,0x2},
+  [67331]={0x1,0x3},
+  [67332]={0x1,0x0},
+  [67339]={0x2,0x3},
+  [67340]={0x2,0x0},
+  [67341]={0x2,0x1},
+  [67342]={0x2,0x2},
+  [67355]={0x2,0x0},
+  [67356]={0x2,0x2},
+  [67357]={0x2,0x3},
+  [67358]={0x2,0x1},
+  [67374]={0x8,0x2},
+  [67375]={0x8,0x1},
+  [67376]={0x8,0x0},
+  [67382]={0x8,0x2},
+  [67383]={0x8,0x1},
+  [67384]={0x8,0x0},
+  [67398]={0x3,0x1},
+  [67399]={0x3,0x3},
+  [67400]={0x3,0x0},
+  [67401]={0x3,0x2},
+  [67402]={0x3,0x4},
+  [67415]={0x3,0x1},
+  [67416]={0x3,0x0},
+  [67417]={0x3,0x2},
+  [67418]={0x3,0x3},
+  [67419]={0x3,0x4},
+  [67435]={0x4,0x1},
+  [67436]={0x4,0x0},
+  [67437]={0x4,0x2},
+  [67438]={0x4,0x4},
+  [67439]={0x4,0x3},
+  [67452]={0x4,0x0},
+  [67453]={0x4,0x2},
+  [67454]={0x4,0x3},
+  [67455]={0x4,0x4},
+  [67456]={0x4,0x1},
+  [67468]={0x5,0x0},
+  [67469]={0x5,0x3},
+  [67470]={0x5,0x2},
+  [67471]={0x5,0x1},
+  [67472]={0x5,0x4},
+  [67479]={0x5,0x0},
+  [67480]={0x5,0x2},
+  [67481]={0x5,0x1},
+  [67482]={0x5,0x3},
+  [67483]={0x5,0x4},
+  [67502]={0x7,0x3},
+  [67503]={0x7,0x1},
+  [67504]={0x7,0x0},
+  [67505]={0x7,0x4},
+  [67506]={0x7,0x2},
+  [67527]={0x7,0x1},
+  [67528]={0x7,0x0},
+  [67529]={0x7,0x3},
+  [67530]={0x7,0x4},
+  [67531]={0x7,0x2},
+  [67572]={0x6,0x4},
+  [67573]={0x6,0x3},
+  [67574]={0x6,0x0},
+  [67575]={0x6,0x2},
+  [67576]={0x6,0x1},
+  [67577]={0x6,0x0},
+  [67578]={0x6,0x1},
+  [67579]={0x6,0x3},
+  [67580]={0x6,0x2},
+  [67581]={0x6,0x4},
+  [67586]={0x9,0x1},
+  [67587]={0x9,0x2},
+  [67588]={0x9,0x0},
+  [67594]={0x9,0x1},
+  [67595]={0x9,0x2},
+  [67596]={0x9,0x0},
+}
+local EVENT = {   -- [ap_id]={major, bit}  -> u16_be(event_ctx+2*major)
+  [67010]={0x5,0x9},
+  [67011]={0x5,0x8},
+  [67012]={0x5,0x7},
+  [67013]={0x5,0xA},
+  [67014]={0xA,0x9},
+  [67015]={0x5,0xB},
+  [67016]={0x5,0x0},
+  [67017]={0x5,0x1},
+  [67018]={0x5,0x2},
+  [67019]={0xA,0xC},
+  [67020]={0x5,0x4},
+  [67021]={0x5,0x5},
+  [67040]={0xC,0x1},
+  [67059]={0x4,0x3},
+  [67100]={0xC,0x4},
+  [67101]={0x1,0x2},
+  [67102]={0x4,0x0},
+  [67127]={0xD,0xA},
+  [67128]={0xD,0xB},
+  [67129]={0xD,0xC},
+  [67130]={0xD,0xD},
+  [67131]={0xD,0xE},
+  [67174]={0x3,0x6},
+  [67207]={0xD,0x6},
+  [67208]={0xD,0x0},
+  [67217]={0x3,0x8},
+  [67235]={0x3,0x1},
+  [67747]={0xD,0x1},
+  [67748]={0xD,0x2},
+  [67749]={0xD,0x4},
+  [67750]={0xD,0x3},
+  [67751]={0xD,0x5},
+}
+local ITEMGOT = { -- [ap_id]={off, bit}  -> u8(item_get_inf+off)
+  [67041]={0x3,0x7},
+  [67042]={0x2,0x5},
+  [67044]={0x2,0x6},
+  [67045]={0x2,0x7},
+  [67046]={0x3,0x6},
+  [67068]={0x0,0x5},
+  [67069]={0x3,0x1},
+  [67070]={0x3,0x2},
+  [67073]={0x2,0x3},
+  [67103]={0x2,0x1},
+  [67106]={0x1,0x2},
+  [67119]={0x0,0x4},
+  [67120]={0x4,0x4},
+  [67123]={0x3,0x5},
+  [67126]={0x0,0x6},
+  [67229]={0x2,0x0},
+  [67238]={0x3,0x0},
+  [67261]={0x0,0x7},
+  [67272]={0x2,0x2},
+}
+local INFTAB = {  -- [ap_id]={off, bit}  -> u8(inf_table+off)
+  [67072]={0x33,0x1},
+  [67176]={0x22,0x6},
+  [67177]={0x20,0x1},
+  [67219]={0x26,0x1},
+  [67260]={0x33,0x0},
+}
+local SHOP = {    -- [ap_id]={shop, item}  -> u32_be(shop_ctx) bit shop*4+item
+  [67036]={0x6,0x0},
+  [67037]={0x6,0x1},
+  [67038]={0x6,0x2},
+  [67039]={0x6,0x3},
+  [67080]={0x4,0x0},
+  [67081]={0x4,0x1},
+  [67082]={0x4,0x2},
+  [67083]={0x4,0x3},
+  [67088]={0x8,0x0},
+  [67089]={0x8,0x1},
+  [67090]={0x8,0x2},
+  [67091]={0x8,0x3},
+  [67096]={0x1,0x0},
+  [67097]={0x1,0x1},
+  [67098]={0x1,0x2},
+  [67099]={0x1,0x3},
+  [67143]={0x7,0x0},
+  [67144]={0x7,0x1},
+  [67145]={0x7,0x2},
+  [67146]={0x7,0x3},
+  [67151]={0x3,0x0},
+  [67152]={0x3,0x1},
+  [67153]={0x3,0x2},
+  [67154]={0x3,0x3},
+  [67191]={0x5,0x0},
+  [67192]={0x5,0x1},
+  [67193]={0x5,0x2},
+  [67194]={0x5,0x3},
+  [67225]={0x2,0x0},
+  [67226]={0x2,0x1},
+  [67227]={0x2,0x2},
+  [67228]={0x2,0x3},
+}
+local SPECIAL = { -- [ap_id]={ recipe, ... }  OR-combined; special kinds
+  [67047]={ {k='inftab',off=0x33,bit=0x2}, {k='scene',scene=0x5B,off=0x10,bit=0xA} },
+  [67050]={ {k='inftab',off=0x33,bit=0x3}, {k='scene',scene=0x1F,off=0x10,bit=0xB} },
+  [67064]={ {k='itemgot',off=0x0,bit=0x3}, {k='scene',scene=0x10,off=0x10,bit=0x3} },
+  [67074]={ {k='bigpoe'} },
+  [67168]={ {k='biggoron'} },
+  [67236]={ {k='fishing',adult=false} },
+  [67237]={ {k='fishing',adult=true} },
+  [67268]={ {k='membership'} },
+}
+-- END GENERATED TABLES
+-- ╚═══════════════════════════════════════════════════════════════════════════╝
+
+-- ── State ─────────────────────────────────────────────────────────────────────
+local reported         = {}     -- ap_id -> true once returned from poll()
+local server_locations = nil    -- set of ap_ids the server expects (nil = all)
+local mem              = {}
+local log_fn           = nil
+
+-- ── Logging ───────────────────────────────────────────────────────────────────
+local function log(msg)
+  if log_fn then pcall(log_fn, "[oot] " .. tostring(msg)) end
+end
+
+-- ── Memory API (resolved at init; 2-arg domain form + current-domain fallback) ─
+local function resolve_memory_api()
+  if not memory then return false end
+  mem.read_u8 = memory.read_u8 or memory.readbyte
+  return mem.read_u8 ~= nil
+end
+
+local function read_u8(addr, domain)
+  if not mem.read_u8 then return nil end
+  local ok, v = pcall(mem.read_u8, addr, domain)
+  if ok and type(v) == "number" then return v end
+  ok, v = pcall(mem.read_u8, addr)            -- older API: current domain
+  if ok and type(v) == "number" then return v end
+  return nil
+end
+
+-- N64 is BIG-ENDIAN: assemble multi-byte values most-significant byte first
+-- (byte at the LOWEST address is the high byte), matching connector_oot.lua's
+-- mainmemory.read_u16_be / read_u32_be. Built from read_u8 so we never depend on
+-- a core's read_u16/u32 endianness. Any failed byte → nil (retry next poll).
+local function read_u16_be(addr, domain)
+  local b0 = read_u8(addr,     domain)   -- high byte
+  local b1 = read_u8(addr + 1, domain)   -- low byte
+  if b0 == nil or b1 == nil then return nil end
+  return b0 * 0x100 + b1
+end
+
+local function read_u32_be(addr, domain)
+  local b0 = read_u8(addr,     domain)   -- most-significant
+  local b1 = read_u8(addr + 1, domain)
+  local b2 = read_u8(addr + 2, domain)
+  local b3 = read_u8(addr + 3, domain)   -- least-significant
+  if b0 == nil or b1 == nil or b2 == nil or b3 == nil then return nil end
+  return ((b0 * 0x1000000) + (b1 * 0x10000) + (b2 * 0x100) + b3)
+end
+
+-- bit.check(value, pos) — LSB-first: (value >> pos) & 1, arithmetic (no bit ops
+-- needed in 5.1 Lua; values fit in doubles). nil value → false.
+local function bit_check(value, pos)
+  if value == nil then return false end
+  return (math.floor(value / (2 ^ pos)) % 2) >= 1
+end
+
+-- ── Multiworld context ────────────────────────────────────────────────────────
+local function load_locations(ids)
+  if type(ids) ~= "table" then return end
+  server_locations = {}
+  local n = 0
+  for _, id in ipairs(ids) do
+    local v = tonumber(id)
+    if v then server_locations[v] = true; n = n + 1 end
+  end
+  log("server location set: " .. n .. " ids")
+end
+
+local function wanted(ap_id)
+  if server_locations == nil then return true end
+  return server_locations[ap_id] == true
+end
+
+-- ── Per-check evaluators (connector_oot.lua helpers, exact) ────────────────────
+-- scene_check(scene, bit, dataoff): bit.check(u32_be(scene_flags + 0x1C*scene + dataoff), bit)
+local function scene_eval(scene, off, b)
+  local v = read_u32_be(SCENE_FLAGS + SCENE_STRIDE * scene + off, RDRAM)
+  return bit_check(v, b)
+end
+
+-- skulltula_check(scene, bit): scene remapped by (i+3) - 2*(i%4), then a u8 read.
+local function skull_eval(scene, b)
+  local idx = (scene + 3) - 2 * (scene % 4)
+  local v = read_u8(SKULLTULA_FLAGS + idx, RDRAM)
+  return bit_check(v, b)
+end
+
+-- event_check(major, bit): bit.check(u16_be(event_ctx + 2*major), bit)
+local function event_eval(major, b)
+  local v = read_u16_be(EVENT_CONTEXT + 2 * major, RDRAM)
+  return bit_check(v, b)
+end
+
+local function itemgot_eval(off, b)
+  return bit_check(read_u8(ITEM_GET_INF + off, RDRAM), b)
+end
+
+local function inftab_eval(off, b)
+  return bit_check(read_u8(INF_TABLE + off, RDRAM), b)
+end
+
+-- shop_check(shop, item): bit.check(u32_be(shop_ctx), shop*4 + item)
+local function shop_eval(shop, item)
+  local v = read_u32_be(SHOP_CONTEXT, RDRAM)
+  return bit_check(v, shop * 4 + item)
+end
+
+local function biggoron_eval()
+  return bit_check(read_u32_be(EQUIPMENT, RDRAM), 0x8)
+end
+
+local function bigpoe_eval()
+  local v = read_u32_be(BIG_POE_POINTS, RDRAM)
+  return v ~= nil and v >= (100 * NUM_BIG_POES_REQUIRED)
+end
+
+local function fishing_eval(adult)
+  local v = read_u32_be(FISHING_CONTEXT, RDRAM)
+  return bit_check(v, adult and 11 or 10)
+end
+
+-- membership_card_check(): event_check(0x9,0)&(0x9,1)&(0x9,2)&(0x9,3)
+local function membership_eval()
+  return event_eval(0x9, 0x0) and event_eval(0x9, 0x1)
+     and event_eval(0x9, 0x2) and event_eval(0x9, 0x3)
+end
+
+-- Evaluate one SPECIAL recipe entry.
+local function eval_recipe(r)
+  local k = r.k
+  if     k == "scene"   then return scene_eval(r.scene, r.off, r.bit)
+  elseif k == "skull"   then return skull_eval(r.scene, r.bit)
+  elseif k == "event"   then return event_eval(r.major, r.bit)
+  elseif k == "itemgot" then return itemgot_eval(r.off, r.bit)
+  elseif k == "inftab"  then return inftab_eval(r.off, r.bit)
+  elseif k == "shop"    then return shop_eval(r.shop, r.item)
+  elseif k == "biggoron" then return biggoron_eval()
+  elseif k == "bigpoe"  then return bigpoe_eval()
+  elseif k == "fishing" then return fishing_eval(r.adult)
+  elseif k == "membership" then return membership_eval()
+  end
+  return false
+end
+
+-- ── Loaded gate ───────────────────────────────────────────────────────────────
+-- The connector only scans while the game mode is "loaded". We gate conservatively
+-- on the save context looking live (max_health sane and >= cur_health). On the
+-- title / file-select screen the save struct is zeroed → never reports phantoms.
+local function save_loaded()
+  local maxhp = read_u16_be(MAX_HEALTH_ADDR, RDRAM)
+  if maxhp == nil or maxhp <= 0 or maxhp > MAX_HEALTH_SANE then return false end
+  local curhp = read_u16_be(CUR_HEALTH_ADDR, RDRAM)
+  if curhp == nil then return false end
+  return curhp <= maxhp
+end
+
+-- ── Flag walk ─────────────────────────────────────────────────────────────────
+local function add_if(new, set, ap_id)
+  if set and not reported[ap_id] and wanted(ap_id) then
+    reported[ap_id] = true
+    new[#new + 1] = ap_id
+  end
+end
+
+local function scan_into(new)
+  for ap_id, r in pairs(SCENE) do
+    add_if(new, scene_eval(r[1], r[2], r[3]), ap_id)
+  end
+  for ap_id, r in pairs(SKULL) do
+    add_if(new, skull_eval(r[1], r[2]), ap_id)
+  end
+  for ap_id, r in pairs(EVENT) do
+    add_if(new, event_eval(r[1], r[2]), ap_id)
+  end
+  for ap_id, r in pairs(ITEMGOT) do
+    add_if(new, itemgot_eval(r[1], r[2]), ap_id)
+  end
+  for ap_id, r in pairs(INFTAB) do
+    add_if(new, inftab_eval(r[1], r[2]), ap_id)
+  end
+  for ap_id, r in pairs(SHOP) do
+    add_if(new, shop_eval(r[1], r[2]), ap_id)
+  end
+  for ap_id, recs in pairs(SPECIAL) do
+    local hit = false
+    for _, r in ipairs(recs) do          -- OR over the recipe list
+      if eval_recipe(r) then hit = true; break end
+    end
+    add_if(new, hit, ap_id)
+  end
+end
+
+-- ── Goal (connector_oot.lua is_game_complete) ─────────────────────────────────
+local function goal_reached()
+  local ptr = read_u32_be(SCENE_POINTER_ADDR, RDRAM)
+  if ptr == nil then return false end
+  return ptr == GOAL_TRIFORCE_HUNT_PTR or ptr == GOAL_GANON_DEFEAT_PTR
+end
+
+-- ── Module contract ───────────────────────────────────────────────────────────
+function M.init(ctx)
+  if ctx and type(ctx.log) == "function" then log_fn = ctx.log end
+  if not resolve_memory_api() then
+    log("BizHawk memory API unavailable — module idle")
+    ADDRESSES_VERIFIED = false
+    return
+  end
+  local cfg = (ctx and ctx.config) or {}
+  load_locations(cfg.locations)
+  local n = 0
+  for _ in pairs(SCENE)   do n = n + 1 end
+  for _ in pairs(SKULL)   do n = n + 1 end
+  for _ in pairs(EVENT)   do n = n + 1 end
+  for _ in pairs(ITEMGOT) do n = n + 1 end
+  for _ in pairs(INFTAB)  do n = n + 1 end
+  for _ in pairs(SHOP)    do n = n + 1 end
+  for _ in pairs(SPECIAL) do n = n + 1 end
+  log("ready: " .. n .. " location flags (N64 big-endian, OoT save context)")
+end
+
+function M.poll()
+  local new = {}
+  if not ADDRESSES_VERIFIED then return new end
+  if not save_loaded() then return new end     -- title/file-select/non-OoT → idle
+  scan_into(new)
+  return new
+end
+
+function M.is_goal_complete()
+  if not ADDRESSES_VERIFIED then return false end
+  return goal_reached()
+end
+
+-- Remote multiworld items: see the file header. items_handling = 0b001 (full
+-- LOCAL) means the AP-patched OoT ROM grants its OWN found items, so solo play and
+-- check reporting work fully; applying REMOTE items is the connector's guarded
+-- RDRAM write path (coop_context incoming_item/incoming_player handshake + the
+-- save's internal received-item counter at save+0x90, plus the deathlink kill
+-- write to HP) and is the one piece deferred until it can be confirmed in-emulator.
+-- No-op (never a wrong write) until then.
+function M.receive_item(item_id, meta)
+  -- intentionally empty (documented)
+end
+
+return M

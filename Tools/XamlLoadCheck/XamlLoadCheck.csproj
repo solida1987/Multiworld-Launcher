@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- XamlLoadCheck - constructs every window and control for real.          -->
+  <!--                                                                        -->
+  <!-- WHY THIS EXISTS                                                        -->
+  <!-- `dotnet build` proves NOTHING about XAML. The compiler checks that the  -->
+  <!-- markup parses and that names resolve; it does not run the generated     -->
+  <!-- InitializeComponent, so a StaticResource that is not there, a style     -->
+  <!-- setter for a property the target does not have, or a binding to a       -->
+  <!-- missing element all build perfectly and throw the first time a window   -->
+  <!-- is opened.                                                              -->
+  <!--                                                                        -->
+  <!-- London 2.9.35 shipped a crash exactly that way. Starting the launcher   -->
+  <!-- catches it for the main window and for whatever renders at startup -    -->
+  <!-- but a dialog nobody opened during the check is still untested.          -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>XamlLoadCheck</AssemblyName>
+    <RootNamespace>LauncherV2.Tools.XamlLoadCheck</RootNamespace>
+
+    <!-- The launcher publishes self-contained, and a self-contained exe can   -->
+    <!-- only be referenced by another one (NETSDK1151). Matching it here also -->
+    <!-- means this gate runs against the same runtime the players get.        -->
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\LauncherV2.csproj" />
+  </ItemGroup>
+
+</Project>
