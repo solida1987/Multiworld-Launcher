@@ -1248,6 +1248,17 @@
                                                     Margin="10,0,0,0"
                                                     Visibility="Collapsed"
                                                     Click="BtnOverviewEmulator_Click"/>
+                                            <!-- Appears only while the chosen emulator is
+                                                 missing. Play is blocked in that state, so
+                                                 this is the one thing left to do — it must
+                                                 be present and obvious, not a dialog you
+                                                 reach by pressing the wrong button first. -->
+                                            <Button x:Name="BtnOverviewGetEmulator"
+                                                    DockPanel.Dock="Left"
+                                                    Style="{StaticResource BtnPlayStyle}"
+                                                    Margin="10,0,0,0"
+                                                    Visibility="Collapsed"
+                                                    Click="BtnOverviewGetEmulator_Click"/>
                                             <!-- Mirrors the hidden header BtnStandalone (§9):
                                                  visible for installed standalone-capable games,
                                                  re-raises the header button's Click. -->
