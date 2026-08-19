@@ -31,7 +31,10 @@ namespace LauncherV2.Core;
 // Pipe = in-emulator Lua opens the launcher's named pipes (BizHawk).
 // Nwa = launcher is a TCP client of the emulator's NWA server and runs the
 // game logic itself via Snes9xLuaBridge (snes9x-emunwa).
-public enum BridgeDialect { Pipe, Nwa }
+// Attach = the launcher starts nothing: it attaches to a helper the player
+// (or the launcher, when the helper is in its folder) runs — SNI — and runs
+// the game logic itself over that helper's protocol.
+public enum BridgeDialect { Pipe, Nwa, Attach }
 
 // One emulator backend the launcher can describe (and, when BridgeReady, drive).
 public sealed record EmulatorBackend
@@ -125,15 +128,35 @@ public static class EmulatorBackends
         new EmulatorBackend
         {
             Id            = "snes9x",
-            DisplayName   = "snes9x",
+            DisplayName   = "snes9x (NWA build)",
             Systems       = new[] { "SNES" },
             BridgeReady   = true,
-            LiveVerified  = true,
+            // Wired and mock-verified 12/12, never yet seen carrying a check
+            // from a real emulator — shown "(experimental)" until it has been.
+            LiveVerified  = false,
             HomepageUrl   = "https://github.com/Skarsnik/snes9x-emunwa",
             // Verified via the releases API: latest non-prerelease tag, asset
             // "snes9x-1.63-nwa-win32-x64.7z", exe "snes9x-x64.exe".
             ExeName       = "snes9x-x64.exe",
             Dialect       = BridgeDialect.Nwa,
+        },
+
+        // SNI — not an emulator but the SNES community's bridge program: it
+        // attaches to snes9x-emunwa, RetroArch, or real hardware (FX Pak Pro)
+        // and serves their memory over one protocol. Picking it means "I run my
+        // own SNES emulator; the launcher connects through SNI". The launcher
+        // starts sni.exe from Emulators\sni\ when it is there, and the sni
+        // bridge extension carries the transport.
+        new EmulatorBackend
+        {
+            Id            = "sni",
+            DisplayName   = "SNI (own emulator or console)",
+            Systems       = new[] { "SNES" },
+            BridgeReady   = true,
+            LiveVerified  = false,
+            HomepageUrl   = "https://github.com/alttpo/sni",
+            ExeName       = "sni.exe",
+            Dialect       = BridgeDialect.Attach,
         },
     };
 

@@ -86,7 +86,8 @@ local server_locations= nil     -- set of ap_ids the server expects (nil = all)
 local items_received  = {}     -- ordered stream (extended ITEM lines)
 local slot_number     = 0
 local remote_items    = false
-local rom_ok          = nil     -- cached "AP" signature result (nil until checked)
+local rom_ok          = nil     -- true once the "AP" signature has been seen
+local rom_said_no     = false   -- the "not yet" line is logged once, not per poll
 local mem             = {}
 local log_fn          = nil
 
@@ -184,15 +185,26 @@ local function bit_and(a, b)
 end
 
 -- ── ROM identity: the AP basepatch writes "AP" at CARTRAM 0x2000 ──────────────
+--
+-- Only the YES is cached. The signature lives in save RAM, which the game fills
+-- in during boot — so a NO taken a second after the emulator started says
+-- nothing about the cartridge, and caching it left detection idle for the whole
+-- session against a perfectly good AP ROM.
 local function rom_is_ap()
-  if rom_ok ~= nil then return rom_ok end
+  if rom_ok then return true end
   local a = read_cartram_u8(ROMNAME_OFF)
   local p = read_cartram_u8(ROMNAME_OFF + 1)
   if a == nil or p == nil then return false end          -- not readable yet; retry
-  rom_ok = (a == string.byte("A") and p == string.byte("P"))
-  if rom_ok then log("AP ROM verified ('AP' signature present)")
-  else log("non-AP ROM (no 'AP' signature) — detection idle, no writes") end
-  return rom_ok
+  if a == string.byte("A") and p == string.byte("P") then
+    rom_ok = true
+    log("AP ROM verified ('AP' signature present)")
+    return true
+  end
+  if not rom_said_no then
+    rom_said_no = true
+    log("no 'AP' signature in save RAM yet — the game writes it on boot; watching")
+  end
+  return false
 end
 
 -- ── Multiworld context ────────────────────────────────────────────────────────

@@ -46,7 +46,8 @@ public sealed class Snes9xLuaBridge : IDisposable
     private const int WramSize = 0x20000;          // SNES WRAM = 128 KB
     private const int TickMs   = 50;               // 20 Hz check polling
 
-    private readonly NwaClient _nwa;
+    private readonly ISnesMemory _mem;
+    private readonly string _tag;
     private readonly Action<string>? _log;
     private readonly Script _script;
     private readonly Table  _module;
@@ -69,8 +70,15 @@ public sealed class Snes9xLuaBridge : IDisposable
 
     public Snes9xLuaBridge(NwaClient nwa, string moduleLuaPath, BridgeConfig config,
                            Action<string>? log = null)
+        : this(new NwaMemory(nwa), moduleLuaPath, config, log, "snes9x") { }
+
+    /// The transport-agnostic form: any ISnesMemory will do. `tag` names the
+    /// transport in log lines so an SNI session does not read as snes9x.
+    public Snes9xLuaBridge(ISnesMemory mem, string moduleLuaPath, BridgeConfig config,
+                           Action<string>? log = null, string tag = "snes9x")
     {
-        _nwa = nwa;
+        _mem = mem;
+        _tag = tag;
         _log = log;
 
         // Pure-managed interpreter.
@@ -119,7 +127,7 @@ public sealed class Snes9xLuaBridge : IDisposable
             {
                 // 1. One CORE_READ of all WRAM → the per-tick snapshot the memory
                 // shim serves reads from.
-                byte[] snap = _nwa.ReadMemoryAsync("WRAM", 0, WramSize, ct)
+                byte[] snap = _mem.ReadAsync("WRAM", 0, WramSize, ct)
                                   .GetAwaiter().GetResult();
                 Buffer.BlockCopy(snap, 0, _wram, 0, Math.Min(snap.Length, WramSize));
 
@@ -141,7 +149,7 @@ public sealed class Snes9xLuaBridge : IDisposable
                 }
                 if (newChecks.Count > 0)
                 {
-                    _log?.Invoke($"[snes9x] checks: {string.Join(",", newChecks)}");
+                    _log?.Invoke($"[{_tag}] checks: {string.Join(",", newChecks)}");
                     LocationsChecked?.Invoke(newChecks.ToArray());
                 }
 
@@ -152,7 +160,7 @@ public sealed class Snes9xLuaBridge : IDisposable
                     if (g.Type == DataType.Boolean && g.Boolean)
                     {
                         goalSent = true;
-                        _log?.Invoke("[snes9x] goal complete");
+                        _log?.Invoke($"[{_tag}] goal complete");
                         GoalCompleted?.Invoke();
                     }
                 }
@@ -165,7 +173,7 @@ public sealed class Snes9xLuaBridge : IDisposable
             catch (Exception ex)
             {
                 _disconnected = true;
-                _log?.Invoke($"[snes9x] bridge stopped: {ex.Message}");
+                _log?.Invoke($"[{_tag}] bridge stopped: {ex.Message}");
                 Disconnected?.Invoke(ex.Message);
                 break;
             }
@@ -182,7 +190,7 @@ public sealed class Snes9xLuaBridge : IDisposable
         DynValue f = _module.Get(fn);
         if (f.Type != DataType.Function) return DynValue.Nil;
         try { return _script.Call(f, args); }
-        catch (Exception ex) { _log?.Invoke($"[snes9x] {fn}() error: {ex.Message}"); return DynValue.Nil; }
+        catch (Exception ex) { _log?.Invoke($"[{_tag}] {fn}() error: {ex.Message}"); return DynValue.Nil; }
     }
 
     private DynValue MetaTable(ItemMeta it)
@@ -259,15 +267,18 @@ public sealed class Snes9xLuaBridge : IDisposable
     private static string Domain(CallbackArguments a, int i)
     {
         string d = a.Count > i && a[i].Type == DataType.String ? a[i].String : "WRAM";
-        return d.Equals("CARTRAM", StringComparison.OrdinalIgnoreCase) ||
-               d.Equals("SRAM",    StringComparison.OrdinalIgnoreCase) ? "SRAM" : "WRAM";
+        if (d.Equals("CARTRAM", StringComparison.OrdinalIgnoreCase) ||
+            d.Equals("SRAM",    StringComparison.OrdinalIgnoreCase)) return "SRAM";
+        if (d.Equals("CARTROM", StringComparison.OrdinalIgnoreCase) ||
+            d.Equals("ROM",     StringComparison.OrdinalIgnoreCase)) return "CARTROM";
+        return "WRAM";
     }
 
     private int ReadU8(int addr, string region)
     {
         if (region == "WRAM")
             return (addr >= 0 && addr < _wram.Length) ? _wram[addr] : 0;
-        byte[] b = _nwa.ReadMemoryAsync("SRAM", addr, 1).GetAwaiter().GetResult();
+        byte[] b = _mem.ReadAsync(region, addr, 1).GetAwaiter().GetResult();
         return b.Length > 0 ? b[0] : 0;
     }
 
@@ -278,21 +289,21 @@ public sealed class Snes9xLuaBridge : IDisposable
             if (addr < 0 || addr + 1 >= _wram.Length) return 0;
             return _wram[addr] | (_wram[addr + 1] << 8);
         }
-        byte[] b = _nwa.ReadMemoryAsync("SRAM", addr, 2).GetAwaiter().GetResult();
+        byte[] b = _mem.ReadAsync(region, addr, 2).GetAwaiter().GetResult();
         return b.Length >= 2 ? b[0] | (b[1] << 8) : 0;
     }
 
     private void WriteU8(int addr, int value, string region)
     {
         byte[] data = { (byte)(value & 0xFF) };
-        _nwa.WriteMemoryAsync(region, addr, data).GetAwaiter().GetResult();
+        _mem.WriteAsync(region, addr, data).GetAwaiter().GetResult();
         if (region == "WRAM" && addr >= 0 && addr < _wram.Length) _wram[addr] = data[0];
     }
 
     private void WriteU16(int addr, int value, string region)
     {
         byte[] data = { (byte)(value & 0xFF), (byte)((value >> 8) & 0xFF) };
-        _nwa.WriteMemoryAsync(region, addr, data).GetAwaiter().GetResult();
+        _mem.WriteAsync(region, addr, data).GetAwaiter().GetResult();
         if (region == "WRAM" && addr >= 0 && addr + 1 < _wram.Length)
         { _wram[addr] = data[0]; _wram[addr + 1] = data[1]; }
     }

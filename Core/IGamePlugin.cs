@@ -83,14 +83,20 @@ public sealed record GameAchievement(
 // A known bug with a player-performable workaround, shown as a card.
 public sealed record KnownIssue(string Symptom, string Cause, string Fix);
 
-// A game asking for the patch file belonging to the seed just connected to.
+// A game asking for the file belonging to the seed just connected to.
 // Seed and Slot are shown verbatim so the player can match them against what
 // they downloaded; FileFilter is the picker's filter (".apemerald" etc.).
+//
+// WhatToPick names the thing being asked for when it is not a patch: the games
+// whose world builds the ROM itself need "the randomized game file for this
+// seed", and calling that a patch sends the player looking for the wrong file.
+// Null keeps the classic patch wording.
 public sealed record SeedPatchRequest(
     string GameName,
     string Seed,
     string Slot,
-    string FileFilter);
+    string FileFilter,
+    string? WhatToPick = null);
 
 // One credit line on the Overview. Highlight lifts a line visually.
 public sealed record GameCredit(string Role, string Name, bool Highlight = false);

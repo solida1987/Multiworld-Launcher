@@ -92,7 +92,8 @@ local reported         = {}     -- ap_id -> true once returned from poll()
 local server_locations = nil    -- set of ap_ids the server expects (nil = all)
 local items_received   = {}     -- ordered stream (extended ITEM lines)
 local slot_number      = 0
-local rom_ok           = nil    -- cached "ArchipelagoLufia" signature result
+local rom_ok           = nil    -- true once "ArchipelagoLufia" has been seen
+local rom_said_no      = false  -- the "not yet" line is logged once, not per poll
 local mem              = {}
 local log_fn           = nil
 
@@ -186,14 +187,19 @@ local function write_u16(addr, value)
 end
 
 -- ── ROM identity: the AP basepatch writes "ArchipelagoLufia" at CARTRAM 0x2000 ──
+-- Only the YES is cached: the signature sits in save RAM, which the game fills
+-- in during boot, so a NO read moments after launch says nothing about the
+-- cartridge.
 local function rom_is_ap()
-  if rom_ok ~= nil then return rom_ok end
+  if rom_ok then return true end
   for i = 1, #AP_SIGN do
     local b = read_u8(SIGN_ADDR + i - 1)
     if b == nil then return false end          -- not readable yet; retry next poll
     if b ~= string.byte(AP_SIGN, i) then
-      rom_ok = false
-      log("non-AP ROM (no 'ArchipelagoLufia' signature) — detection idle, no writes")
+      if not rom_said_no then
+        rom_said_no = true
+        log("no 'ArchipelagoLufia' signature in save RAM yet — written on boot; watching")
+      end
       return false
     end
   end
