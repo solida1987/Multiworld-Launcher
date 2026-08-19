@@ -62,6 +62,13 @@ public sealed class LauncherSettings
     [JsonPropertyName("defender_exclusions_done")]
     public bool DefenderExclusionsDone { get; set; } = false;
 
+    // Cover art: has the player been asked, and what did they answer?
+    // Null means "not asked yet" -- the offer is made once and then respected
+    // either way. Art is fetched onto this machine, never shipped with the
+    // launcher, so this is the player's call and not a default we can assume.
+    [JsonPropertyName("game_art_consent")]
+    public bool? GameArtConsent { get; set; } = null;
+
     // Launch Ship of Harkinian fullscreen.
     // CVar into the install's own shipofharkinian.json before each launch
     // (the JSON CVar store next to soh.exe).
