@@ -2173,11 +2173,19 @@ public partial class MainWindow : Window
     {
         var backends = plugin.AvailableBackends();
 
-        // One option is not a choice. A dropdown that can only re-pick what is
-        // already picked is a decoy, so the button stays away entirely.
-        if (backends.Count < 2)
+        // The button is ALWAYS on the page for an emulated game, even when the
+        // game runs on exactly one emulator. Hiding it then seemed tidy, but it
+        // made the most basic question -- "what is this about to launch?" --
+        // answerable only for games that happened to have a choice. The label
+        // is the answer; the menu is the choice, and a game with one option
+        // simply has a one-entry menu.
+        if (backends.Count == 0)
         {
-            BtnOverviewEmulator.Visibility = Visibility.Collapsed;
+            // Not an emulated game at all: nothing to name, nothing to pick.
+            BtnOverviewEmulator.Visibility    = Visibility.Collapsed;
+            BtnOverviewGetEmulator.Visibility = Visibility.Collapsed;
+            _getEmulatorName = _getEmulatorUrl = _getEmulatorExe = _getEmulatorFolder = null;
+            _getEmulatorRequirement = null;
             return;
         }
 
@@ -2187,7 +2195,10 @@ public partial class MainWindow : Window
                    ?? backends.FirstOrDefault(b => b.BridgeReady)
                    ?? backends[0];
 
-        BtnOverviewEmulator.Content    = $"🎮  {current.DisplayName}  ▾";
+        bool hasChoice = backends.Count > 1;
+        BtnOverviewEmulator.Content    = hasChoice
+            ? $"🎮  {current.DisplayName}  ▾"
+            : $"🎮  {current.DisplayName}";
         BtnOverviewEmulator.Visibility = Visibility.Visible;
 
         // The one action left when the chosen emulator is not here. Play is
@@ -2236,8 +2247,11 @@ public partial class MainWindow : Window
         BtnOverviewEmulator.IsEnabled  = !plugin.IsRunning;
         BtnOverviewEmulator.ToolTip    = plugin.IsRunning
             ? "Stop the game before switching emulator."
-            : "Runs on " + current.DisplayName + ". Click to choose another: "
-              + string.Join(", ", backends.Select(b => b.DisplayName)) + ".";
+            : hasChoice
+                ? "Runs on " + current.DisplayName + ". Click to choose another: "
+                  + string.Join(", ", backends.Select(b => b.DisplayName)) + "."
+                : $"{plugin.DisplayName} runs on {current.DisplayName} — it is the "
+                  + "only emulator this game supports.";
     }
 
     // Where the missing emulator comes from. Set by RefreshEmulatorButton so the
@@ -2310,7 +2324,9 @@ public partial class MainWindow : Window
         if (plugin == null) return;
 
         var backends = plugin.AvailableBackends();
-        if (backends.Count < 2) return;
+        // One entry is still a menu worth opening: it names what the game runs
+        // on and shows there is nothing else to pick, which is an answer.
+        if (backends.Count == 0) return;
 
         var menu = new System.Windows.Controls.ContextMenu
         {
