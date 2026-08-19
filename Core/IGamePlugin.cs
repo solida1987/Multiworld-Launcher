@@ -310,6 +310,34 @@ public interface IGamePlugin
     /// persists; the launcher never has to remember to save.
     string? LastSlotName { get => null; set { } }
 
+    /// The emulator backend this game will launch on, and the backends it can
+    /// choose between.
+    ///
+    /// ⚠ Here for the same reason as LastSlotName: the launcher only ever sees
+    /// a SafePluginProxy for a catalogue game, so anything the UI needs must be
+    /// reachable through this interface. Both members existed as public members
+    /// of EmulatorPlugin and were invisible to the launcher the entire time --
+    /// which is why the game page could NAME the emulator but never offer a
+    /// choice of one. Setting the id persists; the launcher never has to
+    /// remember to save.
+    ///
+    /// A game that is not emulator-backed answers null / an empty list, and the
+    /// picker does not render at all.
+    string? SelectedEmulatorId { get => null; set { } }
+
+    /// True when everything this game needs in order to start is present --
+    /// for an emulated game, that its ROM is picked AND still on disk.
+    ///
+    /// The launcher asked this by casting to EmulatorPlugin, which is false for
+    /// every catalogue game, so the answer was silently "yes, ready" no matter
+    /// what. A game with no ROM still showed READY TO PLAY.
+    bool RomReady => true;
+
+    /// Backends this game can run on, in the order they should be offered.
+    /// Empty means "not an emulated game" -- it never means "no choice".
+    IReadOnlyList<EmulatorBackend> AvailableBackends()
+        => Array.Empty<EmulatorBackend>();
+
     SeedPatchRequest? GetUnmetSeedPatch(string seed, string slot) => null;
 
     // Store a patch the player just picked. Returns null on success, or a
