@@ -1088,7 +1088,7 @@
                                     Style="{StaticResource TabStyle}"
                                     MouseLeftButtonDown="TabOverview_Click">
                                 <TextBlock x:Name="TabOverviewText"
-                                           Text="Overview"
+                                           Text="▶  Play"
                                            FontSize="12"
                                            FontWeight="SemiBold"
                                            VerticalAlignment="Center"
@@ -1098,7 +1098,7 @@
                                     Style="{StaticResource TabStyle}"
                                     MouseLeftButtonDown="TabPlay_Click">
                                 <TextBlock x:Name="TabPlayText"
-                                           Text="▶  Play"
+                                           Text="Log"
                                            FontSize="12"
                                            FontWeight="SemiBold"
                                            VerticalAlignment="Center"

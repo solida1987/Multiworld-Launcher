@@ -806,9 +806,17 @@ public partial class MainWindow : Window
         // Reset progression category so the new game opens on Summary
         _progressionCategory = "summary";
 
-        // Always land on the Overview front page when switching games (§6) —
+        // Always land on the game's own front page when switching games (§6) —
         // SwitchTab triggers RefreshOverview for the freshly selected plugin.
         SwitchTab(PageTab.Overview);
+
+        // Each game carries its own slot: one seed can hold five of them, and
+        // the launcher claims the SELECTED game's name for whatever slot is in
+        // the box. Carrying one slot across games is therefore not a
+        // convenience but a guaranteed "InvalidGame" the moment you switch.
+        if (_apClient == null && plugin is Plugins.Emulated.EmulatorPlugin slotOwner
+            && slotOwner.LastSlotName is { Length: > 0 } remembered)
+            TxtSlotName.Text = remembered;
         HighlightGameCard(plugin);
 
         // Update slot→game suggestion banner (may appear if this game differs from AP connection)
@@ -2102,7 +2110,6 @@ public partial class MainWindow : Window
     // in ONE place.
     private void BtnOverviewPlay_Click(object sender, RoutedEventArgs e)
     {
-        SwitchTab(PageTab.Play);
         if (BtnPlay.IsEnabled)
             BtnPlay.RaiseEvent(new RoutedEventArgs(
                 System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
@@ -2112,7 +2119,6 @@ public partial class MainWindow : Window
     // BtnStandalone keeps the guard/launch logic in one place.
     private void BtnOverviewStandalone_Click(object sender, RoutedEventArgs e)
     {
-        SwitchTab(PageTab.Play);
         if (BtnStandalone.IsEnabled)
             BtnStandalone.RaiseEvent(new RoutedEventArgs(
                 System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
@@ -2125,7 +2131,6 @@ public partial class MainWindow : Window
     private async void BtnOverviewUpdate_Click(object sender, RoutedEventArgs e)
     {
         if (_selectedPlugin == null) return;
-        SwitchTab(PageTab.Play);
         await RunInstallAsync(_selectedPlugin);
     }
 
@@ -2505,7 +2510,6 @@ public partial class MainWindow : Window
             PanelAchievements.Visibility = Visibility.Collapsed;
             PanelGame.Visibility         = Visibility.Visible;
             PanelEmpty.Visibility        = Visibility.Collapsed;
-            SwitchTab(PageTab.Play);
         }
         TxtServer.Focus();
     }
@@ -3155,6 +3159,14 @@ public partial class MainWindow : Window
 
         _playCts        = new CancellationTokenSource();
         _currentSession = new ApSession(server, slot, password, plugin.ApWorldName);
+
+        // Remember which slot this game joined with, so picking it again next
+        // week fills the box for you instead of leaving last game's slot there.
+        if (plugin is Plugins.Emulated.EmulatorPlugin ep && ep.LastSlotName != slot)
+        {
+            ep.LastSlotName = slot;
+            try { ep.SaveSettings(); } catch { /* a remembered name is a courtesy */ }
+        }
         _apClient       = new ApClient(_currentSession, plugin);
 
         // --- Wire global AP events ---
@@ -6659,8 +6671,9 @@ public partial class MainWindow : Window
             if (!reinstalled || !launchPlugin.IsInstalled) return;
         }
 
-        // Switch to Play tab so the log is visible
-        SwitchTab(PageTab.Play);
+        // Stay where the player is. This used to jump to the log the moment
+        // anything started, which threw them off the game page every single
+        // launch -- the log is a place you GO, not a place you are sent.
         await LaunchGameAsync(_selectedPlugin);
     }
 
@@ -6703,7 +6716,6 @@ public partial class MainWindow : Window
         BtnStandalone.IsEnabled = false;
         BtnPlay.IsEnabled       = false;
         SyncOverviewPlayButton();
-        SwitchTab(PageTab.Play);
         SetStatus("Launching standalone...");
         AppendLog("[Standalone] Starting game without Archipelago connection...");
 
@@ -7772,7 +7784,6 @@ public partial class MainWindow : Window
 
         try
         {
-            SwitchTab(PageTab.Play);
             SetStatus("Repairing — downloading missing files...");
             var progress = new Progress<(int Pct, string Msg)>(p =>
             {
@@ -8445,12 +8456,69 @@ public partial class MainWindow : Window
             if (ProblemReport.LooksLikeCrash(exitCode))
                 SaveProblemReport($"the game crashed (code 0x{unchecked((uint)exitCode):X8})");
 
-            await CleanupSessionAsync();
+            // The GAME stopped. The multiworld did not.
+            //
+            // Closing the emulator used to drop the AP connection with it, so
+            // Progression, Items, Map and the item feed all went blank the
+            // moment you quit — and restarting the game meant logging in
+            // again. Nothing about the server asks for that: the slot is
+            // yours until you release it. So the session stays up, and
+            // Disconnect stays where it belongs, under the player's finger.
+            await EndGameKeepSessionAsync();
+
+            if (_apClient != null)
+                AppendLog("[AP] Still connected — the game closed, your slot did not. "
+                        + "Press Play to jump back in, or Disconnect in the sidebar to leave.");
         }
         catch (Exception ex)
         {
             AppendLog($"[Error] Cleanup after game exit failed: {ex.Message}");
         }
+    }
+
+    /// The game half of a session teardown: playtime is booked, the tray icon
+    /// goes, the plugin's bridge handlers come off — and the AP client is left
+    /// alone, still connected, still feeding the tracker tabs.
+    ///
+    /// When there is no AP client (a standalone run, or the player already
+    /// disconnected) this is exactly the old full teardown.
+    private async Task EndGameKeepSessionAsync()
+    {
+        if (_apClient == null) { await CleanupSessionAsync(); return; }
+
+        _trayIcon.Hide();
+
+        var sessionPlugin = _runningPlugin ?? _selectedPlugin;
+        if (sessionPlugin != null && _sessionStart != default)
+        {
+            int playerCount = _tracker.Players.Count > 0 ? _tracker.Players.Count : 1;
+            AchievementStore.Instance.EndSession(
+                sessionPlugin.GameId, _sessionStart, _goalReachedThisSession,
+                _currentSession?.ServerUri ?? TxtServer.Text.Trim(),
+                _currentSession?.SlotName  ?? TxtSlotName.Text.Trim(),
+                playerCount);
+
+            if (sessionPlugin is { ActivePatchedRomPath: { } seedRom })
+                SeedLibraryStore.Instance.MarkPlayed(sessionPlugin.GameId, seedRom,
+                    (long)Math.Max(0, (DateTimeOffset.UtcNow - _sessionStart).TotalSeconds));
+
+            _sessionStart           = default;
+            _goalReachedThisSession = false;
+        }
+
+        if (_runningPlugin != null)
+        {
+            UnwirePluginEvents(_runningPlugin);
+            _runningPlugin = null;
+        }
+        lock (_pendingChecksLock) _pendingChecks.Clear();
+
+        // Tell the server we stopped playing without leaving the room, so the
+        // room page shows the truth to everyone else in the multiworld.
+        try { await _apClient.SetStatusAsync(ClientStatus.Ready); } catch { }
+
+        RefreshButtons(_selectedPlugin);
+        RebuildGameList();
     }
 
     //
