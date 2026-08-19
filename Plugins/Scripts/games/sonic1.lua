@@ -430,6 +430,13 @@ end
 function M.is_goal_complete()
   if not ADDRESSES_VERIFIED then return false end
   if not ensure_ram_type() then return false end
+  -- ⚠ The same readiness guard poll() uses. Without it the goal is judged
+  -- on memory the game has not written yet: at boot the ROM signature is
+  -- already valid while WRAM is still garbage, so a stray bit reads as a
+  -- finished run. That fired on Pokemon Crystal on 19 Aug -- the server
+  -- took the goal, auto-collected, and released all 475 remaining items
+  -- one second after the game started.
+  if not in_gameplay() then return false end
   refresh_save()
   if not save_is_initialised() or not have_slot_data then return false end
   -- The client sets SR_SSGate bit 0x40 at the instant it raises CLIENT_GOAL.

@@ -120,6 +120,13 @@ public sealed class Snes9xLuaBridge : IDisposable
     {
         var seen = new HashSet<long>();   // session dedup of reported checks
         bool goalSent = false;
+        // Goal-confirmation state — see the GOAL block below. The tick count is
+        // deliberately small: it is there to outlast boot-time garbage, not to
+        // make a real victory wait.
+        const int GoalConfirmTicks = 3;
+        bool goalSeenFalse = false;
+        int  goalStreak    = 0;
+        bool goalWarned    = false;
 
         while (!ct.IsCancellationRequested && !_disconnected)
         {
@@ -153,14 +160,45 @@ public sealed class Snes9xLuaBridge : IDisposable
                     LocationsChecked?.Invoke(newChecks.ToArray());
                 }
 
-                // 3. is_goal_complete() → GOAL once.
+                // 3. is_goal_complete() → GOAL once, and only once believable.
+                //
+                // ⚠ A goal cannot be taken back: the server accepts it,
+                // auto-collects, and releases every remaining item in the
+                // world. So a single true reading is not enough. At boot the
+                // ROM signature is already valid while WRAM still holds
+                // garbage, and a stray bit in the goal flag reads as a
+                // finished run — that fired on Pokemon Crystal on 19 Aug, one
+                // second after the game started, and released 475 items.
+                //
+                // Nobody wins before the game has drawn a frame, so the goal
+                // must read FALSE at least once before a true is worth
+                // anything, and it must then hold for GoalConfirmTicks polls.
+                // The same guard lives in bizhawk_ap_connector.lua; both
+                // transports need it because either can be the one running.
                 if (!goalSent)
                 {
                     DynValue g = CallModule("is_goal_complete");
-                    if (g.Type == DataType.Boolean && g.Boolean)
+                    bool done  = g.Type == DataType.Boolean && g.Boolean;
+
+                    if (!done)
+                    {
+                        goalSeenFalse = true;
+                        goalStreak    = 0;
+                    }
+                    else if (!goalSeenFalse)
+                    {
+                        if (!goalWarned)
+                        {
+                            goalWarned = true;
+                            _log?.Invoke($"[{_tag}] goal read TRUE on the first poll — " +
+                                         "ignoring it; the game has not booted yet, so " +
+                                         "this is uninitialised memory");
+                        }
+                    }
+                    else if (++goalStreak >= GoalConfirmTicks)
                     {
                         goalSent = true;
-                        _log?.Invoke($"[{_tag}] goal complete");
+                        _log?.Invoke($"[{_tag}] goal complete (held for {goalStreak} polls)");
                         GoalCompleted?.Invoke();
                     }
                 }
