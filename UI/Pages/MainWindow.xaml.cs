@@ -1766,7 +1766,10 @@ public partial class MainWindow : Window
         // Asked through the interface. The concrete test that used to live here
         // was false for every catalogue game, so this read "ready" regardless.
         bool romReady = plugin.RomReady;
-        bool requirementsMet = plugin.IsInstalled && romReady &&
+        // A missing emulator is its own requirement, listed next to the others
+        // rather than disguised as a missing game.
+        bool emuReady = plugin.EmulatorReady;
+        bool requirementsMet = plugin.IsInstalled && romReady && emuReady &&
                                plugin.GameBadges.Length == 0;
 
         if (requirementsMet)
@@ -1779,6 +1782,21 @@ public partial class MainWindow : Window
             // Capability pill only while it still tells the user something to
             // DO; suppress the duplicate "ROM needed" badge when the pill
             // already says "Bring your own ROM".
+            // Names the emulator and says what to do about it. Install cannot
+            // fix this, so the pill must not read like something Install fixes.
+            if (!emuReady)
+            {
+                string emuName = plugin.AvailableBackends().FirstOrDefault(
+                        b => string.Equals(b.Id, plugin.SelectedEmulatorId,
+                                           StringComparison.OrdinalIgnoreCase))
+                    ?.DisplayName ?? "the chosen emulator";
+                AddOverviewBadge($"{emuName.ToUpperInvariant()} NOT FOUND",
+                    Color.FromRgb(0xF5, 0x9E, 0x0B),
+                    $"{plugin.DisplayName} is set to launch on {emuName}, which is not " +
+                    "on this machine. Pick another with the button next to Play, or put " +
+                    "the emulator in its folder — the game itself is installed.");
+            }
+
             bool capShown = false;
             if (!plugin.IsInstalled || !romReady)
             {

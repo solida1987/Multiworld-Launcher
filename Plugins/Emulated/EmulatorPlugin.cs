@@ -132,9 +132,25 @@ public abstract class EmulatorPlugin : IGamePlugin
     /// BizHawk emulator, so say exactly that. (The old internal placeholder
     /// "emulator-ready" leaked into the header as
     /// "Installed: emulator-ready" — P3-15.)
-    public string? InstalledVersion  => IsEmulatorPresent ? "BizHawk" : null;
+    // Names the emulator this game is set to NOW. It used to be the literal
+    // string "BizHawk" whichever backend was chosen, so the badge misnamed the
+    // emulator the moment anyone picked another one.
+    public string? InstalledVersion  => IsEmulatorPresent
+                                        ? ResolveSelectedBackend().DisplayName : null;
     public string? AvailableVersion  { get; protected set; }
-    public bool    IsInstalled       => RomPath != null && File.Exists(RomPath) && IsEmulatorPresent;
+
+    /// ⚠ An emulated game IS its ROM. Whether the chosen emulator happens to be
+    /// on this machine is a SEPARATE question — see EmulatorReady.
+    ///
+    /// Folding the two together meant that picking an emulator you had not
+    /// downloaded made the launcher announce the GAME was not installed: the
+    /// emulator picker disappeared (it renders only for a game you have), and
+    /// the offered fix became Install, which cannot install an emulator and so
+    /// appeared to do nothing. The ROM never moved.
+    public bool    IsInstalled       => RomPath != null && File.Exists(RomPath);
+
+    /// The chosen backend's executable is where it should be.
+    public bool    EmulatorReady     => IsEmulatorPresent;
     public bool    IsRunning         { get; private set; }
 
     /// Returns the emulator directory (where BizHawk lives) as the game folder.
@@ -444,6 +460,24 @@ public abstract class EmulatorPlugin : IGamePlugin
             throw new FileNotFoundException(
                 $"ROM file not found: {RomPath}\n\n" +
                 $"Select your {DisplayName} ROM in Settings → {DisplayName}.");
+
+        // The emulator, before anything else happens. Without this the launch
+        // got as far as opening the AP side and writing session state, and only
+        // then tripped over a missing executable — so the launcher looked like
+        // it had started a game that was never there.
+        if (!IsEmulatorPresent)
+        {
+            var missing = ResolveSelectedBackend();
+            throw new FileNotFoundException(
+                $"{missing.DisplayName} is not on this machine." +
+                Environment.NewLine + Environment.NewLine +
+                $"{DisplayName} is set to launch on {missing.DisplayName}. Put " +
+                $"{missing.ExeName} into:" + Environment.NewLine +
+                $"    {EmulatorDirectory}" + Environment.NewLine + Environment.NewLine +
+                $"(it comes from {missing.HomepageUrl})" +
+                Environment.NewLine + Environment.NewLine +
+                "Or pick a different emulator with the button next to Play.");
+        }
 
         CurrentSlotName = session.SlotName;
 

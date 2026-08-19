@@ -333,6 +333,16 @@ public interface IGamePlugin
     /// what. A game with no ROM still showed READY TO PLAY.
     bool RomReady => true;
 
+    /// True when the emulator this game is CURRENTLY set to launch on is on
+    /// the machine.
+    ///
+    /// Deliberately separate from IsInstalled. The launcher used to fold this
+    /// into "is the game installed", so picking an emulator you had not
+    /// downloaded made the page claim the GAME was gone -- the emulator picker
+    /// vanished, and Install became the offered fix for something Install
+    /// cannot fix. A missing emulator is its own problem with its own answer.
+    bool EmulatorReady => true;
+
     /// Backends this game can run on, in the order they should be offered.
     /// Empty means "not an emulated game" -- it never means "no choice".
     IReadOnlyList<EmulatorBackend> AvailableBackends()
