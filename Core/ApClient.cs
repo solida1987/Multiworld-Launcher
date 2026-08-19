@@ -162,7 +162,13 @@ public sealed class ApClient : IAsyncDisposable
 
     // Fires whenever ReceivedItems arrives from the server.
     // (items, receiverSlot) — receiverSlot == Slot for normal single-slot clients.
-    public event Action<ApNetworkItem[], int>? ItemsReceived;
+    // (items, receiverSlot, streamIndex). The index is the position of
+    // items[0] in the slot's full received-item stream -- REQUIRED by any
+    // consumer that delivers items by index (the RAM maps' raw_items store).
+    // It used to be absent here: only the plugin path received it, and a
+    // consumer mistaking receiverSlot for the index got, for slot 2, every
+    // packet claiming index 2.
+    public event Action<ApNetworkItem[], int, int>? ItemsReceived;
 
     // Fires after LocationScouts reply arrives with item info.
     public event Action<ApNetworkItem[]>? LocationInfoReceived;
@@ -795,7 +801,7 @@ public sealed class ApClient : IAsyncDisposable
         }
 
         // Also notify the item tracker (fired after plugin, so dedup is respected)
-        ItemsReceived?.Invoke(itemArray, _slot);
+        ItemsReceived?.Invoke(itemArray, _slot, index);
     }
 
     private void HandleDataPackage(JsonElement el)
