@@ -814,8 +814,14 @@ public partial class MainWindow : Window
         // the launcher claims the SELECTED game's name for whatever slot is in
         // the box. Carrying one slot across games is therefore not a
         // convenience but a guaranteed "InvalidGame" the moment you switch.
-        if (_apClient == null && plugin.LastSlotName is { Length: > 0 } remembered)
-            TxtSlotName.Text = remembered;
+        //
+        // ⚠ The empty case matters as much as the filled one. Only filling the
+        // box when a name is remembered leaves the PREVIOUS game's slot sitting
+        // there for every game that has not joined yet -- which is the exact
+        // "guaranteed InvalidGame" this block exists to prevent. So clear it.
+        if (_apClient == null)
+            TxtSlotName.Text = plugin.LastSlotName is { Length: > 0 } remembered
+                ? remembered : "";
         HighlightGameCard(plugin);
 
         // Update slot→game suggestion banner (may appear if this game differs from AP connection)
@@ -3157,11 +3163,54 @@ public partial class MainWindow : Window
         _playCts?.Dispose();   // previous attempt's CTS (P3-4)
 
         _playCts        = new CancellationTokenSource();
+
+        // Which game is this slot? ASK THE SERVER -- do not assume it is
+        // whatever happens to be highlighted in the library.
+        //
+        // Requiring the right game to be selected before you may log in is
+        // backwards: the slot name already determines the game, the server
+        // knows it, and picking wrong produced a bare "InvalidGame" with
+        // nothing on screen saying what the right answer was. Worse, the two
+        // Pokemon slots sit next to each other in the list, so the failure
+        // looked exactly like a mistyped slot name.
+        //
+        // ApSlotProbe logs in with an empty game and the Tracker tag, which
+        // the server admits without a game check, and reads the answer out of
+        // slot_info. A probe failure is never fatal here -- we fall through to
+        // the selected game, which is the behaviour that shipped before.
+        SetStatus("Asking the server which game this slot is...");
+        var probe = await ApSlotProbe.ResolveGameAsync(server, slot, password, _playCts.Token);
+
+        if (probe.Game is { Length: > 0 } slotGame &&
+            !string.Equals(slotGame, plugin.ApWorldName, StringComparison.Ordinal))
+        {
+            var owner = GameRegistry.All.FirstOrDefault(
+                g => string.Equals(g.ApWorldName, slotGame, StringComparison.Ordinal));
+
+            if (owner != null)
+            {
+                AppendLog($"[AP] Slot '{slot}' is {slotGame} — switching from " +
+                          $"{plugin.ApWorldName}.");
+                plugin = owner;
+                SelectGame(owner);
+                TxtSlotName.Text = slot;      // SelectGame rewrites the box
+            }
+            else
+            {
+                BtnConnToggle.Content   = "Connect";
+                BtnConnToggle.IsEnabled = true;
+                PanelConnInputs.Visibility = Visibility.Visible;
+                SetStatus("AP: not connected");
+                ConfirmDialog.ShowInfo(this, "That game is not installed",
+                    $"Slot '{slot}' is {slotGame}, and {slotGame} is not in your " +
+                    "library yet. Install it from the catalogue, then connect again.");
+                return;
+            }
+        }
+
+        _reconnectPlugin = plugin;
         _currentSession = new ApSession(server, slot, password, plugin.ApWorldName);
 
-        // Remember which slot this game joined with, so picking it again next
-        // week fills the box for you instead of leaving last game's slot there.
-        plugin.LastSlotName = slot;
         _apClient       = new ApClient(_currentSession, plugin);
 
         // --- Wire global AP events ---
@@ -3258,6 +3307,19 @@ public partial class MainWindow : Window
             if (refusal != null)
                 throw new InvalidOperationException(
                     TranslateApRefusal(refusal, slot, plugin));
+
+            // Remember which slot this game joined with, so picking it again
+            // next week fills the box for you instead of leaving the last
+            // game's slot there.
+            //
+            // ⚠ This MUST stay behind the verdict. Writing it before the
+            // server answers burns a REFUSED name into the game's settings,
+            // and the pre-fill then puts that same wrong name back in the box
+            // every time the game is selected -- a loop the user cannot get
+            // out of. It shipped that way in 3.7.5 and locked "Crystal" into
+            // Pokemon Emerald: every attempt was refused InvalidGame, and
+            // every attempt saved the bad name again.
+            plugin.LastSlotName = slot;
 
             // Persist the server as default + remember this connection (MRU)
             // — only now that the server actually accepted the login.
