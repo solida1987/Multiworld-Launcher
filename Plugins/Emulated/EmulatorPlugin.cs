@@ -199,9 +199,27 @@ public abstract class EmulatorPlugin : IGamePlugin
     public string? SelectedEmulatorId
     {
         get { EnsureSettingsLoaded(); return _selectedEmulatorId; }
-        set { EnsureSettingsLoaded(); _selectedEmulatorId = value; }
+        set
+        {
+            EnsureSettingsLoaded();
+            if (_selectedEmulatorId == value) return;
+            _selectedEmulatorId = value;
+            // Persist on assignment, so a pick from the game page survives a
+            // restart without the caller having to remember to save. Suppressed
+            // while LoadSettings is running, which assigns this itself -- saving
+            // mid-load would write a half-read file back over a whole one.
+            if (_loadingSettings) return;
+            try { SaveSettings(); } catch { /* a remembered choice is a courtesy */ }
+        }
     }
     private string? _selectedEmulatorId;
+    private bool    _loadingSettings;
+
+    /// An emulated game is ready when its ROM has been picked and is still
+    /// there. Checked on every page draw, so a ROM deleted behind the
+    /// launcher's back turns the badge honest again.
+    public bool RomReady
+        => RomPath is { Length: > 0 } p && System.IO.File.Exists(p);
 
     /// The slot name last used to join a multiworld AS THIS GAME.
     ///
@@ -1652,6 +1670,12 @@ public abstract class EmulatorPlugin : IGamePlugin
     /// Load per-game settings from disk (call from constructor or plugin
     /// registration).
     protected void LoadSettings()
+    {
+        _loadingSettings = true;
+        try { LoadSettingsCore(); } finally { _loadingSettings = false; }
+    }
+
+    private void LoadSettingsCore()
     {
         // Default the emulator choice to this system's default backend (the
         // first BridgeReady one — "bizhawk" today). Done here, not as a field

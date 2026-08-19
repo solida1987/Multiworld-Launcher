@@ -1037,6 +1037,8 @@ public partial class MainWindow : Window
             BtnPlay.Content = "AP Play";
         }
 
+        RefreshEmulatorButton(plugin);
+
         // --- One game at a time (P2-5) ---
         // While ANOTHER game runs, this game's launch buttons go dark with an
         // explanation — a second launch would corrupt the live session/ApClient.
@@ -1761,8 +1763,9 @@ public partial class MainWindow : Window
         // green "READY TO PLAY" instead of contradicting the installed
         // badge ("Installed" next to "ROM needed" next to "Bring your own
         // ROM" said the same unmet thing three times after it WAS met).
-        bool romReady = plugin is not Plugins.Emulated.EmulatorPlugin emuRp ||
-                        (emuRp.RomPath != null && File.Exists(emuRp.RomPath));
+        // Asked through the interface. The concrete test that used to live here
+        // was false for every catalogue game, so this read "ready" regardless.
+        bool romReady = plugin.RomReady;
         bool requirementsMet = plugin.IsInstalled && romReady &&
                                plugin.GameBadges.Length == 0;
 
@@ -2122,6 +2125,90 @@ public partial class MainWindow : Window
 
     // Same front pattern for standalone launches (§9): the hidden header
     // BtnStandalone keeps the guard/launch logic in one place.
+    // Which emulator this game launches on, stated on the action bar and
+    // changeable from there.
+    //
+    // The choice existed since the emulator work landed, but only inside the
+    // game's own Settings panel -- the page could NAME the emulator and never
+    // offer another one, so a player who wanted snes9x had to know the panel
+    // was there. Asked through IGamePlugin: a catalogue game is a
+    // SafePluginProxy, never an EmulatorPlugin, and a concrete test here would
+    // hide the control from every game in the catalogue.
+    private void RefreshEmulatorButton(IGamePlugin plugin)
+    {
+        var backends = plugin.AvailableBackends();
+
+        // One option is not a choice. A dropdown that can only re-pick what is
+        // already picked is a decoy, so the button stays away entirely.
+        if (backends.Count < 2)
+        {
+            BtnOverviewEmulator.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        var current = backends.FirstOrDefault(
+                          b => string.Equals(b.Id, plugin.SelectedEmulatorId,
+                                             StringComparison.OrdinalIgnoreCase))
+                   ?? backends.FirstOrDefault(b => b.BridgeReady)
+                   ?? backends[0];
+
+        BtnOverviewEmulator.Content    = $"🎮  {current.DisplayName}  ▾";
+        BtnOverviewEmulator.Visibility = Visibility.Visible;
+        // Switching emulators mid-session would strand the running bridge.
+        BtnOverviewEmulator.IsEnabled  = !plugin.IsRunning;
+        BtnOverviewEmulator.ToolTip    = plugin.IsRunning
+            ? "Stop the game before switching emulator."
+            : "Runs on " + current.DisplayName + ". Click to choose another: "
+              + string.Join(", ", backends.Select(b => b.DisplayName)) + ".";
+    }
+
+    private void BtnOverviewEmulator_Click(object sender, RoutedEventArgs e)
+    {
+        var plugin = _selectedPlugin;
+        if (plugin == null) return;
+
+        var backends = plugin.AvailableBackends();
+        if (backends.Count < 2) return;
+
+        var menu = new System.Windows.Controls.ContextMenu
+        {
+            PlacementTarget = BtnOverviewEmulator,
+            Placement       = System.Windows.Controls.Primitives.PlacementMode.Bottom,
+        };
+
+        foreach (var b in backends)
+        {
+            bool selected = string.Equals(b.Id, plugin.SelectedEmulatorId,
+                                          StringComparison.OrdinalIgnoreCase);
+            var item = new System.Windows.Controls.MenuItem
+            {
+                Header      = b.DisplayName,
+                IsCheckable = true,
+                IsChecked   = selected,
+                // A backend with no AP bridge yet is listed rather than hidden:
+                // seeing WHY it cannot be picked beats wondering where it went.
+                IsEnabled   = b.BridgeReady,
+                ToolTip     = b.BridgeReady
+                    ? null
+                    : b.DisplayName + " has no Archipelago bridge in the launcher yet.",
+            };
+            var chosen = b;
+            item.Click += (_, _) =>
+            {
+                if (string.Equals(chosen.Id, plugin.SelectedEmulatorId,
+                                  StringComparison.OrdinalIgnoreCase)) return;
+                // Setting it persists itself -- see IGamePlugin.SelectedEmulatorId.
+                plugin.SelectedEmulatorId = chosen.Id;
+                AppendLog($"[Emulator] {plugin.DisplayName} will launch on {chosen.DisplayName}.");
+                // Redraw: the emulator's own install state feeds the badges.
+                SelectGame(plugin);
+            };
+            menu.Items.Add(item);
+        }
+
+        menu.IsOpen = true;
+    }
+
     private void BtnOverviewStandalone_Click(object sender, RoutedEventArgs e)
     {
         if (BtnStandalone.IsEnabled)

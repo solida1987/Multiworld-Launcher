@@ -1237,6 +1237,17 @@
                                                     Style="{StaticResource BtnPlayStyle}"
                                                     MinWidth="150"
                                                     Click="BtnOverviewPlay_Click"/>
+                                            <!-- Which emulator this game launches on. Shown only
+                                                 when the game actually has a choice to make;
+                                                 a one-emulator game gets no decoy control.
+                                                 The label always names the CURRENT choice, so
+                                                 the answer is on screen without opening it. -->
+                                            <Button x:Name="BtnOverviewEmulator"
+                                                    DockPanel.Dock="Left"
+                                                    Style="{StaticResource BtnSecondaryStyle}"
+                                                    Margin="10,0,0,0"
+                                                    Visibility="Collapsed"
+                                                    Click="BtnOverviewEmulator_Click"/>
                                             <!-- Mirrors the hidden header BtnStandalone (§9):
                                                  visible for installed standalone-capable games,
                                                  re-raises the header button's Click. -->

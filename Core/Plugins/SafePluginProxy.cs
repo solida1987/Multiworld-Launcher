@@ -262,6 +262,19 @@ public sealed class SafePluginProxy : IGamePlugin
         set { try { _inner.LastSlotName = value; } catch { /* plugin fault, not ours */ } }
     }
 
+    public string? SelectedEmulatorId
+    {
+        get => Get<string?>(() => _inner.SelectedEmulatorId, null);
+        set { try { _inner.SelectedEmulatorId = value; } catch { /* plugin fault, not ours */ } }
+    }
+
+    // Fails CLOSED: a plugin that throws here is not "ready", it is broken.
+    public bool RomReady => Get<bool>(() => _inner.RomReady, false);
+
+    public IReadOnlyList<EmulatorBackend> AvailableBackends()
+        => Get<IReadOnlyList<EmulatorBackend>>(
+               () => _inner.AvailableBackends(), Array.Empty<EmulatorBackend>());
+
     public SeedPatchRequest? GetUnmetSeedPatch(string seed, string slot)
         => Get<SeedPatchRequest?>(() => _inner.GetUnmetSeedPatch(seed, slot), null);
 
