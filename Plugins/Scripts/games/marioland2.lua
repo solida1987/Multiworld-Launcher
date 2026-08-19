@@ -329,6 +329,13 @@ end
 
 function M.is_goal_complete()
   if not ADDRESSES_VERIFIED or not rom_is_marioland2() then return false end
+  -- ⚠ The same readiness guard poll() uses. Without it the goal is judged
+  -- on memory the game has not written yet: at boot the ROM signature is
+  -- already valid while WRAM is still garbage, so a stray bit reads as a
+  -- finished run. That fired on Pokemon Crystal on 19 Aug -- the server
+  -- took the goal, auto-collected, and released all 475 remaining items
+  -- one second after the game started.
+  if not in_game() then return false end
   -- The goal jingle plays only on a loaded game, so the music guard is implied;
   -- read the one byte the client checks.
   local music = read_u8(MUSIC_ADDR, CARTRAM)

@@ -1058,6 +1058,13 @@ end
 
 function M.is_goal_complete()
   if not ADDRESSES_VERIFIED then return false end
+  -- ⚠ The same readiness guard poll() uses. Without it the goal is judged
+  -- on memory the game has not written yet: at boot the ROM signature is
+  -- already valid while WRAM is still garbage, so a stray bit reads as a
+  -- finished run. That fired on Pokemon Crystal on 19 Aug — the server
+  -- took the goal, auto-collected, and released all 475 remaining items
+  -- one second after the game started.
+  if not save_loaded() then return false end
   return goal_reached()
 end
 

@@ -417,6 +417,13 @@ end
 
 function M.is_goal_complete()
   if not ADDRESSES_VERIFIED or not rom_is_ap() then return false end
+  -- ⚠ The same readiness guard poll() uses. Without it the goal is judged
+  -- on memory the game has not written yet: at boot the ROM signature is
+  -- already valid while WRAM is still garbage, so a stray bit reads as a
+  -- finished run. That fired on Pokemon Crystal on 19 Aug -- the server
+  -- took the goal, auto-collected, and released all 475 remaining items
+  -- one second after the game started.
+  if not update_game_state() then return false end
   refresh_snapshot()
   -- loaded_level == 0x4C is the K. Rool / Gangplank Galleon ending map.
   return snap.loaded_level ~= nil and snap.loaded_level == GOAL_LOADED_LEVEL

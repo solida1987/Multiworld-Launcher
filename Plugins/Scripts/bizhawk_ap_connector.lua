@@ -365,6 +365,13 @@ local tx             = nil           -- "<pipe_name>_c2s": this script → launc
 local rx             = nil           -- "<pipe_name>_s2c": launcher → this script
 local pipe_state     = "connecting"  -- connecting | connected | disconnected | disabled
 local goal_sent      = false
+-- Goal-confirmation state (see the GOAL block below). GOAL_CONFIRM_TICKS is
+-- deliberately small: it exists to outlast boot-time garbage, not to make a
+-- real victory wait.
+local GOAL_CONFIRM_TICKS = 3
+local goal_seen_false    = false
+local goal_streak        = 0
+local goal_warned        = false
 local pending_checks = {}            -- ids waiting to be sent (buffered while offline)
 local sent_ids       = {}            -- location id -> true (session-level dedup)
 local item_queue     = {}            -- received item ids waiting to be applied
@@ -557,15 +564,40 @@ while true do
       end
     end
 
-    -- 4. Goal — send once.
+    -- 4. Goal — send once, and only once it is believable.
+    --
+    -- ⚠ A goal is irreversible: the server takes it, auto-collects, and
+    -- releases every remaining item in the world. One true reading is not
+    -- enough to act on. At boot the ROM signature is already valid while WRAM
+    -- still holds garbage, and a stray bit in the goal flag reads as a
+    -- finished run — exactly what happened to Pokemon Crystal on 19 Aug, one
+    -- second after the game started: 475 items released.
+    --
+    -- Two conditions, both cheap:
+    --   * the goal must have been seen FALSE at least once. Nobody wins before
+    --     the game has drawn a frame, so a first reading of "done" is a
+    --     reading of uninitialised memory, not a victory.
+    --   * it must then hold across GOAL_CONFIRM_TICKS consecutive polls.
     if not goal_sent then
       local ok_goal, done = pcall(game.is_goal_complete)
       if ok_goal and done == true then
-        if pipe_write("GOAL\n") then
-          goal_sent = true
-          flog("GOAL sent")
-          toast("goal complete — sent to Archipelago")
+        if not goal_seen_false then
+          if not goal_warned then
+            goal_warned = true
+            flog("goal read TRUE on the first poll — ignoring it; the game " ..
+                 "has not booted yet, so this is uninitialised memory")
+          end
+        else
+          goal_streak = goal_streak + 1
+          if goal_streak >= GOAL_CONFIRM_TICKS and pipe_write("GOAL\n") then
+            goal_sent = true
+            flog("GOAL sent (held for " .. goal_streak .. " polls)")
+            toast("goal complete — sent to Archipelago")
+          end
         end
+      else
+        goal_seen_false = true
+        goal_streak     = 0
       end
     end
 

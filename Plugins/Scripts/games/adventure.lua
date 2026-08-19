@@ -290,6 +290,13 @@ end
 
 function M.is_goal_complete()
   if not ADDRESSES_VERIFIED or not rom_is_adventure() then return false end
+  -- ⚠ The same readiness guard poll() uses. Without it the goal is judged
+  -- on memory the game has not written yet: at boot the ROM signature is
+  -- already valid while WRAM is still garbage, so a stray bit reads as a
+  -- finished run. That fired on Pokemon Crystal on 19 Aug -- the server
+  -- took the goal, auto-collected, and released all 475 remaining items
+  -- one second after the game started.
+  if not alive_mode() then return false end
   -- Victory: WinAddr (0xDE) becomes nonzero (0xFF) when the chalice is returned
   -- to the yellow castle — the connector's `victory = 1`. The default & only goal.
   local win = read_u8(WIN_ADDR, SYSTEM_BUS)

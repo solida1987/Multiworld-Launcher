@@ -349,6 +349,13 @@ end
 
 function M.is_goal_complete()
   if not ADDRESSES_VERIFIED or not rom_is_ap() then return false end
+  -- ⚠ The same readiness guard poll() uses. Without it the goal is judged
+  -- on memory the game has not written yet: at boot the ROM signature is
+  -- already valid while WRAM is still garbage, so a stray bit reads as a
+  -- finished run. That fired on Pokemon Crystal on 19 Aug -- the server
+  -- took the goal, auto-collected, and released all 475 remaining items
+  -- one second after the game started.
+  if not in_safe_gameplay() then return false end
   local s = read_u8(WGAMEPLAY_TYPE, SYSBUS)
   return s ~= nil and s == VICTORY_VALUE
 end
