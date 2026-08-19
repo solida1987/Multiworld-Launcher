@@ -2200,10 +2200,28 @@ public partial class MainWindow : Window
             _getEmulatorExe    = current.ExeName;
             _getEmulatorFolder = Path.Combine(AppContext.BaseDirectory, "Emulators",
                                               current.InstallSubdir);
-            BtnOverviewGetEmulator.Content    = $"⬇  Get {current.DisplayName}";
-            BtnOverviewGetEmulator.ToolTip    =
-                $"{current.DisplayName} is not bundled with this launcher — open its " +
-                "download page and put your own copy in the folder it names.";
+            // An installed bridge extension's declaration wins — it is the more
+            // specific one, and it can be updated without a launcher build. The
+            // backend's own declaration is the fallback for the emulators the
+            // launcher drives itself, which no extension speaks for.
+            _getEmulatorRequirement =
+                LauncherV2.Core.Extensions.BridgeRegistry.OfferFor(current.InstallSubdir)
+                ?? (current.Source is { IsComplete: true }
+                    ? new LauncherV2.Core.Extensions.EmulatorRequirement(
+                          current.InstallSubdir, current.DisplayName,
+                          current.HomepageUrl, current.ExeName, current.Source)
+                    : null);
+
+            bool canFetch = _getEmulatorRequirement is { CanOfferInstall: true };
+            BtnOverviewGetEmulator.Content = canFetch
+                ? $"⬇  Install {current.DisplayName}"
+                : $"⬇  Get {current.DisplayName}";
+            BtnOverviewGetEmulator.ToolTip = canFetch
+                ? $"{current.DisplayName} is not bundled with this launcher. This shows " +
+                  "you whose program it is and under what licence, then fetches it from " +
+                  "their own release into the right folder."
+                : $"{current.DisplayName} is not bundled with this launcher — open its " +
+                  "download page and put your own copy in the folder it names.";
             BtnOverviewGetEmulator.Visibility = Visibility.Visible;
         }
         else
@@ -2211,6 +2229,7 @@ public partial class MainWindow : Window
             // Cleared, not just hidden: a stale URL behind an invisible button
             // is the kind of thing that resurfaces later pointing somewhere odd.
             _getEmulatorName = _getEmulatorUrl = _getEmulatorExe = _getEmulatorFolder = null;
+            _getEmulatorRequirement = null;
             BtnOverviewGetEmulator.Visibility = Visibility.Collapsed;
         }
         // Switching emulators mid-session would strand the running bridge.
@@ -2227,10 +2246,35 @@ public partial class MainWindow : Window
     private string? _getEmulatorFolder;
     private string? _getEmulatorExe;
     private string? _getEmulatorName;
+    // Set when the missing backend declares a source we can offer to fetch;
+    // null falls back to pointing at the download page.
+    private LauncherV2.Core.Extensions.EmulatorRequirement? _getEmulatorRequirement;
 
-    private void BtnOverviewGetEmulator_Click(object sender, RoutedEventArgs e)
+    private async void BtnOverviewGetEmulator_Click(object sender, RoutedEventArgs e)
     {
         if (_getEmulatorUrl == null) return;
+
+        // Our own guided install, when the backend declares where it comes
+        // from. The offer window names the author and the licence, shows what
+        // it would download, and only fetches after the player agrees — so the
+        // normal answer to a missing emulator is a dialog in this launcher, not
+        // being dropped on a stranger's repository to work it out alone.
+        var offered = _getEmulatorRequirement;
+        if (offered is { CanOfferInstall: true })
+        {
+            string root = Path.Combine(AppContext.BaseDirectory, "Emulators");
+            string? exe = await LauncherV2.Core.Emulators.EmulatorInstallOffer
+                                    .RunAsync(this, offered, root);
+            // null covers "no thanks", cancelled, and a failed download alike —
+            // the offer window has already said which, and the manual route
+            // below stays available on the next click.
+            if (exe != null)
+            {
+                AppendLog($"[Emulator] {_getEmulatorName} installed to {Path.GetDirectoryName(exe)}");
+                if (_selectedPlugin != null) SelectGame(_selectedPlugin);
+            }
+            return;
+        }
 
         // Say whose program it is and where the file has to end up BEFORE the
         // browser opens -- a page in a new tab with no context is exactly the

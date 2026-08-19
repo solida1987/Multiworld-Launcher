@@ -77,6 +77,21 @@ public sealed record EmulatorBackend
     // Folder the launcher installs this backend into, next to the exe:
     // Emulators/<id>.
     public string InstallSubdir => Id == "bizhawk" ? "BizHawk" : Id;
+
+    // Where this program comes from, and whose work it is.
+    //
+    // Only bridge EXTENSIONS could declare this before, through
+    // BridgeRegistry.OfferFor. But the launcher drives some backends itself
+    // (the NWA and Attach dialects have no extension), so those had no
+    // declaration and the only thing left to do was open a browser on somebody
+    // else's repository — which is a strange place to land from a game page.
+    // A backend the launcher drives declares its own source here, and gets the
+    // same consent window and installer as an extension-declared one.
+    //
+    // Null means no offer: the player is told where to get it and does it
+    // themselves. Nothing is ever bundled, and nothing is fetched without the
+    // author and the licence being shown and agreed to first.
+    public LauncherV2.Core.Emulators.EmulatorSource? Source { get; init; }
 }
 
 // Static registry of known emulator backends + lookup helpers.
@@ -139,6 +154,22 @@ public static class EmulatorBackends
             // "snes9x-1.63-nwa-win32-x64.7z", exe "snes9x-x64.exe".
             ExeName       = "snes9x-x64.exe",
             Dialect       = BridgeDialect.Nwa,
+            // Read off the repository, not assumed: the only asset on the
+            // current release is snes9x-1.63-nwa-win32-x64.7z under tag
+            // 1.63-sa1, and snes9x's own licence grants binary distribution
+            // "for non-commercial purposes" while calling itself "freeware for
+            // PERSONAL USE only". So the launcher may fetch a copy FOR the
+            // player from the author's own release once they have seen who
+            // wrote it and under what terms — and may never ship it itself.
+            Source = new LauncherV2.Core.Emulators.EmulatorSource(
+                Author:       "Skarsnik (NWA fork) — snes9x by the Snes9x team",
+                Licence:      "Snes9x licence — non-commercial, personal use only",
+                LicenceUrl:   "https://github.com/Skarsnik/snes9x-emunwa/blob/master/LICENSE",
+                DownloadPage: "https://github.com/Skarsnik/snes9x-emunwa/releases",
+                Owner:        "Skarsnik",
+                Repo:         "snes9x-emunwa",
+                AssetPattern: "snes9x-1.63-nwa-win32-x64.7z",
+                PinnedTag:    "1.63-sa1"),
         },
 
         // SNI — not an emulator but the SNES community's bridge program: it
