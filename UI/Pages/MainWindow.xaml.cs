@@ -380,6 +380,14 @@ public partial class MainWindow : Window
                 Dispatcher.BeginInvoke(() => AppendLog($"[Assets] {msg}"));
         });
 
+        // Cover art for the game tiles.
+        // Box art is someone else's work, so the launcher ships none of it and
+        // fetches it onto THIS machine instead -- the same rule that already
+        // governs emulators. The player is asked once; the answer is kept
+        // either way and never asked again.
+        _ = Dispatcher.BeginInvoke(new Action(async () => await OfferGameArtAsync()),
+                                   System.Windows.Threading.DispatcherPriority.Background);
+
         // Wire achievement notifications.
         // grants can fire on plugin pipe threads (check counters), and a
         // synchronous hop would park the pipe's read loop on the UI thread.
@@ -6913,6 +6921,63 @@ public partial class MainWindow : Window
     // ONE confirm for every stop-the-game path — Play-button Stop, tray menu
     // (UX-8). Wording covers what is actually at risk: the process is killed,
     // so anything the game has not saved yet is gone.
+    // Fetches the covers the library is missing, asking first the one time.
+    private async Task OfferGameArtAsync()
+    {
+        try
+        {
+            var games = GameRegistry.All
+                            .Select(p => (p.GameId, p.IconPath))
+                            .Where(g => !string.IsNullOrWhiteSpace(g.GameId)
+                                        && !string.IsNullOrWhiteSpace(g.IconPath))
+                            .ToList();
+            var missing = GameArtFetcher.MissingFor(games);
+            if (missing.Count == 0) return;
+
+            var settings = SettingsStore.Load();
+            if (settings.GameArtConsent == false) return;   // asked, declined
+
+            if (settings.GameArtConsent == null)
+            {
+                var ask = MessageBox.Show(this,
+                    $"{missing.Count} of your games have no cover on their tile.\n\n"
+                    + "The launcher can download the covers to this computer. They "
+                    + "are not part of the launcher and are not stored in our "
+                    + "repository — it only holds the addresses, and the files land "
+                    + "in your own Assets folder.\n\n"
+                    + "The artwork belongs to the games' publishers.\n\n"
+                    + "Download the covers?",
+                    "Cover art", MessageBoxButton.YesNo, MessageBoxImage.Question);
+
+                settings.GameArtConsent = ask == MessageBoxResult.Yes;
+                SettingsStore.Save(settings);
+                if (!settings.GameArtConsent.Value)
+                {
+                    AppendLog("[Art] No covers downloaded — you said no.");
+                    return;
+                }
+            }
+
+            AppendLog($"[Art] Fetching {missing.Count} cover(s)...");
+            var res = await Task.Run(() => GameArtFetcher.FetchMissingAsync(games));
+            AppendLog($"[Art] {res.Fetched} downloaded, {res.Failed} failed.");
+
+            // Repaint with what actually arrived. No cache to clear first:
+            // LoadCachedBitmap stores successes only and returns early on a
+            // missing file, so these paths were never cached as misses.
+            if (res.Fetched > 0)
+            {
+                RebuildGameList();
+                RefreshHomePage();
+            }
+        }
+        catch (Exception e)
+        {
+            // A missing cover is a blank tile, never a broken launcher.
+            AppendLog($"[Art] {e.Message}");
+        }
+    }
+
     private bool ConfirmStopGame(IGamePlugin plugin)
     {
         bool apLive = _apClient?.State == ApConnectionState.Connected;
