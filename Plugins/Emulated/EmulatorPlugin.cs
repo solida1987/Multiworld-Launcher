@@ -938,6 +938,21 @@ public abstract class EmulatorPlugin : IGamePlugin
         // Attach. A short retry covers an SNI we started a moment ago; a
         // missing DEVICE is not retried into a hang — the player has to load
         // the ROM in their emulator, and the message tells them which file.
+        // ⚠ SNI does not start a game. It reads one you are already running,
+        // and with nothing attached there is nothing to wait for -- retrying
+        // for 15 seconds only delays the same answer. Ask up front, so the
+        // instruction arrives while the player is still looking at the button
+        // they pressed.
+        if (sni.GetUnmetRequirement() is { Length: > 0 } unmet)
+            throw new InvalidOperationException(
+                unmet + Environment.NewLine + Environment.NewLine
+              + "This seed's ROM is ready at:" + Environment.NewLine + launchRom
+              + Environment.NewLine + Environment.NewLine
+              + "SNI reads an emulator you run yourself — it never opens one. "
+              + "Start your SNES emulator, load the file above, then press Play "
+              + "again. (Want the launcher to start the game for you instead? "
+              + "Pick snes9x with the button next to Play.)");
+
         bool connected = false;
         var deadline = DateTime.UtcNow.AddSeconds(15);
         while (!connected && DateTime.UtcNow < deadline && !ct.IsCancellationRequested)
