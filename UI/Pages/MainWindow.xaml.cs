@@ -1136,25 +1136,33 @@ public partial class MainWindow : Window
     // launch would strand anyone whose patch is momentarily elsewhere.
     private bool EnsureSeedPatch(IGamePlugin plugin, SeedPatchRequest req)
     {
+        // Most games hand out a patch; a few hand out the finished, randomized
+        // game file (their world patches in its own code). Same dialog, but the
+        // words must name the thing the player is actually holding.
+        string thing = req.WhatToPick ?? "the patch file you were given for this seed";
+        string title = req.WhatToPick is null ? "Patch needed for this seed"
+                                              : "This seed's game file is needed";
+        string button = req.WhatToPick is null ? "Locate patch…" : "Locate game file…";
+
         while (true)
         {
             string body =
                 $"This is a new multiworld for {req.GameName}.\n\n" +
                 $"Seed: {req.Seed}\n" +
                 $"Your slot: {req.Slot}\n\n" +
-                "Point me at the patch file you were given for this seed. " +
+                $"Point me at {thing}. " +
                 "I only need it once — next time you join this seed I'll " +
                 "already have it.\n\n" +
-                "Your own game file is never modified; the patched copy is a " +
+                "Your own game file is never modified; the randomized copy is a " +
                 "separate file in the launcher's library.";
 
-            if (!ConfirmDialog.Show(this, "Patch needed for this seed", body,
-                                    "Locate patch…", "Play without it"))
+            if (!ConfirmDialog.Show(this, title, body,
+                                    button, "Play without it"))
                 return false;
 
             var dlg = new Microsoft.Win32.OpenFileDialog
             {
-                Title  = $"Select your {req.GameName} patch for slot {req.Slot}",
+                Title  = $"Select your {req.GameName} file for slot {req.Slot}",
                 Filter = req.FileFilter,
             };
             if (dlg.ShowDialog(this) != true)

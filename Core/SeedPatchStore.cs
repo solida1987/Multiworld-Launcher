@@ -163,6 +163,44 @@ public sealed class SeedPatchStore
         return dest;
     }
 
+    /// Store a file for (seed, slot) WITHOUT reading a patch manifest.
+    ///
+    /// For the games whose world builds the ROM in its own code there is no
+    /// container to inspect -- the thing the player supplies IS the finished,
+    /// randomized game file. The plugin has already checked what it can (that
+    /// the file is not the vanilla dump); this just files it under the seed so
+    /// the next Play finds it without asking.
+    public string ImportRaw(string sourcePath, string seed, string slot, string apWorldName)
+    {
+        if (!File.Exists(sourcePath))
+            throw new FileNotFoundException("The chosen file does not exist.", sourcePath);
+
+        Directory.CreateDirectory(PatchDirectory);
+
+        string safe = string.Concat($"{seed}_{slot}"
+            .Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c));
+        string fileName = safe + Path.GetExtension(sourcePath);
+        string dest = Path.Combine(PatchDirectory, fileName);
+
+        if (Path.GetFullPath(sourcePath) != Path.GetFullPath(dest))
+            File.Copy(sourcePath, dest, overwrite: true);
+
+        lock (_gate)
+        {
+            _entries.RemoveAll(x => Matches(x, seed, slot));
+            _entries.Add(new Entry
+            {
+                Seed  = seed,
+                Slot  = slot,
+                File  = fileName,
+                Game  = apWorldName,
+                Added = DateTimeOffset.UtcNow.ToString("O"),
+            });
+            Save();
+        }
+        return dest;
+    }
+
     /// Every patch already sitting in the folder that belongs to this seed but
     /// has not been claimed by a slot yet. Lets one pick cover a whole seed:
     /// a player who drops in all eight files for an eight-player game is not

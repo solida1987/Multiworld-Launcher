@@ -124,7 +124,33 @@ public static class EmulatorInstaller
         Directory.CreateDirectory(dest);
         progress?.Report(new Progress("Unpacking", 100));
 
-        try
+        if (assetName.EndsWith(".7z", StringComparison.OrdinalIgnoreCase))
+        {
+            // snes9x-emunwa ships only a .7z. Windows' own bsdtar unpacks it;
+            // ArchiveExtractor throws a player-readable message when the OS is
+            // too old to have one. Extraction lands wherever the archive says,
+            // so the single-top-folder layout these releases use is flattened
+            // until the exe sits directly in the agreed folder.
+            string tmp = Path.Combine(Path.GetTempPath(),
+                                      "mwl_" + Path.GetRandomFileName() + ".7z");
+            try
+            {
+                await File.WriteAllBytesAsync(tmp, bytes, ct);
+                ArchiveExtractor.Extract(tmp, dest);
+                ArchiveExtractor.FlattenSingleSubdir(dest, req.ExeName);
+            }
+            catch (Exception ex)
+            {
+                return new Result(false,
+                    $"{assetName} could not be unpacked ({ex.Message}). "
+                  + "Install by hand from " + src.DownloadPage, null);
+            }
+            finally
+            {
+                try { File.Delete(tmp); } catch { }
+            }
+        }
+        else try
         {
             using var zip = new ZipArchive(new MemoryStream(bytes), ZipArchiveMode.Read);
             foreach (var entry in zip.Entries)

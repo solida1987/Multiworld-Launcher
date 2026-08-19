@@ -230,6 +230,10 @@ public abstract class EmulatorPlugin : IGamePlugin
     private Snes9xLuaBridge? _nwaBridge;
     private int              _nwaDelivered;   // monotonic item-delivery cursor
 
+    // The SNI transport when the Attach backend is active. Same Lua bridge as
+    // NWA (_nwaBridge), different wire — see LaunchViaSniAsync.
+    private LauncherV2.Core.Extensions.IEmulatorBridge? _sniTransport;
+
     /// Per-launch pipe name disambiguator: a previous launch's servers may
     /// still be winding down (attach timeout, EmuHawk just killed) when the
     /// next launch creates new ones — same-name single-instance pipes would
@@ -386,6 +390,14 @@ public abstract class EmulatorPlugin : IGamePlugin
             if (!string.IsNullOrEmpty(prepared) && File.Exists(prepared))
                 launchRom = prepared;
         }
+        catch (LauncherV2.Core.Patching.SessionRomRefusedException)
+        {
+            // Proven wrong file. Every other failure below falls back to the
+            // library ROM, because a game that runs unsynced still beats no
+            // game — but that reasoning only holds when we do not KNOW the
+            // session is pointless. Here we do.
+            throw;
+        }
         catch (Exception ex)
         {
             Trace($"session ROM preparation failed: {ex.Message}");
@@ -428,6 +440,11 @@ public abstract class EmulatorPlugin : IGamePlugin
         if (nwaBackend.Dialect == BridgeDialect.Nwa)
         {
             await LaunchViaNwaAsync(nwaBackend, launchRom, session, ct);
+            return;
+        }
+        if (nwaBackend.Dialect == BridgeDialect.Attach)
+        {
+            await LaunchViaSniAsync(nwaBackend, launchRom, session, ct);
             return;
         }
 
@@ -679,6 +696,121 @@ public abstract class EmulatorPlugin : IGamePlugin
         bridge.Start(ct);
     }
 
+    // ── SNI attach path ─────────────────────────────────────────────────────
+
+    /// Attach to SNI and run this game's Lua module launcher-side over it —
+    /// the same Snes9xLuaBridge that drives snes9x over NWA, on a different
+    /// wire. The launcher starts NOTHING except SNI itself (when the player
+    /// has put sni.exe in Emulators\sni\): the SNES emulator or console is the
+    /// player's, and SNI lists it as a device once it is running the ROM.
+    ///
+    /// So the order the player experiences is inverted from every other
+    /// backend: emulator first, Play second. When no device is attached yet,
+    /// this throws a message that says exactly which ROM to load and where it
+    /// is — pressing Play again after that succeeds immediately.
+    private async Task LaunchViaSniAsync(EmulatorBackend backend, string launchRom,
+                                         ApSession session, CancellationToken ct)
+    {
+        StartTrace();
+        DisposeNwa();
+
+        var sni = LauncherV2.Core.Extensions.BridgeRegistry.Find("sni")
+            ?? throw new InvalidOperationException(
+                LauncherV2.Core.Extensions.BridgeRegistry.ExplainMissing("sni", DisplayName)
+                ?? "The SNI bridge extension is not installed.");
+
+        // SNI itself is startable: it is a background helper, not an emulator.
+        string sniExe = Path.Combine(AppContext.BaseDirectory, "Emulators",
+                                     backend.InstallSubdir, backend.ExeName);
+        if (File.Exists(sniExe)
+            && Process.GetProcessesByName(
+                   Path.GetFileNameWithoutExtension(backend.ExeName)).Length == 0)
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName         = sniExe,
+                    WorkingDirectory = Path.GetDirectoryName(sniExe)!,
+                    UseShellExecute  = false,
+                });
+                Trace("SNI was not running — started it from Emulators\\"
+                      + backend.InstallSubdir);
+            }
+            catch (Exception ex) { Trace($"could not start sni.exe: {ex.Message}"); }
+        }
+
+        var context = new LauncherV2.Core.Extensions.BridgeContext(
+            GameId, RomSystem, launchRom, EmulatorDirectory);
+
+        // Attach. A short retry covers an SNI we started a moment ago; a
+        // missing DEVICE is not retried into a hang — the player has to load
+        // the ROM in their emulator, and the message tells them which file.
+        bool connected = false;
+        var deadline = DateTime.UtcNow.AddSeconds(15);
+        while (!connected && DateTime.UtcNow < deadline && !ct.IsCancellationRequested)
+        {
+            try { connected = await sni.ConnectAsync(context, ct); }
+            catch (OperationCanceledException) { break; }
+            catch { connected = false; }
+            if (!connected)
+                try { await Task.Delay(1500, ct); } catch { break; }
+        }
+
+        if (!connected)
+            throw new InvalidOperationException(
+                (sni.GetUnmetRequirement() ?? "SNI has no device attached.")
+              + "\n\nThis seed's ROM is ready at:\n" + launchRom
+              + "\n\nLoad it in your own SNES emulator (connected to SNI), "
+              + "then press Play again.");
+
+        _sniTransport = sni;
+        ConnectorAttached = true;
+        IsRunning = true;
+        Trace($"SNI attached — starting Lua bridge ({LuaModuleName})");
+
+        string modulePath = Path.Combine(ScriptsDirectory, "games", LuaModuleName + ".lua");
+        var cfg = new BridgeConfig
+        {
+            SlotNumber = GetOwnSlot?.Invoke() ?? 0,
+            Locations  = GetServerLocations?.Invoke() ?? Array.Empty<long>(),
+            SlotData   = ConvertSlotData(GetSlotData?.Invoke()),
+        };
+
+        Snes9xLuaBridge bridge;
+        try
+        {
+            bridge = new Snes9xLuaBridge(new SniMemory(sni), modulePath, cfg,
+                                         log: Trace, tag: "sni");
+        }
+        catch (Exception ex)
+        {
+            Trace($"Lua bridge failed to start: {ex.Message}");
+            SessionRomNote ??= $"[{DisplayName}] attached to SNI but the AP logic "
+                + $"module failed to load ({ex.Message}) — the game runs without sync.";
+            await sni.DisconnectAsync();
+            _sniTransport = null;
+            IsRunning = false;
+            return;
+        }
+        bridge.LocationsChecked += ids =>
+        { try { LocationsChecked?.Invoke(ids); } catch (Exception ex) { Trace($"LocationsChecked handler: {ex.Message}"); } };
+        bridge.GoalCompleted += () =>
+        { try { GoalCompleted?.Invoke(); } catch (Exception ex) { Trace($"GoalCompleted handler: {ex.Message}"); } };
+        bridge.Disconnected += why =>
+        {
+            Trace($"SNI bridge disconnected: {why}");
+            IsRunning = false;
+            GameExited?.Invoke(0);
+        };
+        _nwaBridge = bridge;
+
+        SessionRomNote ??= $"[{DisplayName}] Connected through SNI. Playing:\n{launchRom}";
+
+        lock (_itemsLock) { _nwaDelivered = 0; PushItemsToNwaBridgeLocked(); }
+        bridge.Start(ct);
+    }
+
     /// Top-level slot_data (JsonElement) → the bool/long/double/string map the
     /// Lua modules read (e.g. remote_items). Null/non-object → null.
     private static IReadOnlyDictionary<string, object?>? ConvertSlotData(JsonElement? slotData)
@@ -703,8 +835,10 @@ public abstract class EmulatorPlugin : IGamePlugin
     {
         try { _nwaBridge?.Dispose(); } catch { }
         try { _nwaClient?.Dispose(); } catch { }
+        try { _sniTransport?.DisconnectAsync().GetAwaiter().GetResult(); } catch { }
         _nwaBridge = null;
         _nwaClient = null;
+        _sniTransport = null;
         _nwaDelivered = 0;
     }
 
@@ -1009,126 +1143,140 @@ public abstract class EmulatorPlugin : IGamePlugin
             Margin = new Thickness(0, 0, 0, 20),
         });
 
-        // ── Section: BizHawk emulator ────────────────────────────────────────
-        panel.Children.Add(new TextBlock
-        {
-            Text = "BIZHAWK EMULATOR", FontSize = 10, FontWeight = FontWeights.SemiBold,
-            Foreground = muted, Margin = new Thickness(0, 0, 0, 8),
-        });
+        // ── Section: the selected emulator ───────────────────────────────────
+        //
+        // Redrawn whenever the combo above changes: this section used to be
+        // computed once, for BizHawk, under a hardcoded "BIZHAWK EMULATOR"
+        // heading — so picking snes9x showed BizHawk's status and BizHawk's
+        // folder, and the download offer for the newly chosen emulator never
+        // appeared without leaving the page and coming back.
+        var emuSection = new StackPanel();
+        panel.Children.Add(emuSection);
 
-        bool emuPresent = IsEmulatorPresent;
-        // §3: show the recorded installed version (the tag the pin resolved to)
-        // when present, so the player can see exactly what BizHawk build is on
-        // disk vs. the pinned target.
-        string presentText = "✓ BizHawk is installed";
-        var emuStatus = new TextBlock
+        void RenderEmuSection()
         {
-            Text       = emuPresent ? presentText : "✗ BizHawk not found",
-            FontSize   = 12,
-            Foreground = emuPresent ? success : error,
-            Margin     = new Thickness(0, 0, 0, 8),
-        };
-        panel.Children.Add(emuStatus);
-
-        if (!emuPresent)
-        {
+            emuSection.Children.Clear();
             var backend = ResolveSelectedBackend();
 
-            // An installed bridge may have declared where this emulator comes
-            // from. If it has, the player gets a real choice here instead of an
-            // instruction; if it has not, this page reads exactly as it always
-            // did. Looked up by folder -- see BridgeRegistry.OfferFor.
-            var offer = LauncherV2.Core.Extensions.BridgeRegistry
-                                  .OfferFor(backend.InstallSubdir);
-
-            panel.Children.Add(new TextBlock
+            emuSection.Children.Add(new TextBlock
             {
-                Text = offer is null
-                    ? $"The launcher does not include {backend.DisplayName}. Get it " +
-                      $"from {backend.HomepageUrl} and extract it into the folder below, " +
-                      $"so that {backend.ExeName} sits directly in it."
-                    : $"{backend.DisplayName} is {offer.Source!.Author}'s program, under " +
-                      $"{offer.Source.Licence}. Put your own copy in the folder below, or " +
-                      "let the launcher fetch that same file from their own release — it " +
-                      "shows you what it would download before it downloads anything.",
-                FontSize     = 11,
-                Foreground   = muted,
-                TextWrapping = TextWrapping.Wrap,
-                Margin       = new Thickness(0, 0, 0, 8),
+                Text = backend.DisplayName.ToUpperInvariant(),
+                FontSize = 10, FontWeight = FontWeights.SemiBold,
+                Foreground = muted, Margin = new Thickness(0, 0, 0, 8),
             });
 
-            if (offer is not null)
+            bool emuPresent = IsEmulatorPresent;
+            string presentText = $"✓ {backend.DisplayName} is installed";
+            var emuStatus = new TextBlock
             {
-                var getBtn = new Button
+                Text       = emuPresent ? presentText : $"✗ {backend.DisplayName} not found",
+                FontSize   = 12,
+                Foreground = emuPresent ? success : error,
+                Margin     = new Thickness(0, 0, 0, 8),
+            };
+            emuSection.Children.Add(emuStatus);
+
+            if (!emuPresent)
+            {
+                // An installed bridge may have declared where this emulator comes
+                // from. If it has, the player gets a real choice here instead of
+                // an instruction; if it has not, this page reads exactly as it
+                // always did. Looked up by folder -- see BridgeRegistry.OfferFor.
+                var offer = LauncherV2.Core.Extensions.BridgeRegistry
+                                      .OfferFor(backend.InstallSubdir);
+
+                emuSection.Children.Add(new TextBlock
                 {
-                    Content = $"Get {backend.DisplayName}...",
+                    Text = offer is null
+                        ? $"The launcher does not include {backend.DisplayName}. Get it " +
+                          $"from {backend.HomepageUrl} and extract it into the folder below, " +
+                          $"so that {backend.ExeName} sits directly in it."
+                        : $"{backend.DisplayName} is {offer.Source!.Author}'s program, under " +
+                          $"{offer.Source.Licence}. Put your own copy in the folder below, or " +
+                          "let the launcher fetch that same file from their own release — it " +
+                          "shows you what it would download before it downloads anything.",
+                    FontSize     = 11,
+                    Foreground   = muted,
+                    TextWrapping = TextWrapping.Wrap,
+                    Margin       = new Thickness(0, 0, 0, 8),
+                });
+
+                if (offer is not null)
+                {
+                    var getBtn = new Button
+                    {
+                        Content = $"Get {backend.DisplayName}...",
+                        Padding = new Thickness(14, 7, 14, 7),
+                        Margin  = new Thickness(0, 0, 0, 8),
+                        Background  = new SolidColorBrush(Color.FromRgb(0x1A, 0x1E, 0x30)),
+                        Foreground  = fg,
+                        BorderBrush = new SolidColorBrush(Color.FromRgb(0x2A, 0x30, 0x50)),
+                    };
+                    emuSection.Children.Add(getBtn);
+
+                    getBtn.Click += async (_, _) =>
+                    {
+                        getBtn.IsEnabled = false;
+                        try
+                        {
+                            EnsureEmulatorFolders();
+                            string? exe = await LauncherV2.Core.Emulators.EmulatorInstallOffer
+                                .RunAsync(Window.GetWindow(panel), offer, EmulatorsRoot);
+
+                            // Say what is true now, not what was true when the
+                            // page was drawn -- the player may have installed it
+                            // by hand from the folder the dialog opened for them.
+                            bool now = exe is not null || IsEmulatorPresent;
+                            emuStatus.Text = now
+                                ? presentText
+                                : $"✗ {backend.DisplayName} not found";
+                            emuStatus.Foreground = now ? success : error;
+                        }
+                        finally { getBtn.IsEnabled = true; }
+                    };
+                }
+
+                var openBtn = new Button
+                {
+                    Content = "Open emulator folder",
                     Padding = new Thickness(14, 7, 14, 7),
                     Margin  = new Thickness(0, 0, 0, 8),
                     Background  = new SolidColorBrush(Color.FromRgb(0x1A, 0x1E, 0x30)),
                     Foreground  = fg,
                     BorderBrush = new SolidColorBrush(Color.FromRgb(0x2A, 0x30, 0x50)),
                 };
-                panel.Children.Add(getBtn);
+                emuSection.Children.Add(openBtn);
 
-                getBtn.Click += async (_, _) =>
+                openBtn.Click += (_, _) =>
                 {
-                    getBtn.IsEnabled = false;
                     try
                     {
                         EnsureEmulatorFolders();
-                        string? exe = await LauncherV2.Core.Emulators.EmulatorInstallOffer
-                            .RunAsync(Window.GetWindow(panel), offer, EmulatorsRoot);
-
-                        // Say what is true now, not what was true when the page
-                        // was drawn -- the player may have installed it by hand
-                        // from the folder the dialog opened for them.
-                        bool now = exe is not null || IsEmulatorPresent;
-                        emuStatus.Text = now
-                            ? presentText
-                            : $"✗ {backend.DisplayName} not found";
-                        emuStatus.Foreground = now ? success : error;
+                        Process.Start(new ProcessStartInfo
+                        {
+                            FileName        = EmulatorDirectory,
+                            UseShellExecute = true,
+                        });
                     }
-                    finally { getBtn.IsEnabled = true; }
+                    catch (Exception ex)
+                    {
+                        emuStatus.Text       = $"Could not open the folder: {ex.Message}";
+                        emuStatus.Foreground = error;
+                    }
                 };
             }
 
-            var openBtn = new Button
+            emuSection.Children.Add(new TextBlock
             {
-                Content = "Open emulator folder",
-                Padding = new Thickness(14, 7, 14, 7),
-                Margin  = new Thickness(0, 0, 0, 8),
-                Background  = new SolidColorBrush(Color.FromRgb(0x1A, 0x1E, 0x30)),
-                Foreground  = fg,
-                BorderBrush = new SolidColorBrush(Color.FromRgb(0x2A, 0x30, 0x50)),
-            };
-            panel.Children.Add(openBtn);
-
-            openBtn.Click += (_, _) =>
-            {
-                try
-                {
-                    EnsureEmulatorFolders();
-                    Process.Start(new ProcessStartInfo
-                    {
-                        FileName        = EmulatorDirectory,
-                        UseShellExecute = true,
-                    });
-                }
-                catch (Exception ex)
-                {
-                    emuStatus.Text       = $"Could not open the folder: {ex.Message}";
-                    emuStatus.Foreground = error;
-                }
-            };
+                Text     = $"Install path: {EmulatorDirectory}",
+                FontSize = 10,
+                Foreground = muted,
+                Margin   = new Thickness(0, 4, 0, 0),
+            });
         }
 
-        panel.Children.Add(new TextBlock
-        {
-            Text     = $"Install path: {EmulatorDirectory}",
-            FontSize = 10,
-            Foreground = muted,
-            Margin   = new Thickness(0, 4, 0, 0),
-        });
+        RenderEmuSection();
+        emuCombo.SelectionChanged += (_, _) => RenderEmuSection();
 
         return panel;
     }
@@ -1345,6 +1493,18 @@ public abstract class EmulatorPlugin : IGamePlugin
     /// the UI shows so the player can locate the file. The base implementation
     /// only knows "a ROM is missing"; subclasses with a patch (which carries
     /// the exact base-ROM MD5) override this to demand the RIGHT version.
+    /// ⚠ Both of these MUST live here, virtual, and not only in a subclass.
+    /// This class is the one that implements IGamePlugin, so the interface
+    /// mapping is fixed HERE: a subclass method that is not an override is
+    /// invisible through the interface, and every call lands on the
+    /// interface's own default (null = "never ask"). That is exactly how the
+    /// per-seed file prompt sat dead in every catalogue plugin — the same
+    /// trap as the proxy hole and the credits default.
+    public virtual SeedPatchRequest? GetUnmetSeedPatch(string seed, string slot) => null;
+
+    public virtual string? ImportSeedPatch(string sourcePath, string seed, string slot)
+        => null;
+
     public virtual RomRequirement? GetUnmetRomRequirement()
     {
         if (RomPath != null && File.Exists(RomPath)) return null;

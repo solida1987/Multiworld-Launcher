@@ -72,7 +72,8 @@ local items_received   = {}
 local slot_number      = 0
 local locations_start  = nil    -- locations_start_id (per-slot AP base) — REQUIRED
 local items_start      = nil    -- items_start_id     (per-slot AP base) — REQUIRED
-local rom_ok           = nil
+local rom_ok           = nil    -- true once the "SM" signature has been seen
+local rom_said_no      = false  -- the "not yet" line is logged once, not per poll
 local mem              = {}
 local log_fn           = nil
 
@@ -170,15 +171,24 @@ local function band(a, b)
 end
 
 -- ── ROM identity: AP basepatch leaves "SM" at the start of the ROM-name field ─
+-- Only the YES is cached: the signature sits in save RAM, which the game fills
+-- in during boot, so a NO read moments after launch says nothing about the
+-- cartridge.
 local function rom_is_ap()
-  if rom_ok ~= nil then return rom_ok end
+  if rom_ok then return true end
   local s = cartram_read_u8(ROMNAME_OFF)
   local m = cartram_read_u8(ROMNAME_OFF + 1)
   if s == nil or m == nil then return false end
-  rom_ok = (s == string.byte("S") and m == string.byte("M"))
-  if rom_ok then log("AP ROM verified ('SM' signature present)")
-  else log("non-AP ROM (no 'SM' signature) — idle, no writes") end
-  return rom_ok
+  if s == string.byte("S") and m == string.byte("M") then
+    rom_ok = true
+    log("AP ROM verified ('SM' signature present)")
+    return true
+  end
+  if not rom_said_no then
+    rom_said_no = true
+    log("no 'SM' signature in save RAM yet — the game writes it on boot; watching")
+  end
+  return false
 end
 
 local function load_locations(ids)
