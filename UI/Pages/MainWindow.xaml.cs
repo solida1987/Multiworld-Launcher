@@ -2089,6 +2089,23 @@ public partial class MainWindow : Window
             var blockers = _selectedPlugin.DetectComponents()
                 .Where(c => c.Need == ComponentNeed.Required && !c.Present)
                 .ToList();
+            // The emulator is a launch requirement like any other. Blocking Play
+            // here is the point: pressing it and getting an error dialog is a
+            // dead end the player had to walk into to discover.
+            if (!_selectedPlugin.EmulatorReady)
+            {
+                var emu = _selectedPlugin.AvailableBackends().FirstOrDefault(
+                        b => string.Equals(b.Id, _selectedPlugin.SelectedEmulatorId,
+                                           StringComparison.OrdinalIgnoreCase));
+                string name = emu?.DisplayName ?? "The chosen emulator";
+                why = $"Cannot launch — {name} is not on this machine."
+                    + Environment.NewLine + Environment.NewLine
+                    + $"Use \"Get {name}\" to open its download page, then put "
+                    + $"{emu?.ExeName ?? "the program"} in the folder it names."
+                    + Environment.NewLine + Environment.NewLine
+                    + "Or choose a different emulator with the button next to Play.";
+            }
+
             if (blockers.Count > 0)
                 why = "Cannot launch — " + string.Join(", ", blockers.Select(b => b.Name))
                     + Environment.NewLine + Environment.NewLine
@@ -2172,12 +2189,75 @@ public partial class MainWindow : Window
 
         BtnOverviewEmulator.Content    = $"🎮  {current.DisplayName}  ▾";
         BtnOverviewEmulator.Visibility = Visibility.Visible;
+
+        // The one action left when the chosen emulator is not here. Play is
+        // blocked in this state, so without this button the page would show a
+        // dead end and nothing to press.
+        if (!plugin.EmulatorReady)
+        {
+            _getEmulatorName   = current.DisplayName;
+            _getEmulatorUrl    = current.HomepageUrl;
+            _getEmulatorExe    = current.ExeName;
+            _getEmulatorFolder = Path.Combine(AppContext.BaseDirectory, "Emulators",
+                                              current.InstallSubdir);
+            BtnOverviewGetEmulator.Content    = $"⬇  Get {current.DisplayName}";
+            BtnOverviewGetEmulator.ToolTip    =
+                $"{current.DisplayName} is not bundled with this launcher — open its " +
+                "download page and put your own copy in the folder it names.";
+            BtnOverviewGetEmulator.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            // Cleared, not just hidden: a stale URL behind an invisible button
+            // is the kind of thing that resurfaces later pointing somewhere odd.
+            _getEmulatorName = _getEmulatorUrl = _getEmulatorExe = _getEmulatorFolder = null;
+            BtnOverviewGetEmulator.Visibility = Visibility.Collapsed;
+        }
         // Switching emulators mid-session would strand the running bridge.
         BtnOverviewEmulator.IsEnabled  = !plugin.IsRunning;
         BtnOverviewEmulator.ToolTip    = plugin.IsRunning
             ? "Stop the game before switching emulator."
             : "Runs on " + current.DisplayName + ". Click to choose another: "
               + string.Join(", ", backends.Select(b => b.DisplayName)) + ".";
+    }
+
+    // Where the missing emulator comes from. Set by RefreshEmulatorButton so the
+    // click handler never has to re-derive it.
+    private string? _getEmulatorUrl;
+    private string? _getEmulatorFolder;
+    private string? _getEmulatorExe;
+    private string? _getEmulatorName;
+
+    private void BtnOverviewGetEmulator_Click(object sender, RoutedEventArgs e)
+    {
+        if (_getEmulatorUrl == null) return;
+
+        // Say whose program it is and where the file has to end up BEFORE the
+        // browser opens -- a page in a new tab with no context is exactly the
+        // "suddenly somewhere strange with no explanation" this replaces.
+        bool go = ConfirmDialog.Show(this,
+            $"Get {_getEmulatorName}",
+            $"{_getEmulatorName} is not part of this launcher and is not bundled with " +
+            "it — it is someone else's program, and you get your own copy from them." +
+            Environment.NewLine + Environment.NewLine +
+            "This opens their download page in your browser:" +
+            Environment.NewLine + $"    {_getEmulatorUrl}" +
+            Environment.NewLine + Environment.NewLine +
+            $"Put {_getEmulatorExe} directly into:" +
+            Environment.NewLine + $"    {_getEmulatorFolder}" +
+            Environment.NewLine + Environment.NewLine +
+            "Then come back and press Play — the launcher checks the folder every " +
+            "time you open this page.",
+            "Open the download page", "Cancel");
+
+        if (!go) return;
+
+        // The folder must exist before they come back with the file, or the
+        // instruction points at nothing.
+        try { Directory.CreateDirectory(_getEmulatorFolder!); } catch { /* shown below anyway */ }
+        OpenUrl(_getEmulatorUrl);
+        AppendLog($"[Emulator] Opened the {_getEmulatorName} download page — " +
+                  $"the file belongs in {_getEmulatorFolder}");
     }
 
     private void BtnOverviewEmulator_Click(object sender, RoutedEventArgs e)
