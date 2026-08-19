@@ -23,9 +23,20 @@ public sealed record ApVersion(
     [JsonPropertyName("class")]
     public string Class => "Version";
 
-    // The version we claim when connecting.
-    // if the protocol is compatible; 0.5.0 works with all current AP servers.
-    public static ApVersion ClientVersion => new(0, 5, 0);
+    // The Archipelago version this client speaks, sent in the Connect packet.
+    //
+    // This is NOT cosmetic and it is NOT "the newest number we can type". A
+    // world may declare `required_client_version`, and the server refuses any
+    // client claiming less -- Pokemon Crystal asks for (0, 6, 0), and the
+    // stale 0.5.0 here meant the game could be installed, patched and staged
+    // and still be unjoinable, with only "the launcher may need an update" to
+    // go on.
+    //
+    // So it tracks the Archipelago release the protocol here is written and
+    // tested against. Raise it when that changes -- never to clear a refusal
+    // on its own, because claiming support we do not have moves the failure
+    // from a clean refusal to a broken session.
+    public static ApVersion ClientVersion => new(0, 6, 7);
 }
 
 // --- items_handling bitmask ---

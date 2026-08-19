@@ -3423,7 +3423,12 @@ public partial class MainWindow : Window
                 $"This slot is for a different game, not {plugin.ApWorldName} — " +
                 "pick the slot's game in the library, then connect again.",
             "IncompatibleVersion" =>
-                "The server rejected this client version — the launcher may need an update.",
+                $"{plugin.ApWorldName} needs a newer Archipelago client than this "
+              + $"launcher reports (it says {ApVersion.ClientVersion.Major}."
+              + $"{ApVersion.ClientVersion.Minor}.{ApVersion.ClientVersion.Build}). "
+              + "The world author sets that minimum, so this is a launcher "
+              + "update rather than anything you can change here — check for "
+              + "one in Settings, and tell me the game name if it persists.",
             "Timeout" =>
                 "The server accepted the connection but never answered the login " +
                 "(waited 15 seconds) — check the address and port, then try again.",
