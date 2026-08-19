@@ -118,6 +118,24 @@ public static class EmulatorBackends
             BridgeReady   = true,                       // proven (Pokémon Emerald)
             HomepageUrl   = "https://tasvideos.org/BizHawk",
             ExeName       = "EmuHawk.exe",
+            // Verified against the releases API: tag 2.11.1 carries exactly
+            // BizHawk-2.11.1-win-x64.zip for Windows.
+            //
+            // The licence line is deliberately not the flat "MIT" GitHub would
+            // suggest. BizHawk's own LICENSE says the team's work is MIT but the
+            // repository also embeds cores under other, partly incompatible
+            // licences, and calls its own condition "a minefield". The player is
+            // told that and given the file to read, rather than a tidy label
+            // that is not quite true.
+            Source = new LauncherV2.Core.Emulators.EmulatorSource(
+                Author:       "the BizHawk team",
+                Licence:      "MIT for BizHawk's own work; bundled cores carry their own",
+                LicenceUrl:   "https://github.com/TASEmulators/BizHawk/blob/master/LICENSE",
+                DownloadPage: "https://github.com/TASEmulators/BizHawk/releases",
+                Owner:        "TASEmulators",
+                Repo:         "BizHawk",
+                AssetPattern: "BizHawk-2.11.1-win-x64.zip",
+                PinnedTag:    "2.11.1"),
         },
 
         // PCSX2 — dedicated PS1/PS2 emulator.
@@ -188,6 +206,18 @@ public static class EmulatorBackends
             HomepageUrl   = "https://github.com/alttpo/sni",
             ExeName       = "sni.exe",
             Dialect       = BridgeDialect.Attach,
+            // Verified against the releases API: tag v0.0.103 publishes ten
+            // platform builds, of which sni-v0.0.103-windows-amd64.zip is the
+            // 64-bit Windows one. Plain MIT, stated as such by the project.
+            Source = new LauncherV2.Core.Emulators.EmulatorSource(
+                Author:       "the SNI project (alttpo)",
+                Licence:      "MIT",
+                LicenceUrl:   "https://github.com/alttpo/sni/blob/main/LICENSE",
+                DownloadPage: "https://github.com/alttpo/sni/releases",
+                Owner:        "alttpo",
+                Repo:         "sni",
+                AssetPattern: "sni-v0.0.103-windows-amd64.zip",
+                PinnedTag:    "v0.0.103"),
         },
     };
 
