@@ -213,7 +213,13 @@ public abstract class EmulatorPlugin : IGamePlugin
     public string? LastSlotName
     {
         get { EnsureSettingsLoaded(); return _lastSlotName; }
-        set { EnsureSettingsLoaded(); _lastSlotName = value; }
+        set
+        {
+            EnsureSettingsLoaded();
+            if (_lastSlotName == value) return;
+            _lastSlotName = value;
+            try { SaveSettings(); } catch { /* a remembered name is a courtesy */ }
+        }
     }
     private string? _lastSlotName;
 

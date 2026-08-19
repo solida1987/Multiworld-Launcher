@@ -300,6 +300,16 @@ public interface IGamePlugin
     // not use one. Non-null asks the player for it, once, and the answer is
     // remembered -- see SeedPatchStore for why the link cannot be read out of
     // the patch file itself.
+    /// The slot name this game last joined a multiworld with, remembered so
+    /// the connect panel fills itself in when the player picks the game.
+    ///
+    /// ⚠ Lives on the INTERFACE, not on EmulatorPlugin. A plugin loaded from a
+    /// package arrives wrapped in SafePluginProxy, so `is EmulatorPlugin` is
+    /// false for every catalogue game -- a concrete cast here silently does
+    /// nothing, which is exactly how the pre-fill shipped broken. Setting it
+    /// persists; the launcher never has to remember to save.
+    string? LastSlotName { get => null; set { } }
+
     SeedPatchRequest? GetUnmetSeedPatch(string seed, string slot) => null;
 
     // Store a patch the player just picked. Returns null on success, or a

@@ -814,8 +814,7 @@ public partial class MainWindow : Window
         // the launcher claims the SELECTED game's name for whatever slot is in
         // the box. Carrying one slot across games is therefore not a
         // convenience but a guaranteed "InvalidGame" the moment you switch.
-        if (_apClient == null && plugin is Plugins.Emulated.EmulatorPlugin slotOwner
-            && slotOwner.LastSlotName is { Length: > 0 } remembered)
+        if (_apClient == null && plugin.LastSlotName is { Length: > 0 } remembered)
             TxtSlotName.Text = remembered;
         HighlightGameCard(plugin);
 
@@ -3162,11 +3161,7 @@ public partial class MainWindow : Window
 
         // Remember which slot this game joined with, so picking it again next
         // week fills the box for you instead of leaving last game's slot there.
-        if (plugin is Plugins.Emulated.EmulatorPlugin ep && ep.LastSlotName != slot)
-        {
-            ep.LastSlotName = slot;
-            try { ep.SaveSettings(); } catch { /* a remembered name is a courtesy */ }
-        }
+        plugin.LastSlotName = slot;
         _apClient       = new ApClient(_currentSession, plugin);
 
         // --- Wire global AP events ---
@@ -3420,8 +3415,7 @@ public partial class MainWindow : Window
             // right, the server is broken". When this game has joined before,
             // the remembered name settles it outright.
             "InvalidSlot" =>
-                plugin is Plugins.Emulated.EmulatorPlugin slotMemory
-                && slotMemory.LastSlotName is { Length: > 0 } known
+                plugin.LastSlotName is { Length: > 0 } known
                 && !string.Equals(known, slotName, StringComparison.Ordinal)
                 ? (string.Equals(known, slotName, StringComparison.OrdinalIgnoreCase)
                     ? $"No slot named '{slotName}' — slot names are case-sensitive, "

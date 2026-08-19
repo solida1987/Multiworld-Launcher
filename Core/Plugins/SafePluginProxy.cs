@@ -256,6 +256,12 @@ public sealed class SafePluginProxy : IGamePlugin
     // Fallback null = "nothing to ask". A broken plugin must not block a launch
     // with a question the player cannot satisfy; the launch itself will report
     // the missing patch through SessionRomNote.
+    public string? LastSlotName
+    {
+        get => Get<string?>(() => _inner.LastSlotName, null);
+        set { try { _inner.LastSlotName = value; } catch { /* plugin fault, not ours */ } }
+    }
+
     public SeedPatchRequest? GetUnmetSeedPatch(string seed, string slot)
         => Get<SeedPatchRequest?>(() => _inner.GetUnmetSeedPatch(seed, slot), null);
 
