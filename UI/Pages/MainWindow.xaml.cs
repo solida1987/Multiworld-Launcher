@@ -3258,7 +3258,7 @@ public partial class MainWindow : Window
                     _ = _apClient!.LocationScoutsAsync(allIds, createAsHint: 0);
             }
         };
-        _apClient.ItemsReceived += (items, receiverSlot) =>
+        _apClient.ItemsReceived += (items, receiverSlot, _) =>
             _tracker.RecordItems(items, receiverSlot);
         _apClient.LocationInfoReceived += items =>
         {
@@ -8251,7 +8251,7 @@ public partial class MainWindow : Window
                         _ = _apClient!.LocationScoutsAsync(allIds, createAsHint: 0);
                 }
             };
-            _apClient.ItemsReceived += (items, receiverSlot) =>
+            _apClient.ItemsReceived += (items, receiverSlot, _) =>
                 _tracker.RecordItems(items, receiverSlot);
             _apClient.LocationInfoReceived += items =>
             {

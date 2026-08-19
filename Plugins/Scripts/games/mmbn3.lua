@@ -297,6 +297,10 @@ function M.poll()
   if not ADDRESSES_VERIFIED then return new end
   refresh_flags()
   if not flags_trustworthy() then return new end   -- canary guard
+  -- ⚠ Same gate the goal check applies: on the title screen (or in garbage
+  -- that happens to dodge the canary -- measured: 132 leaked checks against
+  -- noise) nothing may be reported. is_game_complete does this; poll did not.
+  if on_title() then return new end
   for ap_id, entry in pairs(LOC) do
     if not reported[ap_id] and wanted(ap_id) and flag_set(entry[1], entry[2]) then
       reported[ap_id] = true

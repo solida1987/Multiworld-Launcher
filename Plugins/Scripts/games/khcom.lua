@@ -242,13 +242,23 @@ end
 -- The connector's own loop gates real work on play-time > 3 (a fresh boot /
 -- title screen sits at 0..1). Mirror that so journal garbage on the title
 -- screen is never reported. play-time is a u24 LE counter.
+-- ⚠ Believability latch: `playtime > 3` alone is satisfied by boot-time
+-- garbage from the first poll (0xFF bytes read as a huge play time -- measured
+-- 152 leaked checks). A REAL play-time counter advances; garbage is static.
+-- So the gate additionally demands that the counter has been OBSERVED to move.
+-- Attaching mid-game passes within a second or two of polling.
+local last_playtime  = nil
+local playtime_moved = false
+
 local function in_game()
   local b0 = read_u8(PLAYTIME_ADDR, EWRAM)
   local b1 = read_u8(PLAYTIME_ADDR + 1, EWRAM)
   local b2 = read_u8(PLAYTIME_ADDR + 2, EWRAM)
   if b0 == nil or b1 == nil or b2 == nil then return false end
   local playtime = b0 + b1 * 256 + b2 * 65536
-  return playtime > 3
+  if last_playtime ~= nil and playtime ~= last_playtime then playtime_moved = true end
+  last_playtime = playtime
+  return playtime > 3 and playtime_moved
 end
 
 -- ── Final Marluxia (goal + location 2679999) ──────────────────────────────────

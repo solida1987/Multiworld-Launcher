@@ -213,20 +213,41 @@ local function add_check(new, ap_id)
 end
 
 -- ── Detection passes (mirror connector_sotn.lua) ──────────────────────────────
+-- ⚠ Believability latch. A boss flag counts only after the SAME address has
+-- been read as 0 once this session. Boot-time memory reads as "killed" from
+-- the first poll -- an u32 of garbage is almost never zero -- so without the
+-- latch every boss check fires before the game has drawn a frame (measured:
+-- 27 leaked checks against 0xFF memory). A mid-game save suppresses bosses
+-- that are already killed, which is harmless: those were sent when they
+-- happened and the server keeps them.
+local boss_seen_alive = {}
+
 local function check_bosses(new)
   for addr, ids in pairs(BOSSES) do
     local v = read_u32(addr)
-    if v and v ~= 0 then
-      for _, ap_id in ipairs(ids) do add_check(new, ap_id) end
+    if v ~= nil then
+      if v == 0 then
+        boss_seen_alive[addr] = true
+      elseif boss_seen_alive[addr] then
+        for _, ap_id in ipairs(ids) do add_check(new, ap_id) end
+      end
     end
   end
 end
+
+-- Same latch for the prologue: "past the prologue" is zone ~= 6300, and boot
+-- garbage is trivially ~= 6300. Only report it once the player has actually
+-- been SEEN in the prologue zone this session. A mid-game save never shows
+-- 6300 again -- also harmless, the check was sent when it happened.
+local seen_prologue_zone = false
 
 local function check_prologue(new)
   -- connector_sotn.lua: zone != 6300 OR the past-Dracula u32 flag != 0.
   local zone = read_u16(ADDR_ZONE)
   local flag = read_u32(ADDR_PROLOGUE)
   if zone == nil then return end
+  if zone == PROLOGUE_ZONE then seen_prologue_zone = true end
+  if not seen_prologue_zone then return end
   if zone ~= PROLOGUE_ZONE or (flag ~= nil and flag ~= 0) then
     for _, ap_id in ipairs(PROLOGUE_IDS) do add_check(new, ap_id) end
   end
