@@ -3414,9 +3414,22 @@ public partial class MainWindow : Window
         string code = errors.Length > 0 ? errors[0] : "Unknown";
         return code switch
         {
+            // Slot names are case-sensitive, and that is by far the most
+            // common way this fails: "crystal" and "Crystal" look identical in
+            // a sentence, so "check the spelling" reads as "you typed it
+            // right, the server is broken". When this game has joined before,
+            // the remembered name settles it outright.
             "InvalidSlot" =>
-                $"No slot named '{slotName}' on this server — check the spelling " +
-                "on your room page.",
+                plugin is Plugins.Emulated.EmulatorPlugin slotMemory
+                && slotMemory.LastSlotName is { Length: > 0 } known
+                && !string.Equals(known, slotName, StringComparison.Ordinal)
+                ? (string.Equals(known, slotName, StringComparison.OrdinalIgnoreCase)
+                    ? $"No slot named '{slotName}' — slot names are case-sensitive, "
+                    + $"and this game last joined as '{known}'."
+                    : $"No slot named '{slotName}' on this server. This game last "
+                    + $"joined as '{known}' — check your room page if that is not it.")
+                : $"No slot named '{slotName}' on this server. Slot names are "
+                + "case-sensitive — check it against your room page.",
             "InvalidPassword" =>
                 "Wrong server password.",
             "InvalidGame" =>
