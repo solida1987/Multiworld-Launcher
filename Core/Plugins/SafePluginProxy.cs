@@ -271,6 +271,8 @@ public sealed class SafePluginProxy : IGamePlugin
     // Fails CLOSED: a plugin that throws here is not "ready", it is broken.
     public bool RomReady => Get<bool>(() => _inner.RomReady, false);
 
+    public bool EmulatorReady => Get<bool>(() => _inner.EmulatorReady, false);
+
     public IReadOnlyList<EmulatorBackend> AvailableBackends()
         => Get<IReadOnlyList<EmulatorBackend>>(
                () => _inner.AvailableBackends(), Array.Empty<EmulatorBackend>());
