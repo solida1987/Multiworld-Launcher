@@ -2,8 +2,8 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Multiworld Launcher"
-        Width="1100" Height="700"
-        MinWidth="920" MinHeight="560"
+        Width="1420" Height="720"
+        MinWidth="1180" MinHeight="560"
         Background="{StaticResource BrushBackground}"
         WindowStyle="None"
         AllowsTransparency="True"
@@ -337,6 +337,7 @@
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="240"/>  <!-- sidebar -->
                 <ColumnDefinition Width="*"/>    <!-- main -->
+                <ColumnDefinition Width="308"/>  <!-- community rail -->
             </Grid.ColumnDefinitions>
 
             <!--  SIDEBAR  -->
@@ -678,27 +679,24 @@
                         BorderThickness="0,1,0,0"
                         Padding="8,8">
                     <StackPanel>
+                        <!-- Two buttons, because two is what this corner is for:
+                             bring a plugin in, and see what you have earned.
+                             Session moved into the window's own controls, and
+                             the three Archipelago link icons moved to the
+                             community rail on the right, where each of them can
+                             say what it actually links to. -->
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition/>
                                 <ColumnDefinition Width="8"/>
-                                <ColumnDefinition/>
-                                <ColumnDefinition Width="8"/>
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
-                            <Button x:Name="BtnSession"
-                                    Grid.Column="0"
-                                    Content="Session"
-                                    Style="{StaticResource BtnSecondaryStyle}"
-                                    Padding="0,7"
-                                    HorizontalAlignment="Stretch"
-                                    Click="BtnSession_Click"/>
                             <!-- Loads a .londonplugin the player found and
                                  downloaded themselves. The launcher hosts no
                                  plugins and lists none; this button is the
                                  whole distribution story. -->
                             <Button x:Name="BtnAddPlugin"
-                                    Grid.Column="2"
+                                    Grid.Column="0"
                                     Content="Add plugin"
                                     Style="{StaticResource BtnSecondaryStyle}"
                                     Padding="0,7"
@@ -706,47 +704,12 @@
                                     ToolTip="Load a game plugin file you downloaded (.londonplugin)"
                                     Click="BtnAddPlugin_Click"/>
                             <Button x:Name="BtnAchievements"
-                                    Grid.Column="4"
+                                    Grid.Column="2"
                                     Content="🏆"
                                     Style="{StaticResource BtnSecondaryStyle}"
                                     Padding="9,7"
                                     ToolTip="Achievements — your trophies across every game"
                                     Click="BtnAchievements_Click"/>
-                        </Grid>
-                        <!-- Canonical Archipelago links (§13) — THE home of these
-                             links in the launcher; the status bar carries none. -->
-                        <Grid Margin="0,8,0,0">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition/>
-                                <ColumnDefinition Width="8"/>
-                                <ColumnDefinition/>
-                                <ColumnDefinition Width="8"/>
-                                <ColumnDefinition/>
-                            </Grid.ColumnDefinitions>
-                            <Button x:Name="BtnLinkWebsite"
-                                    Grid.Column="0"
-                                    Content="🌐"
-                                    Style="{StaticResource BtnSecondaryStyle}"
-                                    Padding="0,5"
-                                    HorizontalAlignment="Stretch"
-                                    ToolTip="Archipelago — official website"
-                                    Click="BtnLinkWebsite_Click"/>
-                            <Button x:Name="BtnLinkDiscord"
-                                    Grid.Column="2"
-                                    Content="💬"
-                                    Style="{StaticResource BtnSecondaryStyle}"
-                                    Padding="0,5"
-                                    HorizontalAlignment="Stretch"
-                                    ToolTip="Official Archipelago Discord"
-                                    Click="BtnLinkDiscord_Click"/>
-                            <Button x:Name="BtnLinkWiki"
-                                    Grid.Column="4"
-                                    Content="📖"
-                                    Style="{StaticResource BtnSecondaryStyle}"
-                                    Padding="0,5"
-                                    HorizontalAlignment="Stretch"
-                                    ToolTip="Official Archipelago wiki"
-                                    Click="BtnLinkWiki_Click"/>
                         </Grid>
                     </StackPanel>
                 </Border>
@@ -2103,6 +2066,160 @@
                 </Grid>
 
             </Grid>  <!-- end main panel -->
+
+            <!--  COMMUNITY RAIL  -->
+            <!-- Where the launcher points outward. Ordered by who is actually
+                 going to answer you: our own server first, because that is
+                 where the work happens and where a bug report reaches someone.
+                 The Archipelago links sit at the bottom, present and plainly
+                 labelled, so nobody mistakes this for an official launcher. -->
+            <Border Grid.Column="2"
+                    Background="#141720"
+                    BorderBrush="#1E2233"
+                    BorderThickness="1,0,0,0">
+                <ScrollViewer VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel Margin="18,18,18,22">
+
+                        <TextBlock Text="COMMUNITY"
+                                   FontSize="10"
+                                   FontWeight="Bold"
+                                   Foreground="{StaticResource BrushMuted}"
+                                   Margin="0,0,0,10"/>
+
+                        <!-- The server card is drawn from Discord's public
+                             invite data, so the member counts are real rather
+                             than a screenshot that goes stale. Offline it just
+                             shows the name and the button. -->
+                        <Border Background="#1A1E2C"
+                                CornerRadius="10"
+                                BorderBrush="#252A3D"
+                                BorderThickness="1">
+                            <StackPanel>
+                                <Border Height="56"
+                                        CornerRadius="9,9,0,0"
+                                        Background="#3E8BD8"/>
+                                <StackPanel Margin="14,0,14,14">
+                                    <Border Width="58" Height="58"
+                                            CornerRadius="16"
+                                            Margin="0,-29,0,0"
+                                            HorizontalAlignment="Left"
+                                            Background="#0F1219">
+                                        <Image x:Name="ImgCommunityIcon"
+                                               Width="52" Height="52"
+                                               RenderOptions.BitmapScalingMode="HighQuality"/>
+                                    </Border>
+                                    <TextBlock x:Name="TxtCommunityName"
+                                               Text="Maegis&apos; Casual Cloud Gaming"
+                                               FontSize="14"
+                                               FontWeight="Bold"
+                                               TextWrapping="Wrap"
+                                               Foreground="{StaticResource BrushText}"
+                                               Margin="0,10,0,0"/>
+                                    <StackPanel x:Name="PanelCommunityCounts"
+                                                Orientation="Horizontal"
+                                                Visibility="Collapsed"
+                                                Margin="0,6,0,0">
+                                        <Ellipse Width="7" Height="7"
+                                                 Fill="{StaticResource BrushSuccess}"
+                                                 VerticalAlignment="Center"/>
+                                        <TextBlock x:Name="TxtCommunityOnline"
+                                                   FontSize="11"
+                                                   Margin="5,0,12,0"
+                                                   Foreground="{StaticResource BrushMuted}"/>
+                                        <Ellipse Width="7" Height="7"
+                                                 Fill="#4A5170"
+                                                 VerticalAlignment="Center"/>
+                                        <TextBlock x:Name="TxtCommunityMembers"
+                                                   FontSize="11"
+                                                   Margin="5,0,0,0"
+                                                   Foreground="{StaticResource BrushMuted}"/>
+                                    </StackPanel>
+                                    <Button x:Name="BtnCommunityJoin"
+                                            Content="Go to the server"
+                                            Margin="0,12,0,0"
+                                            Padding="0,9"
+                                            FontWeight="Bold"
+                                            Foreground="White"
+                                            Background="#2E8B57"
+                                            BorderThickness="0"
+                                            Cursor="Hand"
+                                            Click="BtnCommunityJoin_Click"/>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <TextBlock Margin="2,12,2,0"
+                                   FontSize="11.5"
+                                   LineHeight="17"
+                                   TextWrapping="Wrap"
+                                   Foreground="{StaticResource BrushMuted}"
+                                   Text="This is where the launcher and its game plugins are built. Join to follow what is being worked on, ask for a game or a feature, or report something that broke — a bug report here reaches the person who can fix it."/>
+
+                        <Border Height="1" Background="#1E2233" Margin="0,18,0,16"/>
+
+                        <TextBlock Text="THE CODE"
+                                   FontSize="10"
+                                   FontWeight="Bold"
+                                   Foreground="{StaticResource BrushMuted}"
+                                   Margin="0,0,0,8"/>
+                        <Button x:Name="BtnLinkRepos"
+                                Style="{StaticResource BtnSecondaryStyle}"
+                                Padding="10,8"
+                                HorizontalContentAlignment="Left"
+                                Content="Source code and releases"
+                                ToolTip="Every repository: the launcher, the plugin catalogue and the game mods"
+                                Click="BtnLinkRepos_Click"/>
+                        <TextBlock Margin="2,6,2,0"
+                                   FontSize="11"
+                                   TextWrapping="Wrap"
+                                   Foreground="{StaticResource BrushMuted}"
+                                   Text="All of it is open: the launcher, the plugin catalogue and the game mods, with the source published alongside every release."/>
+
+                        <Border Height="1" Background="#1E2233" Margin="0,18,0,16"/>
+
+                        <!-- Canonical Archipelago links (§13) — THE home of
+                             these links in the launcher; the sidebar and the
+                             status bar carry none. -->
+                        <TextBlock Text="ARCHIPELAGO"
+                                   FontSize="10"
+                                   FontWeight="Bold"
+                                   Foreground="{StaticResource BrushMuted}"
+                                   Margin="0,0,0,4"/>
+                        <TextBlock Margin="2,0,2,10"
+                                   FontSize="11"
+                                   TextWrapping="Wrap"
+                                   Foreground="{StaticResource BrushMuted}"
+                                   Text="The project this launcher plays. It is not ours and we do not speak for it — these are its own places."/>
+
+                        <Button x:Name="BtnLinkWebsite"
+                                Style="{StaticResource BtnSecondaryStyle}"
+                                Padding="10,7"
+                                Margin="0,0,0,6"
+                                HorizontalContentAlignment="Left"
+                                Content="Official Archipelago website"
+                                ToolTip="archipelago.gg"
+                                Click="BtnLinkWebsite_Click"/>
+                        <Button x:Name="BtnLinkDiscord"
+                                Style="{StaticResource BtnSecondaryStyle}"
+                                Padding="10,7"
+                                Margin="0,0,0,6"
+                                HorizontalContentAlignment="Left"
+                                Content="Official Archipelago Discord"
+                                ToolTip="The Archipelago project&apos;s own Discord"
+                                Click="BtnLinkDiscord_Click"/>
+                        <Button x:Name="BtnLinkWiki"
+                                Style="{StaticResource BtnSecondaryStyle}"
+                                Padding="10,7"
+                                HorizontalContentAlignment="Left"
+                                Content="Official Archipelago wiki"
+                                ToolTip="Setup guides and documentation"
+                                Click="BtnLinkWiki_Click"/>
+
+                    </StackPanel>
+                </ScrollViewer>
+            </Border>
+
         </Grid>  <!-- end content Grid -->
 
         <!--  STATUS BAR  -->

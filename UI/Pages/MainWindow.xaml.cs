@@ -388,6 +388,10 @@ public partial class MainWindow : Window
         _ = Dispatcher.BeginInvoke(new Action(async () => await OfferGameArtAsync()),
                                    System.Windows.Threading.DispatcherPriority.Background);
 
+        // The community card's live numbers.
+        _ = Dispatcher.BeginInvoke(new Action(async () => await LoadCommunityCardAsync()),
+                                   System.Windows.Threading.DispatcherPriority.Background);
+
         // Wire achievement notifications.
         // grants can fire on plugin pipe threads (check counters), and a
         // synchronous hop would park the pipe's read loop on the UI thread.
@@ -2758,19 +2762,6 @@ public partial class MainWindow : Window
 
     // --- Catalog metadata lookup ---
 
-    private void BtnSession_Click(object sender, RoutedEventArgs e)
-    {
-        // Expand the sidebar connect panel and focus the server field.
-        PanelConnInputs.Visibility = Visibility.Visible;
-        BtnConnToggle.Content      = "Cancel";
-        if (_selectedPlugin != null)
-        {
-            PanelAchievements.Visibility = Visibility.Collapsed;
-            PanelGame.Visibility         = Visibility.Visible;
-            PanelEmpty.Visibility        = Visibility.Collapsed;
-        }
-        TxtServer.Focus();
-    }
 
     // --- Sidebar AP connect toggle ---
 
@@ -7222,6 +7213,49 @@ public partial class MainWindow : Window
 
     // --- Canonical Archipelago links — sidebar bottom row (§13) ---
     // THE home of these three links in the launcher; nothing else hardcodes them.
+
+    // --- Community rail ---
+
+    private void BtnCommunityJoin_Click(object sender, RoutedEventArgs e)
+        => OpenUrl(LauncherV2.Core.CommunityInfo.InviteUrl);
+
+    private void BtnLinkRepos_Click(object sender, RoutedEventArgs e)
+        => OpenUrl("https://github.com/solida1987?tab=repositories");
+
+    // Fills the server card with what Discord actually reports right now.
+    // Never blocks startup and never fails loudly: the card is written with a
+    // working name and button, and the counts are the only part that needs the
+    // network.
+    private async Task LoadCommunityCardAsync()
+    {
+        var snap = await LauncherV2.Core.CommunityInfo.FetchAsync();
+        if (snap == null) return;
+
+        if (!string.IsNullOrWhiteSpace(snap.Name))
+            TxtCommunityName.Text = snap.Name;
+
+        if (snap.Members > 0)
+        {
+            TxtCommunityOnline.Text  = $"{snap.Online} online";
+            TxtCommunityMembers.Text = snap.Members == 1
+                ? "1 member" : $"{snap.Members} members";
+            PanelCommunityCounts.Visibility = Visibility.Visible;
+        }
+
+        if (!string.IsNullOrWhiteSpace(snap.IconUrl))
+        {
+            try
+            {
+                var bmp = new BitmapImage();
+                bmp.BeginInit();
+                bmp.UriSource   = new Uri(snap.IconUrl);
+                bmp.CacheOption = BitmapCacheOption.OnLoad;
+                bmp.EndInit();
+                ImgCommunityIcon.Source = bmp;
+            }
+            catch { /* the card reads fine without a picture */ }
+        }
+    }
 
     private void BtnLinkWebsite_Click(object sender, RoutedEventArgs e)
         => OpenUrl("https://archipelago.gg");
