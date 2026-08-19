@@ -78,6 +78,19 @@ public sealed record EmulatorBackend
     // Emulators/<id>.
     public string InstallSubdir => Id == "bizhawk" ? "BizHawk" : Id;
 
+    // Does picking this actually start the game?
+    //
+    // Every entry in the emulator menu is a promise that pressing Play opens
+    // the game. SNI breaks that promise by design: it is not an emulator, it
+    // ATTACHES to one you are already running (or to real hardware). Listed
+    // beside BizHawk and snes9x it read as a third way to play, and picking it
+    // produced a launcher that looked busy and did nothing — every time.
+    //
+    // The transport stays; it is how a player on original hardware or their own
+    // emulator connects. It just does not belong in a list of ways to start a
+    // game, and will come back as its own explicit choice rather than a peer.
+    public bool LaunchesGame { get; init; } = true;
+
     // Where this program comes from, and whose work it is.
     //
     // Only bridge EXTENSIONS could declare this before, through
@@ -206,6 +219,9 @@ public static class EmulatorBackends
             HomepageUrl   = "https://github.com/alttpo/sni",
             ExeName       = "sni.exe",
             Dialect       = BridgeDialect.Attach,
+            // Not a way to start a game — see LaunchesGame. Kept working and
+            // shipped, kept out of the picker.
+            LaunchesGame  = false,
             // Verified against the releases API: tag v0.0.103 publishes ten
             // platform builds, of which sni-v0.0.103-windows-amd64.zip is the
             // 64-bit Windows one. Plain MIT, stated as such by the project.

@@ -288,7 +288,10 @@ public abstract class EmulatorPlugin : IGamePlugin
     /// unchanged for games that don't override SupportedEmulatorIds.
     public IReadOnlyList<EmulatorBackend> AvailableBackends()
     {
-        var forSystem = EmulatorBackends.BackendsForSystem(RomSystem);
+        // Only things that actually start the game. A menu entry is a promise
+        // that pressing Play opens it -- see EmulatorBackend.LaunchesGame.
+        var forSystem = EmulatorBackends.BackendsForSystem(RomSystem)
+                                        .Where(b => b.LaunchesGame).ToList();
         var declared  = SupportedEmulatorIds;
         if (declared.Count == 0) return forSystem;
 
@@ -1820,6 +1823,7 @@ public abstract class EmulatorPlugin : IGamePlugin
         // persisted value below overrides it.
         SelectedEmulatorId ??= EmulatorBackends.Default(RomSystem).Id;
 
+
         string file = Path.Combine(AppContext.BaseDirectory, "Data", $"{GameId}_settings.json");
         if (!File.Exists(file)) return;
         try
@@ -1837,6 +1841,18 @@ public abstract class EmulatorPlugin : IGamePlugin
             OnLoadingSettings(doc.RootElement);
         }
         catch { /* ignore — stale/corrupt settings */ }
+
+        // ⚠ AFTER the file, never before it: the persisted emulator_id is read
+        // above, so a guard placed earlier judges the default and lets the saved
+        // value through untouched. A backend that no longer appears in the
+        // picker would strand the player on a choice they can neither see nor
+        // change -- SNI became exactly that when it left the list.
+        if (EmulatorBackends.ById(SelectedEmulatorId) is { LaunchesGame: false } gone)
+        {
+            SelectedEmulatorId = EmulatorBackends.Default(RomSystem).Id;
+            Trace($"{gone.DisplayName} no longer starts games — switched to " +
+                  $"{SelectedEmulatorId}");
+        }
     }
 
     public Task<NewsItem[]> GetNewsAsync(CancellationToken ct = default)
