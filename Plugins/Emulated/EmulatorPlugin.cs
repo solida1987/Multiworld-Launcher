@@ -142,14 +142,41 @@ public abstract class EmulatorPlugin : IGamePlugin
 
     // ── ROM and emulator paths ────────────────────────────────────────────────
 
+    // ⚠ Settings are loaded LAZILY, on the first read of any persisted
+    // property. Nothing else loads them: SaveSettings wrote the file for
+    // months while no caller anywhere ran LoadSettings, so every restart
+    // forgot the player's ROM and the game fell back to "not installed" —
+    // however many times they picked it again. A constructor call cannot fix
+    // that, because GameId comes from the SUBCLASS (the catalogue plugin reads
+    // it from its embedded manifest, which does not exist yet while the base
+    // constructor runs). First-read is the earliest safe moment.
+    private bool    _settingsLoaded;
+    private string? _romPath;
+    private bool    _startFullscreen;
+
+    private void EnsureSettingsLoaded()
+    {
+        if (_settingsLoaded) return;
+        _settingsLoaded = true;      // before LoadSettings: its writes re-enter here
+        LoadSettings();
+    }
+
     /// Absolute path to this game's ROM — always the launcher-library COPY
     /// under Games/ROMs/<GameId>/ (§11), never the user's original file.
     /// Set via PromptForRomFile (Settings panel + post-install flow).
-    public string? RomPath { get; set; }
+    public string? RomPath
+    {
+        get { EnsureSettingsLoaded(); return _romPath; }
+        set { EnsureSettingsLoaded(); _romPath = value; }
+    }
 
     /// Launch EmuHawk with --fullscreen (§12). Persisted per-game in
     /// Data/{GameId}_settings.json next to the ROM path.
-    public bool StartFullscreen { get; set; }
+    public bool StartFullscreen
+    {
+        get { EnsureSettingsLoaded(); return _startFullscreen; }
+        set { EnsureSettingsLoaded(); _startFullscreen = value; }
+    }
 
     /// Root directory where the SELECTED backend is (or will be) installed:
     /// Emulators/<subdir>. Computed (not stored) so install/launch/trace/
@@ -169,7 +196,12 @@ public abstract class EmulatorPlugin : IGamePlugin
     /// resolving through EmulatorBackends. Only BridgeReady backends are
     /// selectable in the UI, so a non-ready value never lands here through the
     /// dropdown — but LaunchAsync still guards against a stale/hand-edited one.
-    public string? SelectedEmulatorId { get; set; }
+    public string? SelectedEmulatorId
+    {
+        get { EnsureSettingsLoaded(); return _selectedEmulatorId; }
+        set { EnsureSettingsLoaded(); _selectedEmulatorId = value; }
+    }
+    private string? _selectedEmulatorId;
 
     /// Backing field initialiser runs after EmulatorDirectory above; uses the
     /// subclass's RomSystem to pick the default. RomSystem is abstract, so this
