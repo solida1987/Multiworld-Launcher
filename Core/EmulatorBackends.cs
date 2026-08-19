@@ -99,7 +99,7 @@ public static class EmulatorBackends
             // BizHawk hosts (nearly) the whole emulated catalog natively,
             // including NDS via its built-in melonDS core (matrix §1, §2).
             Systems       = new[] { "GBA", "GBC", "GB", "SNES", "NES", "N64",
-                                    "GEN", "SMS", "A26", "PSX", "NDS" },
+                                    "GEN", "SMS", "A26", "2600", "PSX", "NDS" },
             BridgeReady   = true,                       // proven (Pokémon Emerald)
             HomepageUrl   = "https://tasvideos.org/BizHawk",
             ExeName       = "EmuHawk.exe",

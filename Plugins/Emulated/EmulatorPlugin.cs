@@ -203,6 +203,20 @@ public abstract class EmulatorPlugin : IGamePlugin
     }
     private string? _selectedEmulatorId;
 
+    /// The slot name last used to join a multiworld AS THIS GAME.
+    ///
+    /// One seed can hold many games, and each has its own slot. Keeping a
+    /// single slot box across the whole launcher meant selecting Pokemon and
+    /// connecting with Zelda's slot -- which the server refuses with
+    /// "InvalidGame", because the launcher claims the SELECTED game's name for
+    /// whatever slot is typed. Remembering it per game makes that unreachable.
+    public string? LastSlotName
+    {
+        get { EnsureSettingsLoaded(); return _lastSlotName; }
+        set { EnsureSettingsLoaded(); _lastSlotName = value; }
+    }
+    private string? _lastSlotName;
+
     /// Backing field initialiser runs after EmulatorDirectory above; uses the
     /// subclass's RomSystem to pick the default. RomSystem is abstract, so this
     /// cannot be a field initialiser — it is seeded lazily on first read of the
@@ -1599,13 +1613,15 @@ public abstract class EmulatorPlugin : IGamePlugin
             "N64"  => "N64 ROM (*.n64;*.z64;*.v64)|*.n64;*.z64;*.v64|All files (*.*)|*.*",
             "GEN"  => "Genesis ROM (*.md;*.bin)|*.md;*.bin|All files (*.*)|*.*",
             "NDS"  => "Nintendo DS ROM (*.nds)|*.nds|All files (*.*)|*.*",
+            "SMS"  => "Master System ROM (*.sms)|*.sms|All files (*.*)|*.*",
+            "2600" => "Atari 2600 ROM (*.a26;*.bin)|*.a26;*.bin|All files (*.*)|*.*",
             _      => "ROM files|*.*",
         };
 
     /// Persist per-game settings (ROM library path + launch options) to
     /// Data/{GameId}_settings.json. Subclasses add their own keys through
     /// OnSavingSettings.
-    protected void SaveSettings()
+    public void SaveSettings()
     {
         string dir  = Path.Combine(AppContext.BaseDirectory, "Data");
         Directory.CreateDirectory(dir);
@@ -1615,6 +1631,7 @@ public abstract class EmulatorPlugin : IGamePlugin
             ["rom_path"]    = RomPath,
             ["fullscreen"]  = StartFullscreen,
             ["emulator_id"] = SelectedEmulatorId ?? EmulatorBackends.Default(RomSystem).Id,
+            ["last_slot"]   = LastSlotName,
         };
         OnSavingSettings(bag);
         File.WriteAllText(file, JsonSerializer.Serialize(bag));
@@ -1648,6 +1665,8 @@ public abstract class EmulatorPlugin : IGamePlugin
             if (doc.RootElement.TryGetProperty("emulator_id", out var eid) &&
                 eid.GetString() is { Length: > 0 } savedId)
                 SelectedEmulatorId = savedId;
+            if (doc.RootElement.TryGetProperty("last_slot", out var ls))
+                _lastSlotName = ls.ValueKind == JsonValueKind.String ? ls.GetString() : null;
             OnLoadingSettings(doc.RootElement);
         }
         catch { /* ignore — stale/corrupt settings */ }
