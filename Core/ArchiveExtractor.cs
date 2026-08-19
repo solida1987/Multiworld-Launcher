@@ -92,11 +92,25 @@ public static class ArchiveExtractor
     {
         if (File.Exists(Path.Combine(destDir, sentinelExe))) return false;  // already flat
 
-        var dirs  = Directory.GetDirectories(destDir);
-        var files = Directory.GetFiles(destDir);
-        if (dirs.Length != 1 || files.Length != 0) return false;  // not a single-subdir layout
+        // ⚠ Decided by WHERE THE EXE IS, not by the folder being pristine.
+        //
+        // This used to require "exactly one sub-directory and no loose files",
+        // and the launcher's own bookkeeping defeated it: the "PUT ... HERE"
+        // note and ap_state.json sit in that same folder, so files.Length was
+        // never 0 and the flatten silently declined. snes9x then installed to
+        // Emulators\snes9x\snes9x-1.63-nwa-win32-x64\snes9x-x64.exe and the
+        // launcher reported the exe "is not in it" -- after a successful
+        // download.
+        //
+        // Looking for the sub-directory that actually CONTAINS the executable
+        // also survives the folder being renamed by the next release, which a
+        // hard-coded inner name would not.
+        var withExe = Directory.GetDirectories(destDir)
+            .Where(d => File.Exists(Path.Combine(d, sentinelExe)))
+            .ToArray();
+        if (withExe.Length != 1) return false;   // nothing to lift, or ambiguous
 
-        string inner = dirs[0];
+        string inner = withExe[0];
         foreach (string f in Directory.GetFiles(inner))
             File.Move(f, Path.Combine(destDir, Path.GetFileName(f)), overwrite: true);
         foreach (string d in Directory.GetDirectories(inner))
