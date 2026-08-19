@@ -8654,7 +8654,16 @@ public partial class MainWindow : Window
             // loaded from a package arrives wrapped in SafePluginProxy, which
             // is not one, so the concrete test silently skips every plugin.
             if (!string.IsNullOrEmpty(plugin.SessionRomNote))
+            {
                 AppendLog(plugin.SessionRomNote);
+                // ⚠ The log is not where a player looks. This note only ever
+                // says a version of "the game is running but nothing is
+                // syncing", and putting it in a tab nobody has open let a whole
+                // play session go by with every check lost. It is the loudest
+                // thing worth saying short of refusing to start the game.
+                ToastService.Show("Checks are not syncing",
+                    plugin.SessionRomNote, ToastKind.Warning);
+            }
 
             if (plugin.UsesRomLibrary)
             {

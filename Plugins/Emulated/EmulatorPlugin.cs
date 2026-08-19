@@ -714,6 +714,80 @@ public abstract class EmulatorPlugin : IGamePlugin
     /// the pipe path's connector timeout). The LIVE confirmation (real binary +
     /// ROM reporting a real check) is the owner's in-emulator gate, as documented
     /// on EmulatorBackends.snes9x.
+    /// Switch snes9x-emunwa's Network Access server on in its own config file.
+    ///
+    /// The fork declares [EmuNetworkAccess] Enabled with a default of FALSE
+    /// (wconfig.cpp) and only starts the server when it is true — normally you
+    /// tick it in the emulator's menu. A launcher that starts the emulator FOR
+    /// the player has to set it, or the bridge can never connect and the game
+    /// runs perfectly while reporting nothing.
+    ///
+    /// Best effort throughout: an unwritable config is not a reason to refuse
+    /// to launch, and the connect attempt afterwards is what actually decides
+    /// whether the session syncs.
+    private void EnableNwaInEmulatorConfig()
+    {
+        try
+        {
+            string conf = Path.Combine(EmulatorDirectory, "snes9x.conf");
+            if (!File.Exists(conf))
+            {
+                // First run: snes9x has not written its config yet. Seeding just
+                // this section is enough -- it fills in every other default
+                // itself and keeps what it finds here.
+                File.WriteAllText(conf,
+                    "[EmuNetworkAccess]" + Environment.NewLine +
+                    "Enabled = ON"       + Environment.NewLine +
+                    "IdSeed  = 0"        + Environment.NewLine);
+                Trace("wrote snes9x.conf with Network Access enabled");
+                return;
+            }
+
+            var lines = File.ReadAllLines(conf).ToList();
+            int section = lines.FindIndex(l =>
+                l.Trim().Equals("[EmuNetworkAccess]", StringComparison.OrdinalIgnoreCase));
+
+            if (section < 0)
+            {
+                lines.Insert(0, "[EmuNetworkAccess]");
+                lines.Insert(1, "Enabled = ON");
+                lines.Insert(2, "");
+                File.WriteAllLines(conf, lines);
+                Trace("added [EmuNetworkAccess] Enabled = ON to snes9x.conf");
+                return;
+            }
+
+            // Only inside this section: "Enabled" is a common key name and
+            // flipping another section's copy would change something else.
+            for (int i = section + 1; i < lines.Count; i++)
+            {
+                string t = lines[i].TrimStart();
+                if (t.StartsWith('[')) break;                      // next section
+                if (!t.StartsWith("Enabled", StringComparison.OrdinalIgnoreCase)) continue;
+
+                // Keep the alignment snes9x writes, so its own rewrite is a no-op.
+                int eq = lines[i].IndexOf('=');
+                if (eq < 0) break;
+                string current = lines[i][(eq + 1)..].Trim();
+                if (current.Equals("ON", StringComparison.OrdinalIgnoreCase)) return;  // already on
+                lines[i] = lines[i][..(eq + 1)] + " ON";
+                File.WriteAllLines(conf, lines);
+                Trace($"snes9x.conf: Network Access was {current} — switched ON");
+                return;
+            }
+
+            // Section exists but has no Enabled key.
+            lines.Insert(section + 1, "Enabled = ON");
+            File.WriteAllLines(conf, lines);
+            Trace("snes9x.conf: added Enabled = ON to [EmuNetworkAccess]");
+        }
+        catch (Exception ex)
+        {
+            // The connect attempt below reports the real consequence.
+            Trace($"could not enable Network Access in snes9x.conf: {ex.Message}");
+        }
+    }
+
     private async Task LaunchViaNwaAsync(EmulatorBackend backend, string launchRom,
                                          ApSession session, CancellationToken ct)
     {
@@ -729,6 +803,17 @@ public abstract class EmulatorPlugin : IGamePlugin
             WorkingDirectory = EmulatorDirectory,
             UseShellExecute  = false,
         };
+        // ⚠ snes9x-emunwa ships with its network access switched OFF:
+        // wconfig.cpp declares [EmuNetworkAccess] Enabled with a default of
+        // false, and the server only starts when it is on. Launch it untouched
+        // and the emulator runs perfectly while serving nothing -- which is
+        // exactly what happened on 19 Aug: the right ROM booted, the player
+        // played, and not one check reached the server.
+        //
+        // Written before the process starts, because snes9x rewrites this file
+        // itself on exit and would undo an edit made while it runs.
+        EnableNwaInEmulatorConfig();
+
         var proc = Process.Start(psi)
             ?? throw new InvalidOperationException($"Failed to start {backend.DisplayName}.");
         _emuProcess = proc;
@@ -761,8 +846,11 @@ public abstract class EmulatorPlugin : IGamePlugin
         {
             Trace("NWA connect timed out — game runs without AP sync");
             SessionRomNote ??= $"[{DisplayName}] {backend.DisplayName} started but its " +
-                "Network Access server did not answer — the game runs, but in-game " +
-                "checks won't sync. Make sure this is the NWA build of snes9x.";
+                "Network Access server did not answer, so nothing you do in the game " +
+                "will reach Archipelago. The launcher switches that server on in " +
+                $"snes9x.conf before starting; if this keeps happening, open " +
+                $"{backend.DisplayName} and check that Network Access is enabled in its " +
+                "menu, and that this really is the NWA build.";
             return;
         }
 
