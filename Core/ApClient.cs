@@ -832,19 +832,37 @@ public sealed class ApClient : IAsyncDisposable
                 ServerCheckedLocations?.Invoke(ids.ToArray());
             }
         }
-        // Player composition may change mid-session (join / leave)
+        // Player composition may change mid-session (join / leave, !alias).
+        //
+        // RoomUpdate carries NO game field per player and no slot_info to fall
+        // back on -- Connected is the only packet that ever states which game a
+        // slot plays. Measured against 0.6.7: one `!alias` and the array comes
+        // back as { team, slot, alias, name, class } for every player. Rebuilding
+        // the list from it therefore used to blank every Game, and nothing ever
+        // refilled them, so hints and the item feed lost the game names for the
+        // rest of the session.
+        //
+        // So carry the known game forward, keyed on team+slot, and only take a
+        // game from the packet when it actually supplies one.
         if (el.TryGetProperty("players", out var playersEl) &&
             playersEl.ValueKind == JsonValueKind.Array)
         {
+            var knownGame = Players.ToDictionary(p => (p.Team, p.Slot), p => p.Game);
+
             var players = new List<ApNetworkPlayer>();
             foreach (var p in playersEl.EnumerateArray())
             {
+                int team = p.TryGetProperty("team", out var pt) ? pt.GetInt32() : 0;
+                int slot = p.TryGetProperty("slot", out var ps) ? ps.GetInt32() : 0;
+                string game = p.TryGetProperty("game", out var pg) ? pg.GetString() ?? "" : "";
+                if (game.Length == 0) knownGame.TryGetValue((team, slot), out game!);
+
                 players.Add(new ApNetworkPlayer(
-                    Team:  p.TryGetProperty("team",  out var pt) ? pt.GetInt32() : 0,
-                    Slot:  p.TryGetProperty("slot",  out var ps) ? ps.GetInt32() : 0,
+                    Team:  team,
+                    Slot:  slot,
                     Alias: p.TryGetProperty("alias", out var pa) ? pa.GetString() ?? "" : "",
                     Name:  p.TryGetProperty("name",  out var pn) ? pn.GetString() ?? "" : "",
-                    Game:  p.TryGetProperty("game",  out var pg) ? pg.GetString() ?? "" : ""));
+                    Game:  game ?? ""));
             }
             if (players.Count > 0)
             {
