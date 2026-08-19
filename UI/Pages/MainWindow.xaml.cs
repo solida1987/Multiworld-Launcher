@@ -8674,14 +8674,33 @@ public partial class MainWindow : Window
 
                 if (plugin.ApConnectorAttached == false)
                 {
-                    AppendLog("[Warning] BizHawk is running but the AP connector script never " +
-                              "attached (waited 60 seconds) — no checks or items will sync. " +
-                              "Open the Lua Console inside BizHawk to see the script error, " +
-                              "then restart the game from the launcher.");
-                    ToastService.Show("AP connector not attached",
-                        $"{plugin.DisplayName} is running WITHOUT Archipelago sync — the " +
-                        "connector script didn't start. Check BizHawk's Lua Console for " +
-                        "errors, then stop and relaunch.",
+                    // ⚠ This used to name BizHawk and its Lua Console outright,
+                    // whichever emulator was actually chosen. Told to check the
+                    // Lua Console of a program he was not running, the player
+                    // has been handed advice that cannot apply — the emulator
+                    // picker made that a real situation rather than a
+                    // hypothetical one.
+                    var emu = plugin.AvailableBackends().FirstOrDefault(
+                        b => string.Equals(b.Id, plugin.SelectedEmulatorId,
+                                           StringComparison.OrdinalIgnoreCase));
+                    string emuName = emu?.DisplayName ?? "The emulator";
+                    string advice = emu?.Id switch
+                    {
+                        "bizhawk" => "Open BizHawk's Lua Console to see the script error, " +
+                                     "then stop and relaunch from here.",
+                        "snes9x"  => "In snes9x, check that Network Access is enabled — the " +
+                                     "launcher switches it on, but a copy started by hand " +
+                                     "may not have it.",
+                        "sni"     => "SNI reads an emulator you run yourself: start your SNES " +
+                                     "emulator, load this seed's ROM, and make sure SNI lists " +
+                                     "it as a device. Then press Play again.",
+                        _         => "Stop the game and launch it again from here.",
+                    };
+
+                    AppendLog($"[Warning] {emuName} is running but the AP bridge never " +
+                              $"attached — no checks or items will sync. {advice}");
+                    ToastService.Show("Archipelago is not attached",
+                        $"{plugin.DisplayName} is running WITHOUT Archipelago sync. {advice}",
                         ToastKind.Warning);
                 }
                 else if (!plugin.ChecksImplemented)
