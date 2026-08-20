@@ -29,6 +29,13 @@
                                Foreground="{StaticResource BrushMuted}" Margin="0,16,0,6"/>
                     <StackPanel x:Name="PanelGenres"/>
 
+                    <TextBlock Text="STATUS" FontSize="10" FontWeight="Bold"
+                               Foreground="{StaticResource BrushMuted}" Margin="0,16,0,6"/>
+                    <CheckBox x:Name="ChkTestedOnly" Content="Tested only" FontSize="12"
+                              Foreground="{StaticResource BrushText}"
+                              ToolTip="Only games somebody has played through London end to end"
+                              Checked="Filters_Changed" Unchecked="Filters_Changed"/>
+
                     <Button x:Name="BtnClearFilters" Content="Clear filters"
                             Style="{StaticResource BtnSecondaryStyle}" Padding="0,6"
                             Margin="0,16,0,0" Click="BtnClearFilters_Click"/>

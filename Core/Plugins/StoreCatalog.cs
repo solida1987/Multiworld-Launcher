@@ -29,7 +29,13 @@ public sealed record StoreGame(
     [property: JsonPropertyName("plugin_by")]      string PluginBy,
     [property: JsonPropertyName("cover")]          string? Cover,
     [property: JsonPropertyName("plugin_url")]     string PluginUrl,
-    [property: JsonPropertyName("page")]           string Page);
+    [property: JsonPropertyName("page")]           string Page,
+    /// How much of the install London can do: "rom", "apworld_only",
+    /// "apworld_and_mod", "mod_package", "bundled", "manual".
+    [property: JsonPropertyName("install_kind")]   string? InstallKind = null,
+    /// Has a human actually played this through London? Built is not tested,
+    /// and a card that hides the difference is a card that lies quietly.
+    [property: JsonPropertyName("tested")]         bool Tested = false);
 
 public sealed record StoreIndex(
     [property: JsonPropertyName("count")]     int Count,
