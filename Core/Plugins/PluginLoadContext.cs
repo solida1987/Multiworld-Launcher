@@ -28,7 +28,25 @@ internal sealed class PluginLoadContext : AssemblyLoadContext
             return null;
 
         string? path = _resolver.ResolveAssemblyToPath(name);
-        return path == null ? null : LoadFromAssemblyPath(path);
+        return path == null ? null : LoadFromFileWithoutLock(path);
+    }
+
+    ///
+    /// Load from bytes, never from the path: a path-loaded assembly keeps its
+    /// file locked for the life of the process — Unload() only schedules the
+    /// release — and updating an installed plugin then fails with
+    /// "Access to the path is denied". Bytes cost a copy and free the file.
+    ///
+    public Assembly LoadFromFileWithoutLock(string path)
+    {
+        using var dll = new System.IO.MemoryStream(System.IO.File.ReadAllBytes(path));
+        string pdbPath = System.IO.Path.ChangeExtension(path, ".pdb");
+        if (System.IO.File.Exists(pdbPath))
+        {
+            using var pdb = new System.IO.MemoryStream(System.IO.File.ReadAllBytes(pdbPath));
+            return LoadFromStream(dll, pdb);
+        }
+        return LoadFromStream(dll);
     }
 
     protected override IntPtr LoadUnmanagedDll(string name)

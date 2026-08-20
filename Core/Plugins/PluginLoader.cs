@@ -55,7 +55,7 @@ public static class PluginLoader
         try
         {
             ctx = new PluginLoadContext(dll, "plugin:" + manifest.GameId);
-            Assembly asm = ctx.LoadFromAssemblyPath(Path.GetFullPath(dll));
+            Assembly asm = ctx.LoadFromFileWithoutLock(Path.GetFullPath(dll));
 
             Type? type = asm.GetType(manifest.EntryType, throwOnError: false, ignoreCase: false);
             if (type == null)
