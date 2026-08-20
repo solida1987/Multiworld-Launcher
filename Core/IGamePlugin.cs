@@ -483,6 +483,11 @@ public interface IGamePlugin
     // The seed's location name -> id table, for games that report by name.
     void OnLocationTable(IReadOnlyDictionary<string, long> nameToId) { }
 
+    // Locations the server reports as already checked -- at connect (resume)
+    // and live (a collect, a co-op check). Games that track their own state
+    // ignore it; games whose UI shows check progress need it to stay honest.
+    void OnCheckedLocations(long[] locationIds) { }
+
     // Scout replies: location id -> "player (game)".
     void OnLocationHints(IReadOnlyDictionary<long, string> idToLabel) { }
 

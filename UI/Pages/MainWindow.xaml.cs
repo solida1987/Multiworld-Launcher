@@ -7594,7 +7594,10 @@ public partial class MainWindow : Window
                     // report ids and ignore the call.
                     var byName = new Dictionary<string, long>(locs.Count, StringComparer.Ordinal);
                     foreach (var kv in locs) byName[kv.Value] = kv.Key;
-                    (_runningPlugin ?? _selectedPlugin)?.OnLocationTable(byName);
+                    var tablePlugin = _runningPlugin ?? _selectedPlugin;
+                    tablePlugin?.OnLocationTable(byName);
+                    // Resume sync, now that the plugin can name the ids.
+                    tablePlugin?.OnCheckedLocations(ap.ConnectedChecked.ToArray());
                 }
                 RenormalizeHints();                  // hints that arrived early
                 if (_dpNamesReady && _pendingHintBacklog is JsonElement parked)
@@ -8647,7 +8650,10 @@ public partial class MainWindow : Window
                 if (ap2 != null) SynthesizeSentHistory(ap2, items);
             };
             _apClient.ServerCheckedLocations += ids =>
+            {
                 _locationTracker.OnLocationsChecked(ids);
+                (_runningPlugin ?? _selectedPlugin)?.OnCheckedLocations(ids);
+            };
             _locationTracker.Changed -= OnLocationTrackerChanged;   // never stack (P3-6)
             _locationTracker.Changed += OnLocationTrackerChanged;
             // Same ingest pipeline as the global-connect path + the hint backlog

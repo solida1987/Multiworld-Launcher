@@ -178,6 +178,9 @@ public sealed class SafePluginProxy : IGamePlugin
     public void OnLocationHints(IReadOnlyDictionary<long, string> idToLabel)
         => Guard(() => _inner.OnLocationHints(idToLabel));
 
+    public void OnCheckedLocations(long[] locationIds)
+        => Guard(() => _inner.OnCheckedLocations(locationIds));
+
     // --- UI ---
     // A panel that throws while being built would take down the whole settings
     // page, so the plugin loses its tab rather than the launcher losing the tab
