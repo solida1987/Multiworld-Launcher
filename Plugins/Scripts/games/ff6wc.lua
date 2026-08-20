@@ -24,7 +24,8 @@
 --   SNI SRAM_START(0xE00000)+off → domain "CARTRAM", offset off (fallback "SRAM")
 --   FF6/FF3us is a HiROM cartridge: the "6WC…" ROM name the client validates lives
 --   in the SNES internal header at $00:FFC0 (System Bus) / file offset 0xFFC0
---   (HiROM CARTROM) — read like the EarthBound module's "MOM2AP" probe, multi-domain
+--   (HiROM CARTROM) — read the same way the other SNES modules read their
+--   header signature: multi-domain
 --   with HiROM-first fallbacks.
 --
 -- WHAT THIS DOES (mirrors worlds/ff6wc/Client.py game_watcher)
@@ -336,7 +337,7 @@ local function wanted(ap_id)
   return server_locations[ap_id] == true
 end
 
--- Item-stream filter, same policy as the ALttP/EarthBound modules. items_handling
+-- Item-stream filter, same policy as the ALttP module. items_handling
 -- is 0b111 (server-driven) for FF6WC, but the patched game still grants its own
 -- locally-found items in practice (the client only forwards remote items), so own-
 -- world items are dropped unless the slot is in explicit remote mode; server/
