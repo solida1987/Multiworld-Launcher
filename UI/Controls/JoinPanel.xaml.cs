@@ -11,6 +11,7 @@ using System.Windows.Media;
 using System.Windows.Threading;
 using LauncherV2.Core;
 using LauncherV2.Core.Archipelago;
+using LauncherV2.Core.Plugins;
 
 namespace LauncherV2.UI.Controls;
 
@@ -26,13 +27,14 @@ namespace LauncherV2.UI.Controls;
 // stopping one never touches the others.
 public partial class JoinPanel : System.Windows.Controls.UserControl
 {
-    private const string JoinIndexUrl =
-        "https://raw.githubusercontent.com/solida1987/london-plugin-catalog/main/catalog/join.json";
-
     private IReadOnlyList<SeedInfo> _seeds = Array.Empty<SeedInfo>();
     private SeedInfo? _seed;
     private ApEngine.Report? _engine;
-    private Dictionary<string, (string Id, string Page)>? _catalogue;
+
+    /// The SAME catalogue the Plugin Library shows, keyed by the name a seed's
+    /// slot uses. Sharing it is the point: a game the library offers one click
+    /// away must never be reported here as one nothing covers.
+    private Dictionary<string, StoreGame>? _catalogue;
     private readonly DispatcherTimer _tick;
 
     public JoinPanel()
@@ -75,21 +77,15 @@ public partial class JoinPanel : System.Windows.Controls.UserControl
     /// rather than guessing.
     private async Task LoadCatalogueAsync()
     {
+        var map = new Dictionary<string, StoreGame>(StringComparer.OrdinalIgnoreCase);
         try
         {
-            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
-            http.DefaultRequestHeaders.UserAgent.ParseAdd("MultiworldLauncher");
-            string json = await http.GetStringAsync(JoinIndexUrl);
-            using var doc = JsonDocument.Parse(json);
-
-            var map = new Dictionary<string, (string, string)>(StringComparer.OrdinalIgnoreCase);
-            foreach (var g in doc.RootElement.GetProperty("games").EnumerateObject())
-                map[g.Name] = (
-                    g.Value.GetProperty("id").GetString() ?? "",
-                    g.Value.GetProperty("page").GetString() ?? "");
-            _catalogue = map;
+            var index = await StoreCatalog.FetchAsync();
+            foreach (var g in index?.Games ?? Array.Empty<StoreGame>())
+                map[string.IsNullOrWhiteSpace(g.ApWorldName) ? g.Name : g.ApWorldName] = g;
         }
-        catch { _catalogue = new Dictionary<string, (string, string)>(); }
+        catch { /* offline: installed games still play, the rest say so */ }
+        _catalogue = map;
         Dispatcher.BeginInvoke(RefreshCards);
     }
 
@@ -205,12 +201,14 @@ public partial class JoinPanel : System.Windows.Controls.UserControl
                 status.Text = "Checking whether London has a plugin for this…";
             else if (_catalogue.TryGetValue(slot.Game, out var entry))
             {
-                status.Text = $"Not installed. London has a plugin for this game ({entry.Id}).";
-                var b = Btn("Get the plugin", primary: false);
-                b.Click += (_, _) => OpenUrl(entry.Page);
+                status.Text = "London has a plugin for this game — install it here "
+                            + "and the slot becomes playable.";
+                var b = Btn("Install plugin", primary: true);
+                b.Click += async (_, _) => await InstallPluginAsync(entry, b, status);
                 stack.Children.Add(new TextBlock
                 {
-                    Text = "Download it there, then use Add plugin in the library.",
+                    Text = "Shows the same consent screen as the Plugin Library: "
+                         + "who made it and what it does, before anything is added.",
                     FontSize = 10,
                     TextWrapping = TextWrapping.Wrap,
                     Margin = new Thickness(0, 5, 0, 0),
@@ -296,6 +294,47 @@ public partial class JoinPanel : System.Windows.Controls.UserControl
         if (ApServerHost.For(_seed) is { } host) await host.StopAsync();
         RefreshCards();
     }
+
+    /// Downloads the plugin and hands it to the SAME consent flow the Plugin
+    /// Library and a hand-picked file both use. The seed surface is a shortcut
+    /// to the shop, never a way around its questions.
+    private async Task InstallPluginAsync(StoreGame game, Button button, TextBlock status)
+    {
+        button.IsEnabled = false;
+        button.Content = "Downloading…";
+        status.Foreground = (Brush)FindResource("BrushAccent");
+        status.Text = $"Fetching {game.Name} from {game.PluginBy}'s release…";
+
+        var (path, message) = await StoreCatalog.DownloadPluginAsync(game);
+        if (path == null)
+        {
+            status.Foreground = (Brush)FindResource("BrushError");
+            status.Text = message;
+            button.Content = "Install plugin";
+            button.IsEnabled = true;
+            return;
+        }
+
+        var result = PluginInstallFlow.AddFromFile(Window.GetWindow(this), path);
+        if (result.Message != null)
+            MessageBox.Show(Window.GetWindow(this), result.Message,
+                result.Added ? "Plugin added" : "Plugin not added",
+                MessageBoxButton.OK,
+                result.Added ? MessageBoxImage.Information : MessageBoxImage.Warning);
+
+        try { File.Delete(path); } catch { }
+
+        button.Content = "Install plugin";
+        button.IsEnabled = true;
+        if (result.Added)
+        {
+            PluginInstalled?.Invoke();
+            RefreshCards();
+        }
+    }
+
+    /// The library's game list needs rebuilding after an install here too.
+    public event Action? PluginInstalled;
 
     private static void OpenUrl(string url)
     {
