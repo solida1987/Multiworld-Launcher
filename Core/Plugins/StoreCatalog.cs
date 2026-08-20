@@ -17,6 +17,9 @@ namespace LauncherV2.Core.Plugins;
 public sealed record StoreGame(
     [property: JsonPropertyName("id")]             string Id,
     [property: JsonPropertyName("name")]           string Name,
+    /// The name a seed's slot uses. "Diablo II: Lord of Destruction" plays a
+    /// world called "Diablo II Archipelago", so the two cannot be assumed equal.
+    [property: JsonPropertyName("ap_world_name")]  string ApWorldName,
     [property: JsonPropertyName("subtitle")]       string Subtitle,
     [property: JsonPropertyName("description")]    string Description,
     [property: JsonPropertyName("platform")]       string Platform,

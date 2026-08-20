@@ -392,8 +392,10 @@ public partial class MainWindow : Window
         _ = Dispatcher.BeginInvoke(new Action(async () => await LoadCommunityCardAsync()),
                                    System.Windows.Threading.DispatcherPriority.Background);
 
-        // A plugin installed from the store appears in the library at once.
+        // A plugin installed from the store appears in the library at once —
+        // and so does one installed from a seed's Join card.
         PanelStore.InstalledSomething += () => Dispatcher.BeginInvoke(RebuildGameList);
+        PanelJoin.PluginInstalled     += () => Dispatcher.BeginInvoke(RebuildGameList);
 
         // Wire achievement notifications.
         // grants can fire on plugin pipe threads (check counters), and a
