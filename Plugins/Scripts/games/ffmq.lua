@@ -17,8 +17,9 @@
 --   SNI WRAM_START(0xF50000)+off → domain "WRAM",    offset off (= $7E0000+off)
 --   SNI SRAM_START(0xE00000)+off → domain "CARTRAM", offset off (fallback "SRAM")
 --   The "MQ…" ROM title the client validates lives in the SNES internal header at
---   $00:FFC0 (System Bus) / file offset 0x7FC0 (LoROM CARTROM) — read like the
---   EarthBound module's "MOM2AP" probe, multi-domain with fallbacks.
+--   $00:FFC0 (System Bus) / file offset 0x7FC0 (LoROM CARTROM) — read the same
+--   way the other SNES modules read their header signature, multi-domain
+--   with fallbacks.
 --
 -- WHAT THIS DOES (mirrors worlds/ffmq/Client.py game_watcher)
 --   • poll(): the client's flag scan → AP location ids, gated to the slot's
@@ -300,7 +301,7 @@ local function wanted(ap_id)
   return server_locations[ap_id] == true
 end
 
--- Item-stream filter, same policy as the ALttP/EarthBound modules: in the default
+-- Item-stream filter, same policy as the ALttP module: in the default
 -- 0b001 mode the patched game grants its own found items, so own-world items are
 -- dropped unless the slot is in full remote mode; server/starting entries dropped.
 local function accept_item(it)

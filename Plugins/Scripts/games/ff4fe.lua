@@ -22,7 +22,8 @@
 --   SNI SRAM_START(0xE00000)+off → domain "CARTRAM", offset off (fallback "SRAM")
 --   The ROM-name the client validates is read at SNI 0x007FC0 (the LoROM internal
 --   header) — in BizHawk the cartridge ROM ("CARTROM"/"ROM") at file offset 0x7FC0,
---   probed multi-domain with fallbacks like the EarthBound module's "MOM2AP" probe.
+--   probed multi-domain with fallbacks, the same way the other SNES modules
+--   read their header signature.
 --   The AP build writes a custom header beginning "4FE" there (rom.py
 --   FF4FEPatchExtension.call_fe + __init__ generate_output: rom_name = "4FE<ver>_…"),
 --   exactly what Client.validate_rom checks (rom_name[:3] == b"4FE").
