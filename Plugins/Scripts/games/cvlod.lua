@@ -270,9 +270,9 @@ function M.is_goal_complete()
   -- That fired on Pokemon Crystal on 19 Aug -- the server took the goal,
   -- auto-collected, and released all 475 remaining items one second after the
   -- game started.
-  local s = read_u8(GAME_STATE_ADDR, RDRAM)
-  if s ~= GAME_STATE_PLAY and s ~= GAME_STATE_CREDITS then return false end
-  if s == GAME_STATE_CREDITS then return true end
+  if not in_gameplay() then return false end
+  -- Past the gate the credits state IS the ending, so no flag is needed.
+  if read_u8(GAME_STATE_ADDR, RDRAM) == GAME_STATE_CREDITS then return true end
   refresh_flags()
   return flag_bit(FLAG_ENDING)
 end
