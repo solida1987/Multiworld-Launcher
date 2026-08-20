@@ -201,12 +201,15 @@
                     <!-- Right side on purpose: the three left buttons are
                          places YOUR things live; the store is where new
                          things come from. -->
+                    <!-- "Store" read like money. It is a library of plugins,
+                         so that is its name; the internal ids keep the old
+                         word because published addresses do not move. -->
                     <Button x:Name="BtnModeStore"
-                            Content="Store"
+                            Content="Plugin Library"
                             Style="{StaticResource BtnSecondaryStyle}"
                             Padding="12,4" Margin="0,0,10,0"
                             FontSize="11"
-                            ToolTip="Browse every plugin the catalogue offers — installing always shows the consent screen"
+                            ToolTip="Every game plugin the catalogue offers — installing always shows the consent screen"
                             Click="BtnModeStore_Click"/>
                     <Button x:Name="BtnHelp"
                             Content="?"

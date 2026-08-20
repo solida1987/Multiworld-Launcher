@@ -46,7 +46,7 @@
                 <Grid>
                     <StackPanel Orientation="Horizontal">
                         <TextBlock x:Name="TxtStoreCount" FontSize="14" FontWeight="Bold"
-                                   Foreground="{StaticResource BrushText}" Text="Store"/>
+                                   Foreground="{StaticResource BrushText}" Text="Plugin Library"/>
                         <TextBlock x:Name="TxtStoreNote" FontSize="11" Margin="14,3,0,0"
                                    Foreground="{StaticResource BrushMuted}"
                                    Text="Installing runs the same consent screen as a file you picked yourself."/>
