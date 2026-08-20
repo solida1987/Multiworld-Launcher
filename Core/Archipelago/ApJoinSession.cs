@@ -133,12 +133,42 @@ public sealed class ApJoinSession
                     await ready.Task.ConfigureAwait(false);
             }
 
-            // 4. The plugin's window into the session — same four answers the
-            //    launcher's own flow provides.
+            // 4. The plugin's window into the session — the same answers the
+            //    launcher's own flow provides. The PUSH calls below are not
+            //    optional extras: a plugin that owns a game process (OpenTTD's
+            //    pipe) never polls the Get* delegates -- it waits for
+            //    OnSlotData and OnLocationTable, and a join that skips them
+            //    launches a game that sits forever at zero.
             plugin.GetServerLocations = () => client.ConnectedMissing.ToArray();
             plugin.GetOwnSlot         = () => client.Slot;
             plugin.GetSlotData        = () => client.SlotData;
             plugin.GetSeedName        = () => client.SeedName ?? seed.Id;
+
+            plugin.OnApServicesAttached(new JoinApServices(client));
+            if (client.SlotData is { } sd) plugin.OnSlotData(sd);
+
+            string worldName = plugin.ApWorldName ?? slot.Game;
+            client.DataPackageReceived += (gameKey, data) =>
+            {
+                if (!string.Equals(gameKey, worldName, StringComparison.OrdinalIgnoreCase))
+                    return;
+                // Extract while the JsonElement is alive -- the client does
+                // not clone it for this event.
+                if (!data.TryGetProperty("location_name_to_id", out var locMap)) return;
+                var byName = new Dictionary<string, long>(StringComparer.Ordinal);
+                foreach (var kv in locMap.EnumerateObject())
+                    byName[kv.Name] = kv.Value.GetInt64();
+                plugin.OnLocationTable(byName);
+                // Resume: what this slot already checked, now that the plugin
+                // has the table to name them with.
+                plugin.OnCheckedLocations(client.ConnectedChecked.ToArray());
+            };
+            client.ServerCheckedLocations += ids => plugin.OnCheckedLocations(ids);
+            client.DeathLinkReceived += (source, cause) =>
+                _ = plugin.OnDeathLinkReceivedAsync(source, cause);
+            // The table is a second round trip the client only makes on
+            // request. Fire-and-forget: a failure degrades to id labels.
+            _ = client.GetDataPackageAsync(new[] { worldName });
 
             plugin.LocationsChecked += ids =>
             {
@@ -211,6 +241,63 @@ public sealed class ApJoinSession
         }
         lock (_all) _all.Remove(this);
         Changed?.Invoke();
+    }
+
+    // IApServices over the bare client -- the joined game's window into its
+    // own session. The classic flow's adapter lives in the UI layer and needs
+    // the dispatcher and tracker; a join session has neither, and the games
+    // played through it need identity, resync, scouts and DeathLink.
+    private sealed class JoinApServices : IApServices
+    {
+        private readonly ApClient _ap;
+        public JoinApServices(ApClient ap)
+        {
+            _ap = ap;
+            _ap.LocationInfoReceived += items => LocationsScouted?.Invoke(items);
+            _ap.ServerCheckedLocations += ids =>
+            {
+                lock (_checked) foreach (long id in ids) _checked.Add(id);
+            };
+            lock (_checked) foreach (long id in ap.ConnectedChecked) _checked.Add(id);
+        }
+
+        private readonly HashSet<long> _checked = new();
+
+        public int OwnSlot => _ap.Slot;
+        public System.Text.Json.JsonElement? SlotData => _ap.SlotData;
+        public string? SeedName => _ap.SeedName;
+
+        public string ResolvePlayerName(int slot)
+        {
+            var p = _ap.Players.FirstOrDefault(x => x.Slot == slot);
+            return p?.Alias ?? p?.Name ?? $"Player {slot}";
+        }
+
+        public long[] CheckedLocations()
+        {
+            lock (_checked) return _checked.ToArray();
+        }
+
+        public long[] UncheckedLocations()
+        {
+            lock (_checked)
+                return _ap.ConnectedMissing.Where(id => !_checked.Contains(id)).ToArray();
+        }
+
+        public Task ScoutLocationsAsync(long[] locationIds)
+            => _ap.LocationScoutsAsync(locationIds, createAsHint: 0);
+
+        public event Action<ApNetworkItem[]>? LocationsScouted;
+
+        public Task ResyncAsync() => _ap.SyncAsync();
+
+        public bool DeathLinkEnabled => _ap.DeathLinkEnabled;
+
+        public void ReportDeath(string? cause)
+        {
+            if (!_ap.DeathLinkEnabled) return;
+            _ = _ap.SendDeathLinkAsync(string.IsNullOrWhiteSpace(cause) ? "died" : cause);
+        }
     }
 
     /// Everything, stopped — the launcher is closing.
