@@ -7227,6 +7227,12 @@ public partial class MainWindow : Window
     {
         PanelMultiworld.Visibility = multiworld ? Visibility.Visible : Visibility.Collapsed;
 
+        // The rail is genuinely hidden, not merely painted under. The first
+        // shipped build relied on a comment CLAIMING this happened; the code
+        // was never written, and the rail sat on top of the panel's whole
+        // action column — the player could build slots but never generate.
+        RailCommunity.Visibility = multiworld ? Visibility.Collapsed : Visibility.Visible;
+
         BtnModeLibrary.FontWeight    = multiworld ? FontWeights.Normal : FontWeights.Bold;
         BtnModeMultiworld.FontWeight = multiworld ? FontWeights.Bold   : FontWeights.Normal;
 

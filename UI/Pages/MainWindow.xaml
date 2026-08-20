@@ -1998,21 +1998,14 @@
 
             </Grid>  <!-- end main panel -->
 
-            <!--  MULTIWORLD  -->
-            <!-- Spans every column: it replaces the library rather than
-                 sitting beside it, because seeds are not a property of the
-                 game that happens to be selected. -->
-            <local:MultiworldPanel x:Name="PanelMultiworld"
-                                   Grid.Column="0" Grid.ColumnSpan="3"
-                                   Visibility="Collapsed"/>
-
             <!--  COMMUNITY RAIL  -->
             <!-- Where the launcher points outward. Ordered by who is actually
                  going to answer you: our own server first, because that is
                  where the work happens and where a bug report reaches someone.
                  The Archipelago links sit at the bottom, present and plainly
                  labelled, so nobody mistakes this for an official launcher. -->
-            <Border Grid.Column="2"
+            <Border x:Name="RailCommunity"
+                    Grid.Column="2"
                     Background="#141720"
                     BorderBrush="#1E2233"
                     BorderThickness="1,0,0,0">
@@ -2374,6 +2367,17 @@
                              ScrollViewer.VerticalScrollBarVisibility="Auto"/>
                 </DockPanel>
             </Border>
+
+            <!--  MULTIWORLD  -->
+            <!-- Spans every column and is deliberately the LAST child of the
+                 content grid: WPF paints later children on top, and the first
+                 shipped layout had the community rail painting over this
+                 panel's entire action column — slots and options were visible,
+                 but Generate itself was buried under the Discord card. A
+                 full-surface panel must outrank everything, structurally. -->
+            <local:MultiworldPanel x:Name="PanelMultiworld"
+                                   Grid.Column="0" Grid.ColumnSpan="3"
+                                   Visibility="Collapsed"/>
         </Grid>
 
     </Grid>
