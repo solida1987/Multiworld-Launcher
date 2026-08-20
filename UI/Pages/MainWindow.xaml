@@ -198,6 +198,16 @@
                             HorizontalAlignment="Right"
                             VerticalAlignment="Center"
                             Margin="0,0,2,0">
+                    <!-- Right side on purpose: the three left buttons are
+                         places YOUR things live; the store is where new
+                         things come from. -->
+                    <Button x:Name="BtnModeStore"
+                            Content="Store"
+                            Style="{StaticResource BtnSecondaryStyle}"
+                            Padding="12,4" Margin="0,0,10,0"
+                            FontSize="11"
+                            ToolTip="Browse every plugin the catalogue offers — installing always shows the consent screen"
+                            Click="BtnModeStore_Click"/>
                     <Button x:Name="BtnHelp"
                             Content="?"
                             ToolTip="Keyboard shortcuts (F1)"
@@ -2175,6 +2185,11 @@
             <local:JoinPanel x:Name="PanelJoin"
                              Grid.Column="0" Grid.ColumnSpan="3"
                              Visibility="Collapsed"/>
+
+            <!--  STORE  -->
+            <local:StorePanel x:Name="PanelStore"
+                              Grid.Column="0" Grid.ColumnSpan="3"
+                              Visibility="Collapsed"/>
 
         </Grid>  <!-- end content Grid -->
 

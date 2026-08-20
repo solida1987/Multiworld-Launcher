@@ -177,11 +177,15 @@ public sealed class ApJoinSession
         }
     }
 
-    /// Player-initiated stop: game first, connection second.
+    /// Player-initiated stop: game first, connection second. The teardown is
+    /// AWAITED here — StopAllAsync's caller (launcher shutdown, the proofs)
+    /// must be able to trust that "stopped" means gone, and the fire-and-
+    /// forget End() below cannot promise that.
     public async Task StopAsync()
     {
         try { await Plugin.StopAsync().ConfigureAwait(false); } catch { }
-        End("Stopped");
+        if (Current is not Stage.Ended) Set(Stage.Ended, "Stopped");
+        await TearDownAsync().ConfigureAwait(false);
     }
 
     private void End(string why)
@@ -191,8 +195,13 @@ public sealed class ApJoinSession
         _ = TearDownAsync();
     }
 
+    private int _tornDown;
+
     private async Task TearDownAsync()
     {
+        // Both End() (event-driven) and StopAsync (awaited) reach here; the
+        // second arrival must be a no-op, not a double-dispose.
+        if (System.Threading.Interlocked.Exchange(ref _tornDown, 1) == 1) return;
         var c = _client;
         _client = null;
         if (c != null)

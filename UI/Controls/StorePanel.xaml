@@ -1,0 +1,71 @@
+<UserControl x:Class="LauncherV2.UI.Controls.StorePanel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Background="{StaticResource BrushBackground}">
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="240"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+
+        <!--  Filters. Checkboxes INCLUDE; nothing ticked means everything,
+              because a store that can be filtered down to a void looks broken
+              rather than filtered. -->
+        <Border Grid.Column="0" Background="#141720" BorderBrush="#262C3E"
+                BorderThickness="0,0,1,0">
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <StackPanel Margin="16,14,16,20">
+                    <TextBlock Text="SEARCH" FontSize="10" FontWeight="Bold"
+                               Foreground="{StaticResource BrushMuted}" Margin="0,0,0,6"/>
+                    <TextBox x:Name="TxtSearch" Padding="8,6"
+                             ToolTip="Name, description or genre"
+                             TextChanged="Filters_Changed"/>
+
+                    <TextBlock Text="SYSTEM" FontSize="10" FontWeight="Bold"
+                               Foreground="{StaticResource BrushMuted}" Margin="0,16,0,6"/>
+                    <StackPanel x:Name="PanelPlatforms"/>
+
+                    <TextBlock Text="GENRE" FontSize="10" FontWeight="Bold"
+                               Foreground="{StaticResource BrushMuted}" Margin="0,16,0,6"/>
+                    <StackPanel x:Name="PanelGenres"/>
+
+                    <Button x:Name="BtnClearFilters" Content="Clear filters"
+                            Style="{StaticResource BtnSecondaryStyle}" Padding="0,6"
+                            Margin="0,16,0,0" Click="BtnClearFilters_Click"/>
+                </StackPanel>
+            </ScrollViewer>
+        </Border>
+
+        <Grid Grid.Column="1">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+
+            <Border Grid.Row="0" Padding="18,13,18,10">
+                <Grid>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock x:Name="TxtStoreCount" FontSize="14" FontWeight="Bold"
+                                   Foreground="{StaticResource BrushText}" Text="Store"/>
+                        <TextBlock x:Name="TxtStoreNote" FontSize="11" Margin="14,3,0,0"
+                                   Foreground="{StaticResource BrushMuted}"
+                                   Text="Installing runs the same consent screen as a file you picked yourself."/>
+                    </StackPanel>
+                    <Button x:Name="BtnStoreRefresh" Content="Refresh"
+                            Style="{StaticResource BtnSecondaryStyle}" Padding="12,5"
+                            HorizontalAlignment="Right" Click="BtnStoreRefresh_Click"/>
+                </Grid>
+            </Border>
+
+            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="18,0,18,18">
+                <StackPanel>
+                    <WrapPanel x:Name="PanelGames"/>
+                    <TextBlock x:Name="TxtStoreEmpty" Visibility="Collapsed"
+                               Margin="0,60,0,0" HorizontalAlignment="Center"
+                               FontSize="13" Foreground="{StaticResource BrushMuted}"
+                               Text="Nothing matches those filters."/>
+                </StackPanel>
+            </ScrollViewer>
+        </Grid>
+    </Grid>
+</UserControl>

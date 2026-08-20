@@ -392,6 +392,9 @@ public partial class MainWindow : Window
         _ = Dispatcher.BeginInvoke(new Action(async () => await LoadCommunityCardAsync()),
                                    System.Windows.Threading.DispatcherPriority.Background);
 
+        // A plugin installed from the store appears in the library at once.
+        PanelStore.InstalledSomething += () => Dispatcher.BeginInvoke(RebuildGameList);
+
         // Wire achievement notifications.
         // grants can fire on plugin pipe threads (check counters), and a
         // synchronous hop would park the pipe's read loop on the UI thread.
@@ -7219,6 +7222,7 @@ public partial class MainWindow : Window
     private void BtnModeLibrary_Click(object sender, RoutedEventArgs e)    => SetMode(0);
     private void BtnModeMultiworld_Click(object sender, RoutedEventArgs e) => SetMode(1);
     private void BtnModeJoin_Click(object sender, RoutedEventArgs e)       => SetMode(2);
+    private void BtnModeStore_Click(object sender, RoutedEventArgs e)      => SetMode(3);
 
     /// Swaps the whole content area. The sidebar and the community rail stay
     /// hidden in multiworld mode: neither is about the seed being built, and a
@@ -7230,6 +7234,7 @@ public partial class MainWindow : Window
     {
         PanelMultiworld.Visibility = mode == 1 ? Visibility.Visible : Visibility.Collapsed;
         PanelJoin.Visibility       = mode == 2 ? Visibility.Visible : Visibility.Collapsed;
+        PanelStore.Visibility      = mode == 3 ? Visibility.Visible : Visibility.Collapsed;
 
         // The rail is genuinely hidden, not merely painted under. The first
         // shipped build relied on a comment CLAIMING this happened; the code
@@ -7240,12 +7245,14 @@ public partial class MainWindow : Window
         BtnModeLibrary.FontWeight    = mode == 0 ? FontWeights.Bold : FontWeights.Normal;
         BtnModeMultiworld.FontWeight = mode == 1 ? FontWeights.Bold : FontWeights.Normal;
         BtnModeJoin.FontWeight       = mode == 2 ? FontWeights.Bold : FontWeights.Normal;
+        BtnModeStore.FontWeight      = mode == 3 ? FontWeights.Bold : FontWeights.Normal;
 
         // Re-read on every open: the player may have just installed the
         // engine or generated a seed, and stale emptiness is the most
         // annoying possible answer.
         if (mode == 1) PanelMultiworld.Refresh();
         if (mode == 2) PanelJoin.Refresh();
+        if (mode == 3) PanelStore.Refresh();
     }
 
     // --- Community rail ---
