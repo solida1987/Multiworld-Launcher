@@ -171,6 +171,13 @@
                             Padding="12,4"
                             FontSize="11"
                             Click="BtnModeMultiworld_Click"/>
+                    <Button x:Name="BtnModeJoin"
+                            Content="Join"
+                            Style="{StaticResource BtnSecondaryStyle}"
+                            Padding="12,4" Margin="6,0,0,0"
+                            FontSize="11"
+                            ToolTip="Play the seeds you generated — one card per player slot"
+                            Click="BtnModeJoin_Click"/>
                 </StackPanel>
                 <!-- Center: connection info (shown when connected) -->
                 <StackPanel x:Name="TitleBarConnInfo"
@@ -2161,6 +2168,13 @@
             <local:MultiworldPanel x:Name="PanelMultiworld"
                                    Grid.Column="0" Grid.ColumnSpan="3"
                                    Visibility="Collapsed"/>
+
+            <!--  JOIN  -->
+            <!-- Same rules as the Multiworld panel, same hard-won reasons:
+                 anchored on a proven sibling, last child, full-surface. -->
+            <local:JoinPanel x:Name="PanelJoin"
+                             Grid.Column="0" Grid.ColumnSpan="3"
+                             Visibility="Collapsed"/>
 
         </Grid>  <!-- end content Grid -->
 

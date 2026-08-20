@@ -72,6 +72,12 @@ public sealed class ApServerHost
 
     /// Starts the server for a seed on the first free port at or above 38281.
     /// Waits for proof of life, not for hope.
+    /// One start at a time, globally. Two concurrent joins of the same seed
+    /// both looked, both saw nothing running, and both started a server --
+    /// the caught-in-proof version of the double-click problem. Server starts
+    /// are rare and take ~6 s; serialising them costs nothing.
+    private static readonly System.Threading.SemaphoreSlim _startGate = new(1, 1);
+
     public static async Task<StartResult> StartAsync(
         ApEngine.Report engine, SeedInfo seed, CancellationToken ct = default)
     {
@@ -79,6 +85,20 @@ public sealed class ApServerHost
             return new StartResult(null, engine.Summary());
         if (!File.Exists(seed.MultidataPath))
             return new StartResult(null, "The seed's server file is missing from " + seed.Folder);
+
+        await _startGate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            return await StartLockedAsync(engine, seed, ct).ConfigureAwait(false);
+        }
+        finally { _startGate.Release(); }
+    }
+
+    private static async Task<StartResult> StartLockedAsync(
+        ApEngine.Report engine, SeedInfo seed, CancellationToken ct)
+    {
+        // Re-checked INSIDE the gate: the whole point is that the second
+        // caller waits here until the first caller's server is visible.
         if (For(seed) is { IsRunning: true } already)
             return new StartResult(already, $"Already hosting on port {already.Port}.");
 

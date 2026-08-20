@@ -7216,33 +7216,36 @@ public partial class MainWindow : Window
 
     // --- Modes: library or multiworld ---
 
-    private void BtnModeLibrary_Click(object sender, RoutedEventArgs e)    => SetMode(false);
-    private void BtnModeMultiworld_Click(object sender, RoutedEventArgs e) => SetMode(true);
+    private void BtnModeLibrary_Click(object sender, RoutedEventArgs e)    => SetMode(0);
+    private void BtnModeMultiworld_Click(object sender, RoutedEventArgs e) => SetMode(1);
+    private void BtnModeJoin_Click(object sender, RoutedEventArgs e)       => SetMode(2);
 
     /// Swaps the whole content area. The sidebar and the community rail stay
     /// hidden in multiworld mode: neither is about the seed being built, and a
     /// visible game list next to a slot list is two lists that mean different
     /// things sitting side by side.
-    private void SetMode(bool multiworld)
+    /// 0 = library, 1 = multiworld, 2 = join. An int rather than an enum so
+    /// the build gate can drive it through reflection without sharing a type.
+    private void SetMode(int mode)
     {
-        PanelMultiworld.Visibility = multiworld ? Visibility.Visible : Visibility.Collapsed;
+        PanelMultiworld.Visibility = mode == 1 ? Visibility.Visible : Visibility.Collapsed;
+        PanelJoin.Visibility       = mode == 2 ? Visibility.Visible : Visibility.Collapsed;
 
         // The rail is genuinely hidden, not merely painted under. The first
         // shipped build relied on a comment CLAIMING this happened; the code
         // was never written, and the rail sat on top of the panel's whole
         // action column — the player could build slots but never generate.
-        RailCommunity.Visibility = multiworld ? Visibility.Collapsed : Visibility.Visible;
+        RailCommunity.Visibility = mode == 0 ? Visibility.Visible : Visibility.Collapsed;
 
-        BtnModeLibrary.FontWeight    = multiworld ? FontWeights.Normal : FontWeights.Bold;
-        BtnModeMultiworld.FontWeight = multiworld ? FontWeights.Bold   : FontWeights.Normal;
+        BtnModeLibrary.FontWeight    = mode == 0 ? FontWeights.Bold : FontWeights.Normal;
+        BtnModeMultiworld.FontWeight = mode == 1 ? FontWeights.Bold : FontWeights.Normal;
+        BtnModeJoin.FontWeight       = mode == 2 ? FontWeights.Bold : FontWeights.Normal;
 
-        if (multiworld)
-        {
-            // Re-read the engine every time it is opened: the player may have
-            // just installed it, and a stale "no engine found" would be the
-            // most annoying possible answer.
-            PanelMultiworld.Refresh();
-        }
+        // Re-read on every open: the player may have just installed the
+        // engine or generated a seed, and stale emptiness is the most
+        // annoying possible answer.
+        if (mode == 1) PanelMultiworld.Refresh();
+        if (mode == 2) PanelJoin.Refresh();
     }
 
     // --- Community rail ---
@@ -10272,6 +10275,9 @@ public partial class MainWindow : Window
         // supposedly-closed launcher alive in the background for minutes.
         try { if (stopGame != null) await stopGame.StopAsync(); } catch { }
         try { await Task.WhenAny(CleanupSessionAsync(), Task.Delay(4000)); } catch { }
+
+        try { await Task.WhenAny(LauncherV2.Core.Archipelago.ApJoinSession.StopAllAsync(),
+                                 Task.Delay(10000)); } catch { }
 
         // Every AP server London started dies with it -- politely, via /exit,
         // so the saves get written. Orphans holding ports for nobody are how
