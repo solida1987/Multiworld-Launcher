@@ -1,0 +1,304 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Text.Json;
+using System.Threading.Tasks;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Media;
+using System.Windows.Threading;
+using LauncherV2.Core;
+using LauncherV2.Core.Archipelago;
+
+namespace LauncherV2.UI.Controls;
+
+// JoinPanel — the seed you harvested, as things you can press Play on.
+//
+// One card per player slot. The card answers, in order, the only questions
+// that matter: can THIS machine play it, and with one press. Installed game →
+// Play (server hosted, patch placed, AP connected, game launched). Game with a
+// London plugin but not installed → where to get it. Game with no plugin →
+// said plainly, because "not possible yet" is an answer and silence is not.
+//
+// Several cards can be Playing at once — each runs its own ApJoinSession, and
+// stopping one never touches the others.
+public partial class JoinPanel : System.Windows.Controls.UserControl
+{
+    private const string JoinIndexUrl =
+        "https://raw.githubusercontent.com/solida1987/london-plugin-catalog/main/catalog/join.json";
+
+    private IReadOnlyList<SeedInfo> _seeds = Array.Empty<SeedInfo>();
+    private SeedInfo? _seed;
+    private ApEngine.Report? _engine;
+    private Dictionary<string, (string Id, string Page)>? _catalogue;
+    private readonly DispatcherTimer _tick;
+
+    public JoinPanel()
+    {
+        InitializeComponent();
+
+        // Live counters and running-state changes arrive from pool threads and
+        // from game processes; a 2 s sweep keeps every card honest without any
+        // card having to know why something changed.
+        _tick = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+        _tick.Tick += (_, _) => RefreshCards();
+
+        Loaded   += (_, _) => { Refresh(); _tick.Start(); };
+        Unloaded += (_, _) => _tick.Stop();
+    }
+
+    /// Re-reads the library and the engine. Called every time the mode opens.
+    public void Refresh()
+    {
+        var settings = SettingsStore.Load();
+        _engine = ApEngine.Discover(string.IsNullOrWhiteSpace(settings.ApEnginePath)
+                                    ? null : settings.ApEnginePath);
+
+        _seeds = ApSeedLibrary.List();
+        string? keep = _seed?.Id;
+
+        CmbSeed.Items.Clear();
+        foreach (var s in _seeds)
+            CmbSeed.Items.Add($"{s.Id}   ·   {s.Slots.Count} players   ·   {s.Created:d MMM HH:mm}");
+
+        int idx = keep == null ? 0 : Math.Max(0, _seeds.ToList().FindIndex(s => s.Id == keep));
+        if (CmbSeed.Items.Count > 0) CmbSeed.SelectedIndex = idx;
+        else { _seed = null; RefreshCards(); }
+
+        if (_catalogue == null) _ = LoadCatalogueAsync();
+    }
+
+    /// The catalogue's game -> plugin map. Best-effort: offline, the cards
+    /// still work for installed games, and the rest say the lookup failed
+    /// rather than guessing.
+    private async Task LoadCatalogueAsync()
+    {
+        try
+        {
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
+            http.DefaultRequestHeaders.UserAgent.ParseAdd("MultiworldLauncher");
+            string json = await http.GetStringAsync(JoinIndexUrl);
+            using var doc = JsonDocument.Parse(json);
+
+            var map = new Dictionary<string, (string, string)>(StringComparer.OrdinalIgnoreCase);
+            foreach (var g in doc.RootElement.GetProperty("games").EnumerateObject())
+                map[g.Name] = (
+                    g.Value.GetProperty("id").GetString() ?? "",
+                    g.Value.GetProperty("page").GetString() ?? "");
+            _catalogue = map;
+        }
+        catch { _catalogue = new Dictionary<string, (string, string)>(); }
+        Dispatcher.BeginInvoke(RefreshCards);
+    }
+
+    private void CmbSeed_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        int i = CmbSeed.SelectedIndex;
+        _seed = i >= 0 && i < _seeds.Count ? _seeds[i] : null;
+        RefreshCards();
+    }
+
+    // ------------------------------------------------------------------ cards
+
+    private void RefreshCards()
+    {
+        PanelSlots.Children.Clear();
+        PanelJoinEmpty.Visibility = _seed == null ? Visibility.Visible : Visibility.Collapsed;
+        RefreshServerChip();
+        if (_seed == null) return;
+
+        foreach (var slot in _seed.Slots)
+            PanelSlots.Children.Add(BuildCard(_seed, slot));
+    }
+
+    private void RefreshServerChip()
+    {
+        var host = _seed == null ? null : ApServerHost.For(_seed);
+        bool up = host is { IsRunning: true };
+        DotServer.Fill = new SolidColorBrush(up
+            ? Color.FromRgb(0x4F, 0xA9, 0x7B) : Color.FromRgb(0x4A, 0x51, 0x70));
+        TxtServer.Text = up
+            ? $"Hosting on port {host!.Port} — friends on your network join "
+              + $"{Environment.MachineName}:{host.Port}"
+            : _seed != null && ApServerHost.CanResume(_seed)
+                ? "Server stopped — Play resumes the session"
+                : "Server starts when you press Play";
+        BtnStopServer.Visibility = up ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private UIElement BuildCard(SeedInfo seed, SeedSlot slot)
+    {
+        var plugin = GameRegistry.All.FirstOrDefault(p =>
+            string.Equals(p.ApWorldName, slot.Game, StringComparison.OrdinalIgnoreCase));
+        var session = plugin == null ? null : ApJoinSession.For(plugin);
+        bool playing = session is { Current: ApJoinSession.Stage.Playing or ApJoinSession.Stage.Connecting };
+
+        var card = new Border
+        {
+            Width = 330,
+            Background = new SolidColorBrush(Color.FromRgb(0x1B, 0x20, 0x30)),
+            BorderBrush = new SolidColorBrush(playing
+                ? Color.FromRgb(0x4F, 0xA9, 0x7B) : Color.FromRgb(0x26, 0x2C, 0x3E)),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(7),
+            Padding = new Thickness(15, 12, 15, 13),
+            Margin = new Thickness(0, 0, 12, 12),
+        };
+        var stack = new StackPanel();
+
+        // P2 · Zelda — the slot identity players log in with.
+        var head = new StackPanel { Orientation = Orientation.Horizontal };
+        head.Children.Add(new Border
+        {
+            Background = new SolidColorBrush(Color.FromRgb(0x26, 0x2C, 0x3E)),
+            CornerRadius = new CornerRadius(3),
+            Padding = new Thickness(6, 2, 6, 2),
+            Margin = new Thickness(0, 0, 8, 0),
+            Child = new TextBlock
+            {
+                Text = $"P{slot.Player} · {slot.Name}",
+                FontSize = 10.5,
+                FontWeight = FontWeights.Bold,
+                Foreground = (Brush)FindResource("BrushMuted"),
+            },
+        });
+        stack.Children.Add(head);
+
+        stack.Children.Add(new TextBlock
+        {
+            Text = slot.Game,
+            FontSize = 14.5,
+            FontWeight = FontWeights.Bold,
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 7, 0, 2),
+            Foreground = (Brush)FindResource("BrushText"),
+        });
+
+        var status = new TextBlock
+        {
+            FontSize = 11,
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 0, 0, 9),
+            Foreground = (Brush)FindResource("BrushMuted"),
+        };
+        stack.Children.Add(status);
+
+        Button Btn(string text, bool primary)
+        {
+            var b = new Button
+            {
+                Content = text,
+                Padding = new Thickness(0, 8, 0, 8),
+                Style = (Style)FindResource(primary ? "BtnPlayStyle" : "BtnSecondaryStyle"),
+            };
+            stack.Children.Add(b);
+            return b;
+        }
+
+        if (plugin == null)
+        {
+            // Not installed. The catalogue decides which of the two honest
+            // answers this card gives.
+            if (_catalogue == null)
+                status.Text = "Checking whether London has a plugin for this…";
+            else if (_catalogue.TryGetValue(slot.Game, out var entry))
+            {
+                status.Text = $"Not installed. London has a plugin for this game ({entry.Id}).";
+                var b = Btn("Get the plugin", primary: false);
+                b.Click += (_, _) => OpenUrl(entry.Page);
+                stack.Children.Add(new TextBlock
+                {
+                    Text = "Download it there, then use Add plugin in the library.",
+                    FontSize = 10,
+                    TextWrapping = TextWrapping.Wrap,
+                    Margin = new Thickness(0, 5, 0, 0),
+                    Foreground = (Brush)FindResource("BrushMuted"),
+                });
+            }
+            else
+                status.Text = "This game cannot be started from London yet — no plugin "
+                            + "covers it. The slot still works from the game's own AP client.";
+        }
+        else if (playing)
+        {
+            status.Text = session!.StatusText;
+            stack.Children.Add(new TextBlock
+            {
+                Text = $"{session.ChecksSent} checks sent   ·   {session.ItemsReceived} items received",
+                FontSize = 11.5,
+                FontWeight = FontWeights.Bold,
+                Margin = new Thickness(0, 0, 0, 9),
+                Foreground = (Brush)FindResource("BrushSuccess"),
+            });
+            var b = Btn("Stop", primary: false);
+            b.Click += async (_, _) => { await session.StopAsync(); RefreshCards(); };
+        }
+        else
+        {
+            bool ready = plugin.IsInstalled;
+            status.Text = !ready
+                ? "The plugin is installed but the game is not — open it in the "
+                  + "library and install it first."
+                : slot.PatchFile != null
+                    ? "Ready — this slot's patch is in the seed and will be applied."
+                    : "Ready.";
+
+            var b = Btn("▶  Play this slot", primary: true);
+            b.IsEnabled = ready && _engine is { Usable: true };
+            if (_engine is not { Usable: true })
+                status.Text = "No usable Archipelago engine — set one up under Multiworld.";
+            b.Click += async (_, _) => await PlayAsync(seed, slot, plugin, b, status);
+        }
+
+        card.Child = stack;
+        return card;
+    }
+
+    private async Task PlayAsync(SeedInfo seed, SeedSlot slot, IGamePlugin plugin,
+                                 Button button, TextBlock status)
+    {
+        button.IsEnabled = false;
+        button.Content = "Starting…";
+        status.Text = "Hosting the server, placing the patch, connecting…";
+
+        var (session, message) = await ApJoinSession.StartAsync(_engine!, seed, slot, plugin);
+
+        if (session == null)
+        {
+            status.Text = message;
+            button.Content = "▶  Play this slot";
+            button.IsEnabled = true;
+            RefreshServerChip();
+            return;
+        }
+        RefreshCards();
+    }
+
+    private void BtnStopServer_Click(object sender, RoutedEventArgs e)
+    {
+        _ = StopServerAsync();
+    }
+
+    private async Task StopServerAsync()
+    {
+        if (_seed == null) return;
+        // Sessions first: a server yanked out from under live games is the
+        // disconnect story, and this button promised a stop, not an accident.
+        foreach (var s in ApJoinSession.All.Where(s => s.SeedId == _seed.Id))
+            await s.StopAsync();
+        if (ApServerHost.For(_seed) is { } host) await host.StopAsync();
+        RefreshCards();
+    }
+
+    private static void OpenUrl(string url)
+    {
+        try
+        {
+            System.Diagnostics.Process.Start(
+                new System.Diagnostics.ProcessStartInfo { FileName = url, UseShellExecute = true });
+        }
+        catch { }
+    }
+}
