@@ -148,6 +148,7 @@ public sealed class ApJoinSession
             if (client.SlotData is { } sd) plugin.OnSlotData(sd);
 
             string worldName = plugin.ApWorldName ?? slot.Game;
+            Dictionary<string, long>? table = null;
             client.DataPackageReceived += (gameKey, data) =>
             {
                 if (!string.Equals(gameKey, worldName, StringComparison.OrdinalIgnoreCase))
@@ -158,6 +159,7 @@ public sealed class ApJoinSession
                 var byName = new Dictionary<string, long>(StringComparer.Ordinal);
                 foreach (var kv in locMap.EnumerateObject())
                     byName[kv.Name] = kv.Value.GetInt64();
+                table = byName;
                 plugin.OnLocationTable(byName);
                 // Resume: what this slot already checked, now that the plugin
                 // has the table to name them with.
@@ -188,6 +190,16 @@ public sealed class ApJoinSession
             // 5. The game itself.
             await plugin.LaunchAsync(ap).ConfigureAwait(false);
             plugin.LastSlotName = slot.Name;
+
+            // Push again what may have raced ahead of the launch: a plugin
+            // that resets session state in LaunchAsync loses anything that
+            // arrived before it. All three calls are idempotent by contract.
+            if (client.SlotData is { } sd2) plugin.OnSlotData(sd2);
+            if (table is { } t2)
+            {
+                plugin.OnLocationTable(t2);
+                plugin.OnCheckedLocations(client.ConnectedChecked.ToArray());
+            }
 
             session.Set(Stage.Playing, $"Playing on port {hosted.Host.Port}");
             return (session, "Joined.");
