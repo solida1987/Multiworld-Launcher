@@ -7214,6 +7214,31 @@ public partial class MainWindow : Window
     // --- Canonical Archipelago links — sidebar bottom row (§13) ---
     // THE home of these three links in the launcher; nothing else hardcodes them.
 
+    // --- Modes: library or multiworld ---
+
+    private void BtnModeLibrary_Click(object sender, RoutedEventArgs e)    => SetMode(false);
+    private void BtnModeMultiworld_Click(object sender, RoutedEventArgs e) => SetMode(true);
+
+    /// Swaps the whole content area. The sidebar and the community rail stay
+    /// hidden in multiworld mode: neither is about the seed being built, and a
+    /// visible game list next to a slot list is two lists that mean different
+    /// things sitting side by side.
+    private void SetMode(bool multiworld)
+    {
+        PanelMultiworld.Visibility = multiworld ? Visibility.Visible : Visibility.Collapsed;
+
+        BtnModeLibrary.FontWeight    = multiworld ? FontWeights.Normal : FontWeights.Bold;
+        BtnModeMultiworld.FontWeight = multiworld ? FontWeights.Bold   : FontWeights.Normal;
+
+        if (multiworld)
+        {
+            // Re-read the engine every time it is opened: the player may have
+            // just installed it, and a stale "no engine found" would be the
+            // most annoying possible answer.
+            PanelMultiworld.Refresh();
+        }
+    }
+
     // --- Community rail ---
 
     private void BtnCommunityJoin_Click(object sender, RoutedEventArgs e)
@@ -10214,7 +10239,14 @@ public partial class MainWindow : Window
 
         // WPF cannot await inside OnClosing — cancel this close, run the async
         // teardown, then Close() again (passes the _shutdownComplete gate).
+        //
+        // The window disappears NOW. The teardown used to run behind a window
+        // that just sat there, so the first click looked like nothing had
+        // happened and everybody clicked again — the second click did nothing
+        // but arrive while the first was still working. Closing is the one
+        // action whose feedback cannot come late.
         e.Cancel = true;
+        Hide();
         _ = ShutdownAsync(running);
     }
 
@@ -10229,8 +10261,19 @@ public partial class MainWindow : Window
 
         SaveWindowState();
 
+        // The window is already hidden, but hidden is not closed: every step
+        // below gets a ceiling so a hung network goodbye cannot keep a
+        // supposedly-closed launcher alive in the background for minutes.
         try { if (stopGame != null) await stopGame.StopAsync(); } catch { }
-        try { await CleanupSessionAsync(); } catch { }
+        try { await Task.WhenAny(CleanupSessionAsync(), Task.Delay(4000)); } catch { }
+
+        // Every AP server London started dies with it -- politely, via /exit,
+        // so the saves get written. Orphans holding ports for nobody are how
+        // this machine ended up with two stray servers in the first place.
+        // /exit needs its ~6 s boot-drain in the worst case; 15 s covers a
+        // couple of servers without letting a wedged one hold the exit.
+        try { await Task.WhenAny(LauncherV2.Core.Archipelago.ApServerHost.StopAllAsync(),
+                                 Task.Delay(15000)); } catch { }
 
         try { _trayIcon.Dispose(); } catch { }
         _shutdownComplete = true;

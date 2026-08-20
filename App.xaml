@@ -264,5 +264,105 @@
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="Padding"     Value="10,6"/>
         </Style>
+
+        <!-- The launcher's two button shapes. They live here rather
+             than in MainWindow because controls outside that window
+             need them too: a style scoped to one window is invisible
+             to every UserControl, and the failure is a parse
+             exception at construction, not a build error. -->
+        <Style x:Key="BtnPlayStyle" TargetType="Button">
+            <Setter Property="Background"      Value="{StaticResource BrushAccent}"/>
+            <Setter Property="Foreground"      Value="#1A0800"/>
+            <Setter Property="FontWeight"      Value="Bold"/>
+            <Setter Property="FontSize"        Value="13"/>
+            <Setter Property="Padding"         Value="28,8"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Cursor"          Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd"
+                                Background="{TemplateBinding Background}"
+                                CornerRadius="3"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#DDA800"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="Bd" Property="Background" Value="#1A2040"/>
+                                <Setter Property="Foreground" Value="#3A4060"/>
+                            </Trigger>
+                            <!-- "You cannot launch, and here is why" (§9). Last,
+                                 so it beats the plain disabled grey above; a
+                                 local Background cannot do this job because the
+                                 disabled trigger paints Bd by name. -->
+                            <Trigger Property="Tag" Value="blocked">
+                                <Setter TargetName="Bd" Property="Background" Value="#33EF4444"/>
+                                <Setter Property="Foreground" Value="#EF4444"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="BtnSecondaryStyle" TargetType="Button">
+            <Setter Property="Background"      Value="#1A1E30"/>
+            <Setter Property="Foreground"      Value="{StaticResource BrushText}"/>
+            <Setter Property="FontWeight"      Value="SemiBold"/>
+            <Setter Property="FontSize"        Value="12"/>
+            <Setter Property="Padding"         Value="16,7"/>
+            <Setter Property="BorderBrush"     Value="#2A3060"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Cursor"          Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="3"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#1A2040"/>
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource BrushAccent}"/>
+                            </Trigger>
+                            <!-- Same blocked state as BtnPlayStyle, so the two
+                                 launch buttons read as one refusal. -->
+                            <Trigger Property="Tag" Value="blocked">
+                                <Setter TargetName="Bd" Property="Background" Value="#33EF4444"/>
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="#EF4444"/>
+                                <Setter Property="Foreground" Value="#EF4444"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+
+        <!-- Input styling belongs to the application, not to one window:
+             a UserControl cannot see a window's resources, so a TextBox on
+             a panel would come up in default Windows white. -->
+        <Style TargetType="TextBox">
+            <Setter Property="Background"      Value="#101420"/>
+            <Setter Property="Foreground"      Value="{StaticResource BrushText}"/>
+            <Setter Property="CaretBrush"      Value="{StaticResource BrushAccent}"/>
+            <Setter Property="BorderBrush"     Value="#2A3050"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding"         Value="8,6"/>
+            <Setter Property="FontSize"        Value="13"/>
+            <Setter Property="SelectionBrush"  Value="{StaticResource BrushAccent}"/>
+        </Style>
+
     </Application.Resources>
 </Application>

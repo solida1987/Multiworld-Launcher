@@ -69,6 +69,13 @@ public sealed class LauncherSettings
     [JsonPropertyName("game_art_consent")]
     public bool? GameArtConsent { get; set; } = null;
 
+    // Where the Archipelago engine lives, when the player pointed us at one.
+    // Empty means "look in the usual places" -- a nominated path always wins,
+    // because a machine can hold more than one install and guessing between
+    // them is not London's call to make.
+    [JsonPropertyName("ap_engine_path")]
+    public string ApEnginePath { get; set; } = string.Empty;
+
     // Launch Ship of Harkinian fullscreen.
     // CVar into the install's own shipofharkinian.json before each launch
     // (the JSON CVar store next to soh.exe).
