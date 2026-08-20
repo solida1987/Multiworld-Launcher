@@ -110,6 +110,7 @@ public partial class StorePanel : System.Windows.Controls.UserControl
     private void BtnClearFilters_Click(object sender, RoutedEventArgs e)
     {
         TxtSearch.Text = "";
+        ChkTestedOnly.IsChecked = false;
         foreach (var b in _platformBoxes.Concat(_genreBoxes)) b.IsChecked = false;
         RenderCards();
     }
@@ -129,6 +130,8 @@ public partial class StorePanel : System.Windows.Controls.UserControl
 
         var shown = StoreCatalog.Filter(_index.Games, TxtSearch.Text,
                                         Ticked(_platformBoxes), Ticked(_genreBoxes));
+        if (ChkTestedOnly.IsChecked == true)
+            shown = shown.Where(g => g.Tested).ToList();
 
         TxtStoreCount.Text = shown.Count == _index.Games.Length
             ? $"Plugin Library — {_index.Games.Length} games"
@@ -204,6 +207,31 @@ public partial class StorePanel : System.Windows.Controls.UserControl
             TextWrapping = TextWrapping.Wrap,
             Foreground = (Brush)FindResource("BrushMuted"),
         });
+        // Tested or not, said on the card. Most of the catalogue is packaged
+        // but unplayed -- one person cannot own 282 games -- and a player
+        // deserves to know which of the two they are picking up.
+        var badge = new Border
+        {
+            CornerRadius = new CornerRadius(3),
+            Padding = new Thickness(6, 1, 6, 2),
+            Margin = new Thickness(0, 5, 0, 0),
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Background = new SolidColorBrush(game.Tested
+                ? Color.FromRgb(0x1A, 0x33, 0x28) : Color.FromRgb(0x2A, 0x26, 0x1A)),
+            Child = new TextBlock
+            {
+                Text = game.Tested ? "✓ Tested" : "Untested",
+                FontSize = 9.5,
+                FontWeight = FontWeights.Bold,
+                Foreground = (Brush)FindResource(game.Tested ? "BrushSuccess" : "BrushAccent"),
+            },
+            ToolTip = game.Tested
+                ? "Played through London end to end."
+                : "Built and packaged, but nobody has played it through London yet. "
+                + "It may work perfectly — it just has not been verified.",
+        };
+        body.Children.Add(badge);
+
         body.Children.Add(new TextBlock
         {
             Text = $"World by {game.WorldBy}",
