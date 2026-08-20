@@ -223,14 +223,18 @@ public partial class MultiworldPanel : System.Windows.Controls.UserControl
             Foreground = (Brush)FindResource(hosting ? "BrushSuccess" : "BrushMuted"),
             Text = hosting
                 ? $"Hosting on port {host!.Port} — players connect to this machine's address, port {host.Port}"
-                : ApServerHost.CanResume(seed)
-                    ? "Stopped — the session can be resumed where it left off"
-                    : "Not hosted",
+                : _lastHostError.TryGetValue(seed.Id, out var why)
+                    ? "Did not start: " + why
+                    : ApServerHost.CanResume(seed)
+                        ? "Stopped — the session can be resumed where it left off"
+                        : "Not hosted",
         };
+        if (!hosting && _lastHostError.ContainsKey(seed.Id))
+            status.Foreground = (Brush)FindResource("BrushError");
         stack.Children.Add(status);
 
         var buttons = new StackPanel { Orientation = Orientation.Horizontal };
-        Button Make(string text, RoutedEventHandler click, bool primary = false)
+        Button Make(string text, RoutedEventHandler? click, bool primary = false)
         {
             var b = new Button
             {
@@ -239,14 +243,25 @@ public partial class MultiworldPanel : System.Windows.Controls.UserControl
                 Margin = new Thickness(0, 0, 6, 0),
                 Style = (Style)FindResource(primary ? "BtnPlayStyle" : "BtnSecondaryStyle"),
             };
-            b.Click += click;
+            if (click != null) b.Click += click;
             buttons.Children.Add(b);
             return b;
         }
 
         if (!hosting)
-            Make(ApServerHost.CanResume(seed) ? "Resume hosting" : "Host",
-                 async (_, _) => await HostSeedAsync(seed), primary: true);
+        {
+            var hostBtn = Make(ApServerHost.CanResume(seed) ? "Resume hosting" : "Host",
+                               null, primary: true);
+            hostBtn.Click += async (_, _) =>
+            {
+                hostBtn.IsEnabled = false;
+                hostBtn.Content = "Starting…";
+                status.Foreground = (Brush)FindResource("BrushAccent");
+                status.Text = "Starting the Archipelago server — this takes a few "
+                            + "seconds while it loads every installed world.";
+                await HostSeedAsync(seed);
+            };
+        }
         else
             Make("Stop", async (_, _) =>
             {
@@ -280,10 +295,20 @@ public partial class MultiworldPanel : System.Windows.Controls.UserControl
         if (_engine == null) return;
         var result = await ApServerHost.StartAsync(_engine, seed);
         if (result.Host == null)
+        {
+            // Said twice on purpose: the dialog is the interruption, the card
+            // is what is still there afterwards.
+            _lastHostError[seed.Id] = result.Message;
             MessageBox.Show(Window.GetWindow(this), result.Message,
                 "The server did not start", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        else _lastHostError.Remove(seed.Id);
         RefreshSeeds();
     }
+
+    /// Why the last Host attempt failed, per seed, so the card can keep
+    /// saying it after the dialog is gone.
+    private readonly Dictionary<string, string> _lastHostError = new();
 
     private static void OpenPath(string path)
     {

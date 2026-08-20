@@ -218,8 +218,8 @@ public partial class JoinPanel : System.Windows.Controls.UserControl
                 });
             }
             else
-                status.Text = "This game cannot be started from London yet — no plugin "
-                            + "covers it. The slot still works from the game's own AP client.";
+                status.Text = "No London plugin covers this game yet. The slot still "
+                            + "works from the game's own Archipelago client.";
         }
         else if (playing)
         {
@@ -261,12 +261,17 @@ public partial class JoinPanel : System.Windows.Controls.UserControl
     {
         button.IsEnabled = false;
         button.Content = "Starting…";
-        status.Text = "Hosting the server, placing the patch, connecting…";
+        status.Foreground = (Brush)FindResource("BrushAccent");
+        status.Text = ApServerHost.For(seed) is { IsRunning: true }
+            ? "Connecting and starting the game…"
+            : "Starting the Archipelago server — a few seconds while it loads "
+            + "every installed world. Then the patch, the connection, the game.";
 
         var (session, message) = await ApJoinSession.StartAsync(_engine!, seed, slot, plugin);
 
         if (session == null)
         {
+            status.Foreground = (Brush)FindResource("BrushError");
             status.Text = message;
             button.Content = "▶  Play this slot";
             button.IsEnabled = true;
