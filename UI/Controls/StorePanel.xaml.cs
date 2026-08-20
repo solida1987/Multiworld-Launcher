@@ -53,14 +53,14 @@ public partial class StorePanel : System.Windows.Controls.UserControl
 
     private async Task LoadAsync()
     {
-        TxtStoreCount.Text = "Store — loading…";
+        TxtStoreCount.Text = "Plugin Library — loading…";
         _coversAllowed = SettingsStore.Load().GameArtConsent == true;
 
         _index = await StoreCatalog.FetchAsync();
 
         if (_index == null)
         {
-            TxtStoreCount.Text = "Store";
+            TxtStoreCount.Text = "Plugin Library";
             TxtStoreEmpty.Text = "The catalogue could not be reached, and there is no "
                                + "saved copy yet. Check the connection and press Refresh.";
             TxtStoreEmpty.Visibility = Visibility.Visible;
@@ -131,8 +131,8 @@ public partial class StorePanel : System.Windows.Controls.UserControl
                                         Ticked(_platformBoxes), Ticked(_genreBoxes));
 
         TxtStoreCount.Text = shown.Count == _index.Games.Length
-            ? $"Store — {_index.Games.Length} games"
-            : $"Store — {shown.Count} of {_index.Games.Length} games";
+            ? $"Plugin Library — {_index.Games.Length} games"
+            : $"Plugin Library — {shown.Count} of {_index.Games.Length} games";
         TxtStoreEmpty.Text = "Nothing matches those filters.";
         TxtStoreEmpty.Visibility = shown.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
 
@@ -285,7 +285,7 @@ public partial class StorePanel : System.Windows.Controls.UserControl
         {
             btn.Content = "Install…";
             btn.IsEnabled = true;
-            MessageBox.Show(Window.GetWindow(this), message, "Store",
+            MessageBox.Show(Window.GetWindow(this), message, "Plugin Library",
                 MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
