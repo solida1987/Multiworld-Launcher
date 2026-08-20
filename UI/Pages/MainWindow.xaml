@@ -2152,6 +2152,16 @@
                 </ScrollViewer>
             </Border>
 
+            <!--  MULTIWORLD  -->
+            <!-- Directly after the community rail, i.e. the LAST child of the
+                 content grid. Anchoring matters: two shipped builds put this
+                 panel in the wrong parent — first under the rail's paint, then
+                 inside a collapsed overlay where it never rendered at all. The
+                 rail is the anchor because the rail is a proven sibling. -->
+            <local:MultiworldPanel x:Name="PanelMultiworld"
+                                   Grid.Column="0" Grid.ColumnSpan="3"
+                                   Visibility="Collapsed"/>
+
         </Grid>  <!-- end content Grid -->
 
         <!--  STATUS BAR  -->
@@ -2367,17 +2377,6 @@
                              ScrollViewer.VerticalScrollBarVisibility="Auto"/>
                 </DockPanel>
             </Border>
-
-            <!--  MULTIWORLD  -->
-            <!-- Spans every column and is deliberately the LAST child of the
-                 content grid: WPF paints later children on top, and the first
-                 shipped layout had the community rail painting over this
-                 panel's entire action column — slots and options were visible,
-                 but Generate itself was buried under the Discord card. A
-                 full-surface panel must outrank everything, structurally. -->
-            <local:MultiworldPanel x:Name="PanelMultiworld"
-                                   Grid.Column="0" Grid.ColumnSpan="3"
-                                   Visibility="Collapsed"/>
         </Grid>
 
     </Grid>
