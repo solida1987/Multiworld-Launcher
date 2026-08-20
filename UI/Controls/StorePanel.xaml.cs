@@ -170,24 +170,18 @@ public partial class StorePanel : System.Windows.Controls.UserControl
         {
             var img = new Image { Stretch = Stretch.UniformToFill };
             RenderOptions.SetBitmapScalingMode(img, BitmapScalingMode.HighQuality);
-            _ = SetCoverAsync(img, game);
-            coverHost.Child = img;
+            // Letters first, picture over them when one arrives. A tile is
+            // never empty, not even for the moment the download takes.
+            coverHost.Child = InitialsTile(game);
+            _ = SetCoverAsync(img, game).ContinueWith(t =>
+                {
+                    if (t.Result) coverHost.Child = img;
+                },
+                System.Threading.CancellationToken.None,
+                TaskContinuationOptions.OnlyOnRanToCompletion,
+                TaskScheduler.FromCurrentSynchronizationContext());
         }
-        else
-        {
-            string initials = new string(game.Name.Split(' ', StringSplitOptions.RemoveEmptyEntries)
-                                                  .Take(3).Select(w => char.ToUpperInvariant(w[0]))
-                                                  .ToArray());
-            coverHost.Child = new TextBlock
-            {
-                Text = initials,
-                FontSize = 34,
-                FontWeight = FontWeights.Bold,
-                Foreground = new SolidColorBrush(Color.FromRgb(0x33, 0x3A, 0x50)),
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center,
-            };
-        }
+        else coverHost.Child = InitialsTile(game);
         stack.Children.Add(coverHost);
 
         var body = new StackPanel { Margin = new Thickness(12, 9, 12, 12) };
@@ -270,11 +264,15 @@ public partial class StorePanel : System.Windows.Controls.UserControl
         return card;
     }
 
-    private async Task SetCoverAsync(Image img, StoreGame game)
+    /// True when a picture actually landed. The ROM covers are PNG and the
+    /// Steam headers are JPEG -- a PNG-only check silently rejected all 188 of
+    /// the Steam ones and left the tile blank, which looked like a launcher
+    /// that had lost its images rather than one that had refused them.
+    private async Task<bool> SetCoverAsync(Image img, StoreGame game)
     {
         try
         {
-            if (_coverCache.TryGetValue(game.Id, out var hit)) { img.Source = hit; return; }
+            if (_coverCache.TryGetValue(game.Id, out var hit)) { img.Source = hit; return true; }
 
             // Disk-cached: a store you scroll twice should not fetch the same
             // fifty covers twice.
@@ -286,7 +284,9 @@ public partial class StorePanel : System.Windows.Controls.UserControl
                 { Timeout = TimeSpan.FromSeconds(30) };
                 http.DefaultRequestHeaders.UserAgent.ParseAdd("MultiworldLauncher");
                 byte[] data = await http.GetByteArrayAsync(game.Cover);
-                if (data.Length < 2000 || data[0] != 0x89) return;
+                bool png  = data.Length > 4 && data[0] == 0x89 && data[1] == 0x50;
+                bool jpeg = data.Length > 4 && data[0] == 0xFF && data[1] == 0xD8;
+                if (data.Length < 2000 || !(png || jpeg)) return false;
                 await File.WriteAllBytesAsync(local, data);
             }
 
@@ -299,8 +299,30 @@ public partial class StorePanel : System.Windows.Controls.UserControl
             bmp.Freeze();
             _coverCache[game.Id] = bmp;
             img.Source = bmp;
+            return true;
         }
         catch { /* a missing cover is an initials tile, never an error */ }
+        return false;
+    }
+
+    /// The letters that stand in for a picture. Built here so the card can
+    /// fall back to it AFTER a download turns out to be unusable -- the first
+    /// version chose between picture and letters before it knew which it had,
+    /// and every failed download became an empty rectangle.
+    private UIElement InitialsTile(StoreGame game)
+    {
+        string initials = new string(
+            game.Name.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                     .Take(3).Select(w => char.ToUpperInvariant(w[0])).ToArray());
+        return new TextBlock
+        {
+            Text = initials,
+            FontSize = 34,
+            FontWeight = FontWeights.Bold,
+            Foreground = new SolidColorBrush(Color.FromRgb(0x33, 0x3A, 0x50)),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
     }
 
     private async Task InstallAsync(StoreGame game, Button btn)
