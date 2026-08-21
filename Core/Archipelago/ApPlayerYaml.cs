@@ -59,7 +59,20 @@ public static class ApPlayerYaml
         if (!string.IsNullOrWhiteSpace(engineVersion))
             sb.Append("requires:\n  version: ").Append(engineVersion).Append('\n');
 
-        sb.Append('\n').Append(Scalar(slot.Game)).Append(":\n");
+        sb.Append('\n').Append(Scalar(slot.Game)).Append(':');
+
+        // A game section with no options must be an explicit empty MAP. Left
+        // as a bare "Game:" the line parses to null, and a null where the
+        // generator expects a mapping is a crash rather than "use the
+        // defaults". This happens for real: the Create YAML dialog renders
+        // exactly this whenever the world's option template is not installed.
+        if (slot.Options.Count == 0)
+        {
+            sb.Append(" {}\n");
+            return sb.ToString();
+        }
+
+        sb.Append('\n');
         foreach (var (key, value) in slot.Options.OrderBy(o => o.Key, StringComparer.Ordinal))
             sb.Append("  ").Append(key).Append(": ").Append(Scalar(value)).Append('\n');
 
