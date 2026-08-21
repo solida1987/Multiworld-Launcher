@@ -87,12 +87,12 @@
                                        TextWrapping="Wrap" MaxWidth="1060"
                                        HorizontalAlignment="Left"
                                        Foreground="{StaticResource BrushText}"
-                                       Text="So if a game will not install, will not connect, or sends no checks: report it to us and we will look at it. Every card says which kind it is — the few marked Supported here are ours end to end, and those are the ones we can promise to fix."/>
+                                       Text="So if a game will not install, will not connect, or sends no checks: come and say so on our Discord and we will look at it. Every card says which kind it is — the few marked Supported here are ours end to end, and those are the ones we can promise to fix."/>
                             <TextBlock x:Name="TxtSupportLink" Margin="0,8,0,0" FontSize="12"
                                        Foreground="{StaticResource BrushAccent}"
                                        Cursor="Hand" TextDecorations="Underline"
                                        MouseLeftButtonUp="TxtSupportLink_Click"
-                                       Text="Report a problem on BetaHub  →"/>
+                                       Text="Ask us on Discord  →"/>
                         </StackPanel>
                     </Border>
                 </StackPanel>
