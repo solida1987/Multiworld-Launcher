@@ -159,6 +159,14 @@ public static class ProblemReport
             // useless. The Application Error record names the faulting module —
             // the game's own code, a graphics wrapper, or ours — and that is
             // the difference between guessing and knowing.
+            // Windows writes process dumps somewhere we were not looking.
+            //
+            // A dump is the only artefact that names the function a frozen or
+            // crashed game was actually inside. They land in the user's
+            // CrashDumps folder, not next to the game — so every report so far
+            // has been missing the one file that could end the guessing.
+            AddCrashDumps(zip, manifest);
+
             string errors = ReadWindowsErrors();
             if (errors.Length > 0)
             {
@@ -260,6 +268,80 @@ public static class ProblemReport
             {
                 // A file held open by the running game is normal, not a failure.
                 manifest.AppendLine($"  {prefix}/{rel} — skipped ({ex.GetType().Name})");
+            }
+        }
+    }
+
+    /// Windows' own process dumps, from %LOCALAPPDATA%\CrashDumps.
+    ///
+    /// Two rules, both learned the hard way elsewhere in this file:
+    ///
+    ///   * NEVER truncated. Every other file here is cut from the end when it
+    ///     is huge, which is right for a log and worthless for a dump — half a
+    ///     dump opens in nothing. Too big means left out and SAID so.
+    ///   * Only recent ones, newest first, and only a couple. A dump is
+    ///     megabytes, and a report nobody can upload helps nobody.
+    private static void AddCrashDumps(ZipArchive zip, StringBuilder manifest)
+    {
+        const long MaxOneDump   = 24L * 1024 * 1024;
+        const int  MaxDumpCount = 2;
+
+        string dir;
+        try
+        {
+            dir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "CrashDumps");
+        }
+        catch (Exception) { return; }
+        if (!Directory.Exists(dir)) return;
+
+        List<FileInfo> dumps;
+        try
+        {
+            var cutoff = DateTime.Now - Window;
+            dumps = new DirectoryInfo(dir).EnumerateFiles("*.dmp")
+                        .Where(f => f.LastWriteTime >= cutoff)
+                        .OrderByDescending(f => f.LastWriteTime)
+                        .ToList();
+        }
+        catch (Exception) { return; }
+
+        if (dumps.Count == 0) return;
+
+        manifest.AppendLine();
+        manifest.AppendLine("  Windows process dumps (from your CrashDumps folder):");
+
+        int taken = 0;
+        foreach (var d in dumps)
+        {
+            if (taken >= MaxDumpCount)
+            {
+                manifest.AppendLine($"  dumps/{d.Name} — left out, {taken} newer one(s) "
+                                  + "are already here");
+                continue;
+            }
+            if (d.Length > MaxOneDump)
+            {
+                manifest.AppendLine($"  dumps/{d.Name} — left out, too big to send "
+                                  + $"({d.Length / 1024 / 1024} MB). Ask for it "
+                                  + "separately if it turns out to matter.");
+                continue;
+            }
+            try
+            {
+                var entry = zip.CreateEntry($"dumps/{d.Name}", CompressionLevel.Optimal);
+                using var dst = entry.Open();
+                using var src = new FileStream(d.FullName, FileMode.Open, FileAccess.Read,
+                                               FileShare.ReadWrite);
+                src.CopyTo(dst);
+                manifest.AppendLine($"  dumps/{d.Name}  ({d.Length:N0} bytes, "
+                                  + $"written {d.LastWriteTime:yyyy-MM-dd HH:mm})");
+                taken++;
+            }
+            catch (Exception ex)
+            {
+                manifest.AppendLine($"  dumps/{d.Name} — skipped ({ex.GetType().Name})");
             }
         }
     }
