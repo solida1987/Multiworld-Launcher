@@ -1251,9 +1251,15 @@
                                             BorderThickness="1"
                                             CornerRadius="4"
                                             Padding="14,12">
-                                        <DockPanel LastChildFill="False">
+                                        <!--  Wraps rather than runs off the edge.
+                                              A DockPanel put every button on one
+                                              row, so on a small screen the ones at
+                                              the end were simply unreachable — and
+                                              every button added made it worse.
+                                              A WrapPanel spends height instead,
+                                              which a window has more of. -->
+                                        <WrapPanel Orientation="Horizontal">
                                             <Button x:Name="BtnOverviewPlay"
-                                                    DockPanel.Dock="Left"
                                                     Content="▶  AP Play"
                                                     Style="{StaticResource BtnPlayStyle}"
                                                     MinWidth="150"
@@ -1264,9 +1270,8 @@
                                                  The label always names the CURRENT choice, so
                                                  the answer is on screen without opening it. -->
                                             <Button x:Name="BtnOverviewEmulator"
-                                                    DockPanel.Dock="Left"
                                                     Style="{StaticResource BtnSecondaryStyle}"
-                                                    Margin="10,0,0,0"
+                                                    Margin="0,0,10,8"
                                                     Visibility="Collapsed"
                                                     Click="BtnOverviewEmulator_Click"/>
                                             <!-- Appears only while the chosen emulator is
@@ -1275,19 +1280,17 @@
                                                  be present and obvious, not a dialog you
                                                  reach by pressing the wrong button first. -->
                                             <Button x:Name="BtnOverviewGetEmulator"
-                                                    DockPanel.Dock="Left"
                                                     Style="{StaticResource BtnPlayStyle}"
-                                                    Margin="10,0,0,0"
+                                                    Margin="0,0,10,8"
                                                     Visibility="Collapsed"
                                                     Click="BtnOverviewGetEmulator_Click"/>
                                             <!-- Mirrors the hidden header BtnStandalone (§9):
                                                  visible for installed standalone-capable games,
                                                  re-raises the header button's Click. -->
                                             <Button x:Name="BtnOverviewStandalone"
-                                                    DockPanel.Dock="Left"
                                                     Content="▶  Standalone"
                                                     Style="{StaticResource BtnSecondaryStyle}"
-                                                    Margin="10,0,0,0"
+                                                    Margin="0,0,10,8"
                                                     Visibility="Collapsed"
                                                     ToolTip="Launch the game solo, without an Archipelago server"
                                                     Click="BtnOverviewStandalone_Click"/>
@@ -1297,25 +1300,22 @@
                                                  no launch). The launcher itself is the only thing
                                                  that updates as a requirement. -->
                                             <Button x:Name="BtnOverviewUpdate"
-                                                    DockPanel.Dock="Left"
                                                     Content="↑  Update available"
                                                     Style="{StaticResource BtnPlayStyle}"
-                                                    Margin="10,0,0,0"
+                                                    Margin="0,0,10,8"
                                                     Visibility="Collapsed"
                                                     ToolTip="Download and install the newest published version"
                                                     Click="BtnOverviewUpdate_Click"/>
                                             <Button x:Name="BtnOverviewGetGame"
-                                                    DockPanel.Dock="Left"
                                                     Content="Get the game ↗"
                                                     Style="{StaticResource BtnSecondaryStyle}"
-                                                    Margin="10,0,0,0"
+                                                    Margin="0,0,10,8"
                                                     Visibility="Collapsed"
                                                     Click="BtnOverviewGetGame_Click"/>
                                             <Button x:Name="BtnOverviewWebsite"
-                                                    DockPanel.Dock="Left"
                                                     Content="Website ↗"
                                                     Style="{StaticResource BtnSecondaryStyle}"
-                                                    Margin="10,0,0,0"
+                                                    Margin="0,0,10,8"
                                                     Visibility="Collapsed"
                                                     Click="BtnOverviewWebsite_Click"/>
                                             <!-- One button that gathers every log the
@@ -1325,10 +1325,9 @@
                                                  on. Beats talking someone through folder
                                                  paths over Discord. -->
                                             <Button x:Name="BtnOverviewCollectLogs"
-                                                    DockPanel.Dock="Right"
                                                     Content="&#x1F4CB;  Collect logs"
                                                     Style="{StaticResource BtnSecondaryStyle}"
-                                                    Margin="10,0,0,0"
+                                                    Margin="0,0,10,8"
                                                     ToolTip="Gather every log file into one zip you can send to the developer"
                                                     Click="BtnOverviewCollectLogs_Click"/>
                                             <!-- Commands the selected game offers.
@@ -1337,10 +1336,17 @@
                                                  nothing about what any of them do;
                                                  a game that offers none leaves this
                                                  row empty. -->
-                                            <StackPanel x:Name="OverviewCommandBar"
-                                                        DockPanel.Dock="Right"
-                                                        Orientation="Horizontal"/>
-                                        </DockPanel>
+                                            <!--  Also a WrapPanel, and capped to the
+                                                  row's own width: nested inside one,
+                                                  it would otherwise ask for its full
+                                                  content width and push its last
+                                                  buttons off a narrow screen — the
+                                                  exact problem the outer wrap fixes. -->
+                                            <WrapPanel x:Name="OverviewCommandBar"
+                                                       Orientation="Horizontal"
+                                                       MaxWidth="{Binding ActualWidth,
+                                                           RelativeSource={RelativeSource AncestorType=WrapPanel}}"/>
+                                        </WrapPanel>
                                     </Border>
 
                                     <!--  Stats strip (playtime / last played / sessions /
