@@ -389,13 +389,42 @@ public partial class MainWindow : Window
                                    System.Windows.Threading.DispatcherPriority.Background);
 
         // The community card's live numbers.
+        PopulateSoundRail();
+
         _ = Dispatcher.BeginInvoke(new Action(async () => await LoadCommunityCardAsync()),
                                    System.Windows.Threading.DispatcherPriority.Background);
+
+        // Missing icons and banners, fetched from the catalogue's addresses in
+        // the background. The shipped plugins already look at exactly the
+        // paths this fills, so the art appears without touching any of them —
+        // and one rebuild at the end repaints the sidebar and the lobby.
+        _ = Core.Plugins.GameArtCache.PrefetchAsync(changed: () => Dispatcher.BeginInvoke(() =>
+        {
+            RebuildGameList();
+            RefreshHomePage();
+        }));
 
         // A plugin installed from the store appears in the library at once —
         // and so does one installed from a seed's Join card.
         PanelStore.InstalledSomething += () => Dispatcher.BeginInvoke(RebuildGameList);
         PanelJoin.PluginInstalled     += () => Dispatcher.BeginInvoke(RebuildGameList);
+
+        // A Join card that cannot start says exactly what is missing, and the
+        // fix -- installing the game, picking a ROM, pointing at a folder --
+        // lives on that game's own page. So take them there instead of making
+        // them find it.
+        PanelJoin.OpenGameRequested   += p => Dispatcher.BeginInvoke(() =>
+        {
+            SetMode(0);
+            SelectGame(p);
+        });
+
+        // A session joined on somebody else's server has no seed folder to
+        // pre-drop a patch from -- the player has to hand it over. The ask is
+        // the SAME dialog flow the library Play button uses, so the words,
+        // the retry loop and the (seed, slot) storage are identical.
+        Core.Archipelago.ApJoinSession.AskForSeedPatch = (plugin, req) =>
+            Dispatcher.InvokeAsync(() => EnsureSeedPatch(plugin, req)).Task;
 
         // Wire achievement notifications.
         // grants can fire on plugin pipe threads (check counters), and a
@@ -450,15 +479,13 @@ public partial class MainWindow : Window
         // landed straight on the D2 Play tab.
         // visible; it disappears forever once the user picks any game
         // (SelectGame persists HasSelectedGameOnce).
-        if (_hasSelectedGameOnce)
-        {
-            var firstId = LibraryStore.GetSortedGameIds().FirstOrDefault();
-            var firstPlugin = firstId != null
-                ? GameRegistry.All.FirstOrDefault(p => p.GameId == firstId)
-                : GameRegistry.All.FirstOrDefault();
-            if (firstPlugin != null)
-                SelectGame(firstPlugin);
-        }
+        // Startup used to auto-select the first library game here (for anyone
+        // past their first run). That made the launcher open on one game's
+        // Play tab -- and the landing page, which now spotlights a random game
+        // and carries news and live streams, was never seen. Everyone lands on
+        // the lobby now; one click on the spotlight or the sidebar goes deeper.
+        // (The old P2-16 concern is covered: no auto-select means the Getting
+        // Started checklist is always reachable too.)
 
         // Background: check for updates only on library plugins — not all 382.
         // Running all plugins in parallel would fire hundreds of network calls at
@@ -738,12 +765,16 @@ public partial class MainWindow : Window
         // fall back to a subtle accent-tinted solid when no art exists.
         try
         {
-            // The plugin names its own banner; the generic one stands in when
-            // it names none or the file it names is not there. Looking the art
-            // up by GameId under the launcher's own Assets was the launcher
-            // storing a game's picture for it.
+            // The plugin names its own banner first. When it names none, the
+            // art cache answers: the banner address the catalogue lists for
+            // this game, already fetched to the player's machine. Only then
+            // the generic art. (This is not the launcher storing a game's
+            // picture FOR it -- the cache is downstream of the catalogue's
+            // address, same as the cover.)
             string? heroPath = plugin.HeaderArtPath;
             if (string.IsNullOrEmpty(heroPath) || !File.Exists(heroPath))
+                heroPath = Core.Plugins.GameArtCache.BannerPath(plugin.GameId);
+            if (!File.Exists(heroPath))
                 heroPath = Path.Combine(AppContext.BaseDirectory,
                     "Assets", "Heroes", "_generic_hero.png");
 
@@ -5627,485 +5658,9 @@ public partial class MainWindow : Window
         var muted = (Brush)FindResource("BrushMuted");
         var fg    = new SolidColorBrush(Color.FromRgb(0xCC, 0xD0, 0xE0));
 
-        // --- Global launcher settings ---
-        SettingsPanel.Children.Add(new TextBlock
-        {
-            Text       = "LAUNCHER",
-            FontSize   = 10,
-            FontWeight = FontWeights.SemiBold,
-            Foreground = muted,
-            Margin     = new Thickness(0, 0, 0, 8),
-        });
-
-        var settings = SettingsStore.Load();
-
-
-        // Default AP Server row
-        SettingsPanel.Children.Add(new TextBlock
-        {
-            Text = "Default AP Server", FontSize = 11, Foreground = muted,
-            Margin = new Thickness(0, 10, 0, 4),
-        });
-        var serverRow  = new DockPanel { Margin = new Thickness(0, 0, 0, 4) };
-        var serverBox  = new TextBox
-        {
-            Text        = settings.DefaultApServer,
-            FontSize    = 11, Padding = new Thickness(6, 5, 6, 5),
-            Background  = new SolidColorBrush(Color.FromRgb(0x0C, 0x10, 0x20)),
-            Foreground  = fg, BorderBrush = new SolidColorBrush(Color.FromRgb(0x1E, 0x22, 0x33)),
-            ToolTip     = "e.g. archipelago.gg:38281 — pre-filled into the connect panel",
-        };
-        var serverSave = new Button
-        {
-            Content     = "Save", Width = 55, Padding = new Thickness(0, 5, 0, 5),
-            Background  = new SolidColorBrush(Color.FromRgb(0x1A, 0x1E, 0x30)),
-            Foreground  = fg, BorderBrush = new SolidColorBrush(Color.FromRgb(0x2A, 0x30, 0x50)),
-            Margin      = new Thickness(6, 0, 0, 0),
-        };
-        serverSave.Click += (_, _) =>
-        {
-            var s = SettingsStore.Load();
-            s.DefaultApServer = serverBox.Text.Trim();
-            SettingsStore.Save(s);
-            // Also pre-fill the sidebar server box if it's empty
-            if (string.IsNullOrWhiteSpace(TxtServer.Text))
-                TxtServer.Text = s.DefaultApServer;
-            AppendLog("[Settings] Default AP server saved.");
-        };
-        DockPanel.SetDock(serverSave, Dock.Right);
-        serverRow.Children.Add(serverSave);
-        serverRow.Children.Add(serverBox);
-        SettingsPanel.Children.Add(serverRow);
-
-        // --- AP World sync folder ---
-        // Several games ship an .apworld, but it lands inside the launcher's own
-        // install tree and Archipelago only loads worlds from custom_worlds — so
-        // every update meant hand-copying a file.
-        // copy happens on every install/update.
-        // until the user fills it in: writing into someone's Archipelago install
-        // uninvited is not our call.
-        SettingsPanel.Children.Add(new TextBlock
-        {
-            Text = "AP World folder (optional)", FontSize = 11, Foreground = muted,
-            Margin = new Thickness(0, 14, 0, 4),
-        });
-        var apwRow = new DockPanel { Margin = new Thickness(0, 0, 0, 4) };
-        var apwBox = new TextBox
-        {
-            Text        = settings.ApworldSyncDir,
-            FontSize    = 11, Padding = new Thickness(6, 5, 6, 5),
-            Background  = new SolidColorBrush(Color.FromRgb(0x0C, 0x10, 0x20)),
-            Foreground  = fg, BorderBrush = new SolidColorBrush(Color.FromRgb(0x1E, 0x22, 0x33)),
-            ToolTip     = "e.g. C:\\ProgramData\\Archipelago\\custom_worlds — "
-                        + "leave empty to turn this off",
-        };
-        var apwBrowse = new Button
-        {
-            Content     = "Browse", Width = 62, Padding = new Thickness(0, 5, 0, 5),
-            Background  = new SolidColorBrush(Color.FromRgb(0x1A, 0x1E, 0x30)),
-            Foreground  = fg, BorderBrush = new SolidColorBrush(Color.FromRgb(0x2A, 0x30, 0x50)),
-            Margin      = new Thickness(6, 0, 0, 0), Cursor = Cursors.Hand,
-        };
-        var apwSync = new Button
-        {
-            Content     = "Copy now", Width = 70, Padding = new Thickness(0, 5, 0, 5),
-            Background  = new SolidColorBrush(Color.FromRgb(0x1A, 0x1E, 0x30)),
-            Foreground  = fg, BorderBrush = new SolidColorBrush(Color.FromRgb(0x2A, 0x30, 0x50)),
-            Margin      = new Thickness(6, 0, 0, 0), Cursor = Cursors.Hand,
-            ToolTip     = "Copy the .apworld files of every installed game into "
-                        + "that folder now, without waiting for the next update",
-        };
-        var apwStatus = new TextBlock
-        {
-            FontSize = 10, Foreground = muted, TextWrapping = TextWrapping.Wrap,
-            Margin = new Thickness(0, 0, 0, 2),
-            Text = "When a game installs or updates, its .apworld is copied here. "
-                 + "Nothing in the folder is ever deleted.",
-        };
-        // Save on focus-loss rather than behind a Save button: this row already
-        // carries two buttons, and a third that must be pressed for the other two
-        // to see the new path is exactly the kind of trap that gets reported as
-        // "the setting doesn't work".
-        void SaveApworldDir()
-        {
-            var s2 = SettingsStore.Load();
-            string v = apwBox.Text.Trim();
-            if (s2.ApworldSyncDir == v) return;
-            s2.ApworldSyncDir = v;
-            SettingsStore.Save(s2);
-            AppendLog(v.Length == 0
-                ? "[Settings] AP World folder cleared — copies are off."
-                : $"[Settings] AP World folder set to {v}");
-        }
-        apwBox.LostFocus += (_, _) => SaveApworldDir();
-        apwBrowse.Click += (_, _) =>
-        {
-            var dlg = new Microsoft.Win32.OpenFolderDialog
-            {
-                Title = "Select your Archipelago custom_worlds folder",
-            };
-            if (apwBox.Text.Trim().Length > 0 && Directory.Exists(apwBox.Text.Trim()))
-                dlg.InitialDirectory = apwBox.Text.Trim();
-            if (dlg.ShowDialog() == true)
-            {
-                apwBox.Text = dlg.FolderName;
-                SaveApworldDir();
-            }
-        };
-        apwSync.Click += (_, _) =>
-        {
-            SaveApworldDir();
-            string dir = apwBox.Text.Trim();
-            if (dir.Length == 0)
-            {
-                apwStatus.Text = "Choose a folder first.";
-                return;
-            }
-            var installed = GameRegistry.All
-                .Where(p => { try { return p.IsInstalled; } catch { return false; } })
-                .ToList();
-            var res = ApworldSync.Sync(installed, dir);
-            string msg = res.Summary() ?? "No .apworld files found in any installed game.";
-            apwStatus.Text = msg;
-            AppendLog($"[Settings] {msg}");
-        };
-        DockPanel.SetDock(apwBrowse, Dock.Right);
-        DockPanel.SetDock(apwSync,   Dock.Right);
-        apwRow.Children.Add(apwSync);
-        apwRow.Children.Add(apwBrowse);
-        apwRow.Children.Add(apwBox);
-        SettingsPanel.Children.Add(apwRow);
-        SettingsPanel.Children.Add(apwStatus);
-
-        // --- Notification + connection toggles ---
-        var soundCheck = new CheckBox
-        {
-            Content   = "Notification sounds (progression items, traps, DeathLink, goal)",
-            FontSize  = 11,
-            Foreground = fg,
-            IsChecked = settings.SoundNotifications,
-            Margin    = new Thickness(0, 14, 0, 0),
-            Cursor    = Cursors.Hand,
-        };
-        soundCheck.Click += (_, _) =>
-        {
-            var s = SettingsStore.Load();
-            s.SoundNotifications = soundCheck.IsChecked == true;
-            SettingsStore.Save(s);
-            SoundsEnabled = s.SoundNotifications;
-        };
-        SettingsPanel.Children.Add(soundCheck);
-
-        // --- Launcher version + update ---
-        // The only way to update the launcher used to be a banner that appears
-        // once at startup, and nothing anywhere showed which version was
-        // running — so "did my update actually land?" was unanswerable without
-        // opening Copy Diagnostics.
-        {
-            var verRow = new StackPanel
-            {
-                Orientation = Orientation.Horizontal,
-                Margin = new Thickness(0, 16, 0, 0),
-            };
-            var verText = new TextBlock
-            {
-                Text = $"Launcher version {LauncherUpdater.CurrentVersion.ToString(3)}",
-                FontSize = 11, Foreground = fg,
-                VerticalAlignment = VerticalAlignment.Center,
-            };
-            var checkBtn = new Button
-            {
-                Content = "Check for update",
-                FontSize = 11, Padding = new Thickness(10, 4, 10, 4),
-                Margin = new Thickness(12, 0, 0, 0), Cursor = Cursors.Hand,
-            };
-            // One handler, two modes — a nested "+= Click" inside the check
-            // would stack a new install handler on every check, so the third
-            // click would fire three downloads.
-            bool armedToInstall = false;
-            checkBtn.Click += async (_, _) =>
-            {
-                checkBtn.IsEnabled = false;
-                try
-                {
-                    if (armedToInstall)
-                    {
-                        checkBtn.Content = "Downloading...";
-                        await _launcherUpdater.DownloadAndApplyAsync();
-                        return;                       // the app restarts itself
-                    }
-
-                    checkBtn.Content = "Checking...";
-                    await _launcherUpdater.CheckAsync();
-                    var latest = _launcherUpdater.LatestVersion;
-                    if (latest != null && latest > LauncherUpdater.CurrentVersion)
-                    {
-                        armedToInstall = true;
-                        checkBtn.Content = $"Install v{latest.ToString(3)}";
-                    }
-                    else
-                    {
-                        checkBtn.Content = "Up to date";
-                    }
-                }
-                catch (Exception ex)
-                {
-                    AppendLog($"[Update] {ex.Message}");
-                    checkBtn.Content = armedToInstall ? "Update failed" : "Check failed";
-                }
-                finally { checkBtn.IsEnabled = true; }
-            };
-            verRow.Children.Add(verText);
-            verRow.Children.Add(checkBtn);
-            SettingsPanel.Children.Add(verRow);
-        }
-
-        // --- Per-event sound picker ---
-        // One row per event the launcher can announce: a dropdown with the
-        // bundled clips + the old Windows sound + off, and a ▶ that previews
-        // the current choice. Rows live under the master toggle and grey out
-        // with it, so the hierarchy is visible: master off = nothing plays,
-        // regardless of the per-event choices.
-        {
-            var soundPanel = new StackPanel { Margin = new Thickness(18, 6, 0, 0) };
-            (string Key, string Label)[] events =
-            {
-                ("progression", "Progression item"),
-                ("trap",        "Trap incoming"),
-                ("death",       "DeathLink"),
-                ("goal",        "Goal complete"),
-            };
-            foreach (var (key, label) in events)
-            {
-                var row = new DockPanel { Margin = new Thickness(0, 3, 0, 0) };
-                row.Children.Add(new TextBlock
-                {
-                    Text = label, FontSize = 11, Foreground = fg, Width = 130,
-                    VerticalAlignment = VerticalAlignment.Center,
-                });
-
-                // Items are plain STRINGS, not ComboBoxItem objects.
-                // ComboBoxItem carries its own default foreground (the system
-                // dark colour) that the app's global light TextBlock style does
-                // not reach, so the selected value rendered near-black on the
-                // dark box — unreadable.
-                // ContentPresenter as a TextBlock, which does inherit the light
-                // foreground. Tags are kept in a parallel list indexed the same.
-                var options = new List<(string Tag, string Label)>
-                {
-                    ("system", "Windows sound (old)"),
-                    ("none",   "Off for this event"),
-                };
-                foreach (var (id, name) in BundledSounds) options.Add((id, name));
-                foreach (var (id, name) in CustomSounds()) options.Add((id, name));
-
-                var combo = new ComboBox
-                {
-                    Width = 220, FontSize = 11, Foreground = Brushes.White,
-                };
-                foreach (var opt in options) combo.Items.Add(opt.Label);
-
-                string current = SoundMap.TryGetValue(key, out var cur) ? cur
-                               : DefaultSoundMap.GetValueOrDefault(key, "system");
-                int idx = options.FindIndex(o => o.Tag == current);
-                combo.SelectedIndex = idx >= 0 ? idx : 0;
-
-                combo.SelectionChanged += (_, _) =>
-                {
-                    if (combo.SelectedIndex < 0) return;
-                    var s = SettingsStore.Load();
-                    s.NotificationSoundMap[key] = options[combo.SelectedIndex].Tag;
-                    SettingsStore.Save(s);
-                    SoundMap = new Dictionary<string, string>(s.NotificationSoundMap);
-                };
-
-                var preview = new Button
-                {
-                    Content = "▶", FontSize = 11, Width = 28,
-                    Margin = new Thickness(6, 0, 0, 0), Cursor = Cursors.Hand,
-                    ToolTip = "Play the selected sound",
-                };
-                preview.Click += (_, _) =>
-                {
-                    if (combo.SelectedIndex >= 0)
-                        try { PlaySoundChoice(options[combo.SelectedIndex].Tag, key); } catch { }
-                };
-
-                DockPanel.SetDock(preview, Dock.Right);
-                var comboHost = new StackPanel { Orientation = Orientation.Horizontal };
-                comboHost.Children.Add(combo);
-                comboHost.Children.Add(preview);
-                row.Children.Add(comboHost);
-                soundPanel.Children.Add(row);
-            }
-            // Volume. The play path uses MediaPlayer precisely so this can
-            // exist — SoundPlayer, which this used before, has no volume at all.
-            var volRow = new DockPanel { Margin = new Thickness(0, 10, 0, 0) };
-            var volLabel = new TextBlock
-            {
-                Text = "Volume", FontSize = 11, Foreground = fg, Width = 130,
-                VerticalAlignment = VerticalAlignment.Center,
-            };
-            var volValue = new TextBlock
-            {
-                Text = $"{settings.SoundVolume}%", FontSize = 11, Foreground = muted,
-                Width = 42, VerticalAlignment = VerticalAlignment.Center,
-                Margin = new Thickness(8, 0, 0, 0),
-            };
-            var volSlider = new Slider
-            {
-                Minimum = 0, Maximum = 100, Value = settings.SoundVolume,
-                Width = 220, VerticalAlignment = VerticalAlignment.Center,
-                IsSnapToTickEnabled = true, TickFrequency = 5,
-            };
-            volSlider.ValueChanged += (_, _) =>
-            {
-                int v = (int)Math.Round(volSlider.Value);
-                volValue.Text = $"{v}%";
-                SoundVolume = v;                      // heard on the very next sound
-                var s = SettingsStore.Load();
-                s.SoundVolume = v;
-                SettingsStore.Save(s);
-            };
-            DockPanel.SetDock(volLabel, Dock.Left);
-            DockPanel.SetDock(volValue, Dock.Right);
-            volRow.Children.Add(volLabel);
-            volRow.Children.Add(volValue);
-            volRow.Children.Add(volSlider);
-            soundPanel.Children.Add(volRow);
-
-            // Bring your own sound. Copied into Assets\Sounds\custom so an
-            // update, which overwrites Assets\Sounds itself, cannot delete it.
-            var addRow = new DockPanel { Margin = new Thickness(0, 8, 0, 0) };
-            var addBtn = new Button
-            {
-                Content = "Add your own sound…", FontSize = 11,
-                Padding = new Thickness(10, 4, 10, 4), Cursor = Cursors.Hand,
-                Background = new SolidColorBrush(Color.FromRgb(0x1A, 0x1E, 0x30)),
-                Foreground = fg,
-                BorderBrush = new SolidColorBrush(Color.FromRgb(0x2A, 0x30, 0x50)),
-            };
-            var addNote = new TextBlock
-            {
-                FontSize = 10, Foreground = muted, TextWrapping = TextWrapping.Wrap,
-                Margin = new Thickness(8, 0, 0, 0),
-                VerticalAlignment = VerticalAlignment.Center,
-                Text = "wav, mp3 or wma — it then appears in the lists above.",
-            };
-            addBtn.Click += (_, _) =>
-            {
-                var dlg = new Microsoft.Win32.OpenFileDialog
-                {
-                    Title = "Choose a sound",
-                    Filter = "Sound files (*.wav;*.mp3;*.wma)|*.wav;*.mp3;*.wma",
-                    CheckFileExists = true,
-                };
-                if (dlg.ShowDialog() != true) return;
-                try
-                {
-                    Directory.CreateDirectory(CustomSoundDir);
-                    string dst = Path.Combine(CustomSoundDir, Path.GetFileName(dlg.FileName));
-                    // Never silently replace one the user already added.
-                    int n = 1;
-                    string stem = Path.GetFileNameWithoutExtension(dst);
-                    string ext  = Path.GetExtension(dst);
-                    while (File.Exists(dst))
-                        dst = Path.Combine(CustomSoundDir, $"{stem} ({n++}){ext}");
-                    File.Copy(dlg.FileName, dst);
-                    addNote.Text = $"Added \"{Path.GetFileNameWithoutExtension(dst)}\".";
-                    AppendLog($"[Settings] Added sound {Path.GetFileName(dst)}");
-                    PopulateSettingsPanel(plugin);   // rebuild so the lists show it
-                }
-                catch (Exception ex)
-                {
-                    addNote.Text = "Could not add that file: " + ex.Message;
-                }
-            };
-            DockPanel.SetDock(addBtn, Dock.Left);
-            addRow.Children.Add(addBtn);
-            addRow.Children.Add(addNote);
-            soundPanel.Children.Add(addRow);
-
-            // Grey the picker out while the master toggle is off.
-            soundPanel.IsEnabled = settings.SoundNotifications;
-            soundCheck.Click += (_, _) => soundPanel.IsEnabled = soundCheck.IsChecked == true;
-            SettingsPanel.Children.Add(soundPanel);
-        }
-
-        var reconnectCheck = new CheckBox
-        {
-            Content   = "Auto-reconnect to the AP server after connection drops",
-            FontSize  = 11,
-            Foreground = fg,
-            IsChecked = settings.AutoReconnect,
-            Margin    = new Thickness(0, 8, 0, 0),
-            Cursor    = Cursors.Hand,
-        };
-        reconnectCheck.Click += (_, _) =>
-        {
-            var s = SettingsStore.Load();
-            s.AutoReconnect = reconnectCheck.IsChecked == true;
-            SettingsStore.Save(s);
-            if (!s.AutoReconnect) CancelAutoReconnect(resetAttempts: true);
-        };
-        SettingsPanel.Children.Add(reconnectCheck);
-
-        // --- Copy Diagnostics — one-click Discord bug report payload ---
-        var diagBtn = new Button
-        {
-            Content = "📋 Copy Diagnostics",
-            Padding = new Thickness(14, 6, 14, 6),
-            Margin  = new Thickness(0, 14, 0, 0),
-            HorizontalAlignment = HorizontalAlignment.Left,
-            Background  = new SolidColorBrush(Color.FromRgb(0x1A, 0x1E, 0x30)),
-            Foreground  = fg,
-            BorderBrush = new SolidColorBrush(Color.FromRgb(0x2A, 0x30, 0x50)),
-            Cursor  = Cursors.Hand,
-            ToolTip = "Copies launcher version, install state and recent log lines — paste into a Discord bug report",
-        };
-        diagBtn.Click += (_, _) =>
-        {
-            try
-            {
-                System.Windows.Clipboard.SetText(BuildDiagnosticsText());
-                ToastService.Show("Diagnostics copied",
-                    "Paste into the Discord bug-reports channel.", ToastKind.Success);
-            }
-            catch
-            {
-                AppendLog("[Settings] Could not access the clipboard — try again.");
-            }
-        };
-        SettingsPanel.Children.Add(diagBtn);
-
-        // --- Save Problem Report — the whole payload as one file ---
-        // Copy Diagnostics puts launcher state on the clipboard, which is fine
-        // for "the button is greyed out" but contains no crash information at
-        // all. This gathers the game's own crash log and run log too, so a
-        // crash report is one file instead of a conversation.
-        var reportBtn = new Button
-        {
-            Content = "🗒 Save Problem Report",
-            Padding = new Thickness(14, 6, 14, 6),
-            Margin  = new Thickness(0, 8, 0, 0),
-            HorizontalAlignment = HorizontalAlignment.Left,
-            Background  = new SolidColorBrush(Color.FromRgb(0x1A, 0x1E, 0x30)),
-            Foreground  = fg,
-            BorderBrush = new SolidColorBrush(Color.FromRgb(0x2A, 0x30, 0x50)),
-            Cursor  = Cursors.Hand,
-            ToolTip = "Saves one zip to your Desktop with the crash logs and settings — send that file",
-        };
-        reportBtn.Click += (_, _) => SaveProblemReport("requested by the player");
-        SettingsPanel.Children.Add(reportBtn);
-
-        // Divider
-        SettingsPanel.Children.Add(new Border
-        {
-            Height     = 1,
-            Background = new SolidColorBrush(Color.FromRgb(0x1E, 0x22, 0x33)),
-            Margin     = new Thickness(0, 16, 0, 16),
-        });
-
+        // The LAUNCHER section that used to render here moved to the
+        // Settings page in the topbar; the notification sounds moved to
+        // the right rail. This tab is the GAME's now, nothing else.
         // --- Per-game settings ---
         SettingsPanel.Children.Add(new TextBlock
         {
@@ -6132,6 +5687,445 @@ public partial class MainWindow : Window
                 Margin       = new Thickness(0, 8, 0, 0),
             });
         }
+    }
+
+
+    // ------------------------------------------------- launcher-wide settings
+
+    /// One section on the Settings page: a card with a heading, an optional
+    /// explainer, and the rows that belong together.
+    private Border SettingsCard(string title, string? blurb, UIElement body)
+    {
+        var stack = new StackPanel();
+        stack.Children.Add(new TextBlock
+        {
+            Text       = title.ToUpperInvariant(),
+            FontSize   = 10,
+            FontWeight = FontWeights.Bold,
+            Foreground = (Brush)FindResource("BrushMuted"),
+            Margin     = new Thickness(0, 0, 0, blurb == null ? 10 : 4),
+        });
+        if (blurb != null)
+            stack.Children.Add(new TextBlock
+            {
+                Text         = blurb,
+                FontSize     = 11,
+                TextWrapping = TextWrapping.Wrap,
+                Foreground   = (Brush)FindResource("BrushMuted"),
+                Opacity      = 0.8,
+                Margin       = new Thickness(0, 0, 0, 12),
+            });
+        stack.Children.Add(body);
+        return new Border
+        {
+            Background      = new SolidColorBrush(Color.FromRgb(0x14, 0x17, 0x20)),
+            BorderBrush     = new SolidColorBrush(Color.FromRgb(0x1E, 0x22, 0x33)),
+            BorderThickness = new Thickness(1),
+            CornerRadius    = new CornerRadius(6),
+            Padding         = new Thickness(18, 14, 18, 16),
+            Margin          = new Thickness(0, 0, 0, 12),
+            Child           = stack,
+        };
+    }
+
+    private TextBox SettingsBox(string text, string tooltip) => new()
+    {
+        Text        = text,
+        FontSize    = 11,
+        Padding     = new Thickness(6, 5, 6, 5),
+        Background  = new SolidColorBrush(Color.FromRgb(0x0C, 0x10, 0x20)),
+        Foreground  = new SolidColorBrush(Color.FromRgb(0xCC, 0xD0, 0xE0)),
+        BorderBrush = new SolidColorBrush(Color.FromRgb(0x1E, 0x22, 0x33)),
+        ToolTip     = tooltip,
+    };
+
+    private Button SettingsButton(string text, string? tooltip = null) => new()
+    {
+        Content     = text,
+        FontSize    = 11,
+        Padding     = new Thickness(12, 5, 12, 5),
+        Cursor      = Cursors.Hand,
+        Background  = new SolidColorBrush(Color.FromRgb(0x1A, 0x1E, 0x30)),
+        Foreground  = new SolidColorBrush(Color.FromRgb(0xCC, 0xD0, 0xE0)),
+        BorderBrush = new SolidColorBrush(Color.FromRgb(0x2A, 0x30, 0x50)),
+        ToolTip     = tooltip,
+    };
+
+    /// The Settings page: everything that applies to the launcher itself.
+    /// Rebuilt every time the page opens, so it always shows the saved state.
+    private void PopulateGlobalSettingsPanel()
+    {
+        GlobalSettingsPanel.Children.Clear();
+        var muted    = (Brush)FindResource("BrushMuted");
+        var fg       = new SolidColorBrush(Color.FromRgb(0xCC, 0xD0, 0xE0));
+        var settings = SettingsStore.Load();
+
+        // ── Connection ────────────────────────────────────────────────────
+        {
+            var body = new StackPanel();
+
+            body.Children.Add(new TextBlock
+            {
+                Text = "Default AP server", FontSize = 11, Foreground = muted,
+                Margin = new Thickness(0, 0, 0, 4),
+            });
+            var serverRow = new DockPanel();
+            var serverBox = SettingsBox(settings.DefaultApServer,
+                "e.g. archipelago.gg:38281 — pre-filled into the connect panel");
+            var serverSave = SettingsButton("Save");
+            serverSave.Margin = new Thickness(6, 0, 0, 0);
+            serverSave.Click += (_, _) =>
+            {
+                var s = SettingsStore.Load();
+                s.DefaultApServer = serverBox.Text.Trim();
+                SettingsStore.Save(s);
+                if (string.IsNullOrWhiteSpace(TxtServer.Text))
+                    TxtServer.Text = s.DefaultApServer;
+                AppendLog("[Settings] Default AP server saved.");
+            };
+            DockPanel.SetDock(serverSave, Dock.Right);
+            serverRow.Children.Add(serverSave);
+            serverRow.Children.Add(serverBox);
+            body.Children.Add(serverRow);
+
+            var reconnectCheck = new CheckBox
+            {
+                Content   = "Auto-reconnect to the AP server after connection drops",
+                FontSize  = 11,
+                Foreground = fg,
+                IsChecked = settings.AutoReconnect,
+                Margin    = new Thickness(0, 12, 0, 0),
+                Cursor    = Cursors.Hand,
+            };
+            reconnectCheck.Click += (_, _) =>
+            {
+                var s = SettingsStore.Load();
+                s.AutoReconnect = reconnectCheck.IsChecked == true;
+                SettingsStore.Save(s);
+                if (!s.AutoReconnect) CancelAutoReconnect(resetAttempts: true);
+            };
+            body.Children.Add(reconnectCheck);
+
+            GlobalSettingsPanel.Children.Add(SettingsCard("Connection",
+                "Where the connect panel points by default, and what happens "
+                + "when a connection drops.", body));
+        }
+
+        // ── Archipelago worlds ────────────────────────────────────────────
+        {
+            var body = new StackPanel();
+            body.Children.Add(new TextBlock
+            {
+                Text = "AP World folder (optional)", FontSize = 11, Foreground = muted,
+                Margin = new Thickness(0, 0, 0, 4),
+            });
+            var apwRow = new DockPanel();
+            var apwBox = SettingsBox(settings.ApworldSyncDir,
+                "e.g. C:\\ProgramData\\Archipelago\\custom_worlds — leave empty to turn this off");
+            var apwBrowse = SettingsButton("Browse");
+            apwBrowse.Margin = new Thickness(6, 0, 0, 0);
+            var apwSync = SettingsButton("Copy now",
+                "Copy the .apworld files of every installed game into that folder "
+                + "now, without waiting for the next update");
+            apwSync.Margin = new Thickness(6, 0, 0, 0);
+            var apwStatus = new TextBlock
+            {
+                FontSize = 10, Foreground = muted, TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 6, 0, 0),
+                Text = "When a game installs or updates, its .apworld is copied here. "
+                     + "Nothing in the folder is ever deleted.",
+            };
+            void SaveApworldDir()
+            {
+                var s2 = SettingsStore.Load();
+                string v = apwBox.Text.Trim();
+                if (s2.ApworldSyncDir == v) return;
+                s2.ApworldSyncDir = v;
+                SettingsStore.Save(s2);
+                AppendLog(v.Length == 0
+                    ? "[Settings] AP World folder cleared — copies are off."
+                    : $"[Settings] AP World folder set to {v}");
+            }
+            apwBox.LostFocus += (_, _) => SaveApworldDir();
+            apwBrowse.Click += (_, _) =>
+            {
+                var dlg = new Microsoft.Win32.OpenFolderDialog
+                {
+                    Title = "Select your Archipelago custom_worlds folder",
+                };
+                if (apwBox.Text.Trim().Length > 0 && Directory.Exists(apwBox.Text.Trim()))
+                    dlg.InitialDirectory = apwBox.Text.Trim();
+                if (dlg.ShowDialog() == true)
+                {
+                    apwBox.Text = dlg.FolderName;
+                    SaveApworldDir();
+                }
+            };
+            apwSync.Click += (_, _) =>
+            {
+                SaveApworldDir();
+                string dir = apwBox.Text.Trim();
+                if (dir.Length == 0) { apwStatus.Text = "Choose a folder first."; return; }
+                var installed = GameRegistry.All
+                    .Where(p => { try { return p.IsInstalled; } catch { return false; } })
+                    .ToList();
+                var res = ApworldSync.Sync(installed, dir);
+                string msg = res.Summary() ?? "No .apworld files found in any installed game.";
+                apwStatus.Text = msg;
+                AppendLog($"[Settings] {msg}");
+            };
+            DockPanel.SetDock(apwBrowse, Dock.Right);
+            DockPanel.SetDock(apwSync,   Dock.Right);
+            apwRow.Children.Add(apwSync);
+            apwRow.Children.Add(apwBrowse);
+            apwRow.Children.Add(apwBox);
+            body.Children.Add(apwRow);
+            body.Children.Add(apwStatus);
+
+            GlobalSettingsPanel.Children.Add(SettingsCard("Archipelago worlds",
+                "For playing with Archipelago's own tools too: the launcher can "
+                + "keep a copy of every installed game's .apworld where "
+                + "Archipelago loads worlds from.", body));
+        }
+
+        // ── Updates ───────────────────────────────────────────────────────
+        {
+            var body = new StackPanel { Orientation = Orientation.Horizontal };
+            body.Children.Add(new TextBlock
+            {
+                Text = $"Launcher version {LauncherUpdater.CurrentVersion.ToString(3)}",
+                FontSize = 11, Foreground = fg,
+                VerticalAlignment = VerticalAlignment.Center,
+            });
+            var checkBtn = SettingsButton("Check for update");
+            checkBtn.Margin = new Thickness(12, 0, 0, 0);
+            bool armedToInstall = false;
+            checkBtn.Click += async (_, _) =>
+            {
+                checkBtn.IsEnabled = false;
+                try
+                {
+                    if (armedToInstall)
+                    {
+                        checkBtn.Content = "Downloading...";
+                        await _launcherUpdater.DownloadAndApplyAsync();
+                        return;                       // the app restarts itself
+                    }
+                    checkBtn.Content = "Checking...";
+                    await _launcherUpdater.CheckAsync();
+                    var latest = _launcherUpdater.LatestVersion;
+                    if (latest != null && latest > LauncherUpdater.CurrentVersion)
+                    {
+                        armedToInstall = true;
+                        checkBtn.Content = $"Install v{latest.ToString(3)}";
+                    }
+                    else checkBtn.Content = "Up to date";
+                }
+                catch (Exception ex)
+                {
+                    AppendLog($"[Update] {ex.Message}");
+                    checkBtn.Content = armedToInstall ? "Update failed" : "Check failed";
+                }
+                finally { checkBtn.IsEnabled = true; }
+            };
+            body.Children.Add(checkBtn);
+
+            GlobalSettingsPanel.Children.Add(SettingsCard("Updates", null, body));
+        }
+
+        // ── Troubleshooting ───────────────────────────────────────────────
+        {
+            var body = new StackPanel { Orientation = Orientation.Horizontal };
+            var diagBtn = SettingsButton("📋 Copy Diagnostics",
+                "Copies launcher version, install state and recent log lines — "
+                + "paste into a Discord bug report");
+            diagBtn.Click += (_, _) =>
+            {
+                try
+                {
+                    System.Windows.Clipboard.SetText(BuildDiagnosticsText());
+                    ToastService.Show("Diagnostics copied",
+                        "Paste into the Discord bug-reports channel.", ToastKind.Success);
+                }
+                catch
+                {
+                    AppendLog("[Settings] Could not access the clipboard — try again.");
+                }
+            };
+            var reportBtn = SettingsButton("🗒 Save Problem Report",
+                "Saves one zip to your Desktop with the crash logs and settings — "
+                + "send that file");
+            reportBtn.Margin = new Thickness(8, 0, 0, 0);
+            reportBtn.Click += (_, _) => SaveProblemReport("requested by the player");
+            body.Children.Add(diagBtn);
+            body.Children.Add(reportBtn);
+
+            GlobalSettingsPanel.Children.Add(SettingsCard("Troubleshooting",
+                "When something breaks, these put the whole story in one place — "
+                + "a bug report with them attached reaches the cause much faster.",
+                body));
+        }
+    }
+
+    // -------------------------------------------------- sounds, in the rail
+
+    /// The notification sounds, in the right rail where every game can see
+    /// them. They are launcher-wide -- rendering them inside one game's
+    /// Settings tab made a global volume slider look like that game's.
+    private void PopulateSoundRail()
+    {
+        RailSoundPanel.Children.Clear();
+        var muted    = (Brush)FindResource("BrushMuted");
+        var fg       = new SolidColorBrush(Color.FromRgb(0xCC, 0xD0, 0xE0));
+        var settings = SettingsStore.Load();
+
+        var master = new CheckBox
+        {
+            Content    = "Play notification sounds",
+            FontSize   = 11,
+            Foreground = fg,
+            IsChecked  = settings.SoundNotifications,
+            Cursor     = Cursors.Hand,
+        };
+        RailSoundPanel.Children.Add(master);
+
+        var detail = new StackPanel { Margin = new Thickness(0, 8, 0, 0) };
+
+        // Volume first: the thing people reach for.
+        var volRow = new DockPanel();
+        var volValue = new TextBlock
+        {
+            Text = $"{settings.SoundVolume}%", FontSize = 10, Foreground = muted,
+            Width = 34, TextAlignment = TextAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        var volSlider = new Slider
+        {
+            Minimum = 0, Maximum = 100, Value = settings.SoundVolume,
+            VerticalAlignment = VerticalAlignment.Center,
+            IsSnapToTickEnabled = true, TickFrequency = 5,
+        };
+        volSlider.ValueChanged += (_, _) =>
+        {
+            int v = (int)Math.Round(volSlider.Value);
+            volValue.Text = $"{v}%";
+            SoundVolume = v;                      // heard on the very next sound
+            var s = SettingsStore.Load();
+            s.SoundVolume = v;
+            SettingsStore.Save(s);
+        };
+        DockPanel.SetDock(volValue, Dock.Right);
+        volRow.Children.Add(volValue);
+        volRow.Children.Add(volSlider);
+        detail.Children.Add(volRow);
+
+        // One compact row per event: label above, choice + preview below.
+        (string Key, string Label)[] events =
+        {
+            ("progression", "Progression item"),
+            ("trap",        "Trap incoming"),
+            ("death",       "DeathLink"),
+            ("goal",        "Goal complete"),
+        };
+        foreach (var (key, label) in events)
+        {
+            detail.Children.Add(new TextBlock
+            {
+                Text = label, FontSize = 10, Foreground = muted,
+                Margin = new Thickness(0, 8, 0, 2),
+            });
+
+            // Items are plain STRINGS: ComboBoxItem's own default foreground
+            // rendered the selected value near-black on the dark box.
+            var options = new List<(string Tag, string Label)>
+            {
+                ("system", "Windows sound (old)"),
+                ("none",   "Off for this event"),
+            };
+            foreach (var (id, name) in BundledSounds) options.Add((id, name));
+            foreach (var (id, name) in CustomSounds()) options.Add((id, name));
+
+            var row = new DockPanel();
+            var combo = new ComboBox { FontSize = 11, Foreground = Brushes.White };
+            foreach (var opt in options) combo.Items.Add(opt.Label);
+
+            string current = SoundMap.TryGetValue(key, out var cur) ? cur
+                           : DefaultSoundMap.GetValueOrDefault(key, "system");
+            int idx = options.FindIndex(o => o.Tag == current);
+            combo.SelectedIndex = idx >= 0 ? idx : 0;
+            combo.SelectionChanged += (_, _) =>
+            {
+                if (combo.SelectedIndex < 0) return;
+                var s = SettingsStore.Load();
+                s.NotificationSoundMap[key] = options[combo.SelectedIndex].Tag;
+                SettingsStore.Save(s);
+                SoundMap = new Dictionary<string, string>(s.NotificationSoundMap);
+            };
+
+            var preview = new Button
+            {
+                Content = "▶", FontSize = 11, Width = 26,
+                Margin = new Thickness(4, 0, 0, 0), Cursor = Cursors.Hand,
+                ToolTip = "Play the selected sound",
+            };
+            preview.Click += (_, _) =>
+            {
+                if (combo.SelectedIndex >= 0)
+                    try { PlaySoundChoice(options[combo.SelectedIndex].Tag, key); } catch { }
+            };
+            DockPanel.SetDock(preview, Dock.Right);
+            row.Children.Add(preview);
+            row.Children.Add(combo);
+            detail.Children.Add(row);
+        }
+
+        // Bring your own sound. Copied into Assets\Sounds\custom so an
+        // update, which overwrites Assets\Sounds itself, cannot delete it.
+        var addBtn = SettingsButton("Add your own sound…",
+            "wav, mp3 or wma — it then appears in the lists above");
+        addBtn.Margin = new Thickness(0, 10, 0, 0);
+        addBtn.HorizontalAlignment = HorizontalAlignment.Left;
+        addBtn.Click += (_, _) =>
+        {
+            var dlg = new Microsoft.Win32.OpenFileDialog
+            {
+                Title = "Choose a sound",
+                Filter = "Sound files (*.wav;*.mp3;*.wma)|*.wav;*.mp3;*.wma",
+                CheckFileExists = true,
+            };
+            if (dlg.ShowDialog() != true) return;
+            try
+            {
+                Directory.CreateDirectory(CustomSoundDir);
+                string dst = Path.Combine(CustomSoundDir, Path.GetFileName(dlg.FileName));
+                // Never silently replace one the user already added.
+                int n = 1;
+                string stem = Path.GetFileNameWithoutExtension(dst);
+                string ext  = Path.GetExtension(dst);
+                while (File.Exists(dst))
+                    dst = Path.Combine(CustomSoundDir, $"{stem} ({n++}){ext}");
+                File.Copy(dlg.FileName, dst);
+                AppendLog($"[Settings] Added sound {Path.GetFileName(dst)}");
+                PopulateSoundRail();   // rebuild so the lists show it
+            }
+            catch (Exception ex)
+            {
+                AppendLog("[Settings] Could not add that file: " + ex.Message);
+            }
+        };
+        detail.Children.Add(addBtn);
+
+        // Master off = nothing plays, and the detail rows say so by greying.
+        detail.IsEnabled = settings.SoundNotifications;
+        master.Click += (_, _) =>
+        {
+            var s = SettingsStore.Load();
+            s.SoundNotifications = master.IsChecked == true;
+            SettingsStore.Save(s);
+            SoundsEnabled = s.SoundNotifications;
+            detail.IsEnabled = s.SoundNotifications;
+        };
+        RailSoundPanel.Children.Add(detail);
     }
 
     // Skeleton / loading placeholder cards
@@ -7221,10 +7215,30 @@ public partial class MainWindow : Window
 
     // --- Modes: library or multiworld ---
 
-    private void BtnModeLibrary_Click(object sender, RoutedEventArgs e)    => SetMode(0);
+    private void BtnModeHome_Click(object sender, RoutedEventArgs e)       => ShowLobby();
+
+    /// Back to the landing page: no game selected, fresh random spotlight.
+    /// This is also the state the launcher starts in.
+    private void ShowLobby()
+    {
+        _selectedPlugin = null;
+        _homeHeroPlugin = null;          // force a new random pick
+        PanelGame.Visibility         = Visibility.Collapsed;
+        PanelAchievements.Visibility = Visibility.Collapsed;
+        PanelEmpty.Visibility        = Visibility.Visible;
+        SetMode(0);
+        RefreshHomePage();
+    }
+
+    private void HomeQuickMultiworld_Click(object sender, MouseButtonEventArgs e) => SetMode(1);
+    private void HomeQuickJoin_Click(object sender, MouseButtonEventArgs e)       => SetMode(2);
+    private void HomeQuickStore_Click(object sender, MouseButtonEventArgs e)      => SetMode(3);
     private void BtnModeMultiworld_Click(object sender, RoutedEventArgs e) => SetMode(1);
     private void BtnModeJoin_Click(object sender, RoutedEventArgs e)       => SetMode(2);
     private void BtnModeStore_Click(object sender, RoutedEventArgs e)      => SetMode(3);
+    private void BtnModeSettings_Click(object sender, RoutedEventArgs e)   => SetMode(6);
+    private void BtnModeStreamers_Click(object sender, RoutedEventArgs e)  => SetMode(4);
+    private void BtnModeDiscord_Click(object sender, RoutedEventArgs e)    => SetMode(5);
 
     /// Swaps the whole content area. The sidebar and the community rail stay
     /// hidden in multiworld mode: neither is about the seed being built, and a
@@ -7237,6 +7251,8 @@ public partial class MainWindow : Window
         PanelMultiworld.Visibility = mode == 1 ? Visibility.Visible : Visibility.Collapsed;
         PanelJoin.Visibility       = mode == 2 ? Visibility.Visible : Visibility.Collapsed;
         PanelStore.Visibility      = mode == 3 ? Visibility.Visible : Visibility.Collapsed;
+        PanelCommunity.Visibility  = mode is 4 or 5 ? Visibility.Visible : Visibility.Collapsed;
+        PanelSettings.Visibility   = mode == 6 ? Visibility.Visible : Visibility.Collapsed;
 
         // The rail is genuinely hidden, not merely painted under. The first
         // shipped build relied on a comment CLAIMING this happened; the code
@@ -7244,16 +7260,23 @@ public partial class MainWindow : Window
         // action column — the player could build slots but never generate.
         RailCommunity.Visibility = mode == 0 ? Visibility.Visible : Visibility.Collapsed;
 
-        BtnModeLibrary.FontWeight    = mode == 0 ? FontWeights.Bold : FontWeights.Normal;
+        BtnModeHome.FontWeight       = mode == 0 ? FontWeights.Bold : FontWeights.Normal;
         BtnModeMultiworld.FontWeight = mode == 1 ? FontWeights.Bold : FontWeights.Normal;
         BtnModeJoin.FontWeight       = mode == 2 ? FontWeights.Bold : FontWeights.Normal;
         BtnModeStore.FontWeight      = mode == 3 ? FontWeights.Bold : FontWeights.Normal;
+        BtnModeStreamers.FontWeight  = mode == 4 ? FontWeights.Bold : FontWeights.Normal;
+        BtnModeDiscord.FontWeight    = mode == 5 ? FontWeights.Bold : FontWeights.Normal;
+        BtnModeSettings.FontWeight   = mode == 6 ? FontWeights.Bold : FontWeights.Normal;
 
         // Re-read on every open: the player may have just installed the
         // engine or generated a seed, and stale emptiness is the most
         // annoying possible answer.
         if (mode == 1) PanelMultiworld.Refresh();
         if (mode == 2) PanelJoin.Refresh();
+        if (mode == 6) PopulateGlobalSettingsPanel();
+        if (mode is 4 or 5)
+            PanelCommunity.Show(mode == 4 ? Controls.CommunityPanel.Face.Streamers
+                                          : Controls.CommunityPanel.Face.Discord);
         if (mode == 3) PanelStore.Refresh();
     }
 
@@ -7299,15 +7322,6 @@ public partial class MainWindow : Window
             catch { /* the card reads fine without a picture */ }
         }
     }
-
-    private void BtnLinkWebsite_Click(object sender, RoutedEventArgs e)
-        => OpenUrl("https://archipelago.gg");
-
-    private void BtnLinkDiscord_Click(object sender, RoutedEventArgs e)
-        => OpenUrl("https://discord.gg/8Z65BR2");
-
-    private void BtnLinkWiki_Click(object sender, RoutedEventArgs e)
-        => OpenUrl("https://archipelago.miraheze.org/");
 
     // "Find these on your room page at archipelago.gg" helper link in the
     // connect panel (UX-2) — the room page is where server/slot/password live.
@@ -10485,16 +10499,24 @@ public partial class MainWindow : Window
 
         // Installed games in library order
         var allPlugins = GameRegistry.All.ToList();
-        var installed  = LibraryStore.GetSortedGameIds()
+        var library    = LibraryStore.GetSortedGameIds()
             .Select(id => allPlugins.FirstOrDefault(p => p.GameId == id))
-            .Where(p => p is { IsInstalled: true })
+            .Where(p => p != null)
             .Cast<IGamePlugin>()
             .ToList();
+        if (library.Count == 0) library = allPlugins;
+        var installed = library.Where(p => p.IsInstalled).ToList();
 
-        // Featured = most-recently played installed game
-        _homeHeroPlugin = installed
-            .OrderByDescending(p => PlaytimeService.LastPlayed(p.GameId) ?? DateTimeOffset.MinValue)
-            .FirstOrDefault();
+        // Featured = a RANDOM game from the list, picked at startup and again
+        // each time Lobby is pressed (both null the field). Between those
+        // moments the pick is kept, so an install finishing in the background
+        // does not shuffle the card the player is looking at. Any game on the
+        // list qualifies -- spotlighting something not yet installed is how a
+        // library gets explored.
+        if (_homeHeroPlugin == null || !library.Contains(_homeHeroPlugin))
+            _homeHeroPlugin = library.Count > 0
+                ? library[Random.Shared.Next(library.Count)]
+                : null;
 
         if (_homeHeroPlugin != null)
         {
@@ -10502,9 +10524,12 @@ public partial class MainWindow : Window
 
             var played = PlaytimeService.LastPlayed(_homeHeroPlugin.GameId);
             var pt     = PlaytimeService.TotalPlaytime(_homeHeroPlugin.GameId);
-            TxtHomeHeroMeta.Text = pt.TotalMinutes >= 1
+            TxtHomeHeroMeta.Text = !_homeHeroPlugin.IsInstalled
+                ? "Not installed yet — open the page and one click sets it up"
+                : pt.TotalMinutes >= 1
                 ? $"{PlaytimeService.FormatPlaytime(pt)} played · last played {(played.HasValue ? PlaytimeService.FormatRelativeDate(played.Value) : "never")}"
                 : "Not yet played";
+            BtnHomeHeroPlay.Content = _homeHeroPlugin.IsInstalled ? "▶  PLAY" : "OPEN PAGE";
 
             var desc = _homeHeroPlugin.Description ?? "";
             TxtHomeHeroDesc.Text = desc.Length > 240 ? desc[..240] + "…" : desc;
@@ -10541,6 +10566,152 @@ public partial class MainWindow : Window
         // Hide getting-started card once the user has installed games
         HomeGetStartedSection.Visibility = installed.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
 
+        // With games on the list, the landing page earns its other sections:
+        // what the launcher does, the news, and who is live. Without any, the
+        // Getting Started checklist IS the page, exactly as before.
+        HomeQuickRow.Visibility = library.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        _ = FillHomeNewsAsync();
+        _ = FillHomeLiveAsync();
+    }
+
+    /// The NEWS section, from the catalogue (built-in notes offline). Runs
+    /// once per process; repeated RefreshHomePage calls just re-render.
+    private async Task FillHomeNewsAsync()
+    {
+        var items = await Core.LauncherNews.LoadAsync();
+        if (!CheckAccess()) { await Dispatcher.InvokeAsync(() => RenderHomeNews(items)); return; }
+        RenderHomeNews(items);
+    }
+
+    private void RenderHomeNews(IReadOnlyList<Core.LauncherNews.NewsItem> items)
+    {
+        HomeNewsItems.Children.Clear();
+        foreach (var n in items.Take(4))
+        {
+            var card = new Border
+            {
+                Background = new SolidColorBrush(System.Windows.Media.Color.FromRgb(0x14, 0x17, 0x20)),
+                BorderBrush = new SolidColorBrush(System.Windows.Media.Color.FromRgb(0x1E, 0x22, 0x33)),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(6),
+                Padding = new Thickness(16, 11, 16, 12),
+                Margin = new Thickness(0, 0, 0, 8),
+            };
+            var stack = new StackPanel();
+            var head = new DockPanel();
+            head.Children.Add(new TextBlock
+            {
+                Text = n.Date,
+                FontSize = 10,
+                Foreground = (System.Windows.Media.Brush)FindResource("BrushMuted"),
+                Opacity = 0.7,
+                VerticalAlignment = VerticalAlignment.Center,
+            });
+            DockPanel.SetDock(head.Children[0], Dock.Right);
+            head.Children.Add(new TextBlock
+            {
+                Text = n.Title,
+                FontSize = 12.5,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = (System.Windows.Media.Brush)FindResource("BrushText"),
+            });
+            stack.Children.Add(head);
+            stack.Children.Add(new TextBlock
+            {
+                Text = n.Text,
+                FontSize = 11,
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 4, 0, 0),
+                Foreground = (System.Windows.Media.Brush)FindResource("BrushMuted"),
+            });
+            card.Child = stack;
+            HomeNewsItems.Children.Add(card);
+        }
+        HomeNewsSection.Visibility = HomeNewsItems.Children.Count > 0
+            ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    /// The LIVE section: which listed streamers are on air, per Twitch's
+    /// public preview endpoint. Live-checked on every landing render -- being
+    /// stale is the one thing a live section must never be.
+    private async Task FillHomeLiveAsync()
+    {
+        IReadOnlyList<Core.CommunityDirectory.LiveStreamer> live;
+        try { live = await Core.CommunityDirectory.WhoIsLiveAsync(); }
+        catch (Exception) { live = Array.Empty<Core.CommunityDirectory.LiveStreamer>(); }
+        await Dispatcher.InvokeAsync(() =>
+        {
+            HomeLiveCards.Children.Clear();
+            foreach (var l in live)
+            {
+                var card = new Border
+                {
+                    Width = 236,
+                    Background = new SolidColorBrush(System.Windows.Media.Color.FromRgb(0x14, 0x17, 0x20)),
+                    BorderBrush = new SolidColorBrush(System.Windows.Media.Color.FromRgb(0xE9, 0x19, 0x16)),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(6),
+                    Margin = new Thickness(0, 0, 10, 10),
+                    Cursor = System.Windows.Input.Cursors.Hand,
+                    ToolTip = $"Watch {l.Who.Name} on Twitch",
+                };
+                var stack = new StackPanel();
+
+                // The preview IS the stream, a frame of it -- the most honest
+                // possible advert for what is on right now.
+                var thumb = new Border
+                {
+                    Height = 118,
+                    CornerRadius = new CornerRadius(6, 6, 0, 0),
+                    Background = new SolidColorBrush(System.Windows.Media.Color.FromRgb(0x1A, 0x1E, 0x2C)),
+                };
+                try
+                {
+                    var bmp = new System.Windows.Media.Imaging.BitmapImage();
+                    bmp.BeginInit();
+                    bmp.UriSource = new Uri(l.ThumbnailUrl, UriKind.Absolute);
+                    bmp.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad;
+                    bmp.EndInit();
+                    thumb.Background = new ImageBrush(bmp) { Stretch = System.Windows.Media.Stretch.UniformToFill };
+                }
+                catch (Exception) { }
+                stack.Children.Add(thumb);
+
+                var row = new DockPanel { Margin = new Thickness(10, 7, 10, 8) };
+                var badge = new Border
+                {
+                    Background = new SolidColorBrush(System.Windows.Media.Color.FromRgb(0xE9, 0x19, 0x16)),
+                    CornerRadius = new CornerRadius(3),
+                    Padding = new Thickness(5, 1, 5, 2),
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Child = new TextBlock
+                    {
+                        Text = "LIVE",
+                        FontSize = 9,
+                        FontWeight = FontWeights.Bold,
+                        Foreground = System.Windows.Media.Brushes.White,
+                    },
+                };
+                DockPanel.SetDock(badge, Dock.Right);
+                row.Children.Add(badge);
+                row.Children.Add(new TextBlock
+                {
+                    Text = l.Who.Name,
+                    FontSize = 12,
+                    FontWeight = FontWeights.SemiBold,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Foreground = (System.Windows.Media.Brush)FindResource("BrushText"),
+                });
+                stack.Children.Add(row);
+
+                card.Child = stack;
+                string url = l.Who.Twitch!;
+                card.MouseLeftButtonDown += (_, _) => OpenUrl(url);
+                HomeLiveCards.Children.Add(card);
+            }
+            HomeLiveSection.Visibility = HomeLiveCards.Children.Count > 0
+                ? Visibility.Visible : Visibility.Collapsed;
+        });
     }
 
     private Border BuildHomeRecentCard(IGamePlugin plugin)

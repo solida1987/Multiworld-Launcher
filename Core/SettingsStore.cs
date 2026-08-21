@@ -129,7 +129,10 @@ public sealed class LauncherSettings
     // Master toggle for notification sounds (progression items, traps,
     // DeathLink deaths, goal completion).
     [JsonPropertyName("sound_notifications")]
-    public bool SoundNotifications { get; set; } = true;
+    // Off by default (changed 21/8 on request): a launcher that plays sounds
+    // out of the box surprises people; the ones who want them turn them on in
+    // the rail. An existing settings file keeps whatever the player chose.
+    public bool SoundNotifications { get; set; } = false;
 
     // Playback volume for notification sounds, 0-100. Starts at half so the
     // first one a new user hears is not startling.

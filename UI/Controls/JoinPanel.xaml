@@ -28,6 +28,15 @@
                               ToolTip="Every seed in your library, newest first"/>
                 </StackPanel>
 
+                <!--  Joining somebody else's session has nothing to do with the
+                      seed picker beside it, so it gets its own button rather
+                      than an entry in a list of your own seeds. -->
+                <Button x:Name="BtnJoinElsewhere" Grid.Column="1" Content="+  Join a server elsewhere"
+                        Style="{StaticResource BtnSecondaryStyle}" Padding="12,6"
+                        HorizontalAlignment="Left" Margin="16,0,0,0" VerticalAlignment="Center"
+                        Click="BtnJoinElsewhere_Click"
+                        ToolTip="Sign in to a slot on a session somebody else is hosting"/>
+
                 <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
                     <Ellipse x:Name="DotServer" Width="9" Height="9"
                              Fill="#4A5170" VerticalAlignment="Center" Margin="0,0,7,0"/>
@@ -45,6 +54,22 @@
         <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="18,16,18,8">
             <StackPanel>
                 <WrapPanel x:Name="PanelSlots"/>
+
+                <!--  Slots on servers we are not running. Hidden until there is
+                      at least one, so the tab does not grow a header for
+                      something most people never use. -->
+                <StackPanel x:Name="SectionExternal" Visibility="Collapsed" Margin="0,6,0,0">
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                        <TextBlock Text="HOSTED ELSEWHERE" FontSize="10" FontWeight="Bold"
+                                   Foreground="{StaticResource BrushMuted}" VerticalAlignment="Center"/>
+                        <Border Background="#262C3E" CornerRadius="3" Padding="6,1" Margin="9,0,0,0">
+                            <TextBlock x:Name="TxtExternalCount" FontSize="10"
+                                       Foreground="{StaticResource BrushMuted}"/>
+                        </Border>
+                    </StackPanel>
+                    <WrapPanel x:Name="PanelExternal"/>
+                </StackPanel>
+
                 <StackPanel x:Name="PanelJoinEmpty" Margin="0,60,0,0"
                             HorizontalAlignment="Center" MaxWidth="480">
                     <TextBlock Text="Nothing to join yet" FontSize="16" FontWeight="Bold"
@@ -52,6 +77,9 @@
                     <TextBlock Margin="0,8,0,0" TextWrapping="Wrap" TextAlignment="Center"
                                FontSize="12" Foreground="{StaticResource BrushMuted}"
                                Text="Generate a seed under Multiworld first. Every player slot in it shows up here as a card with one button: press it, and London hosts the server, applies that slot's patch, connects, and starts the game."/>
+                    <TextBlock Margin="0,14,0,0" TextWrapping="Wrap" TextAlignment="Center"
+                               FontSize="12" Foreground="{StaticResource BrushMuted}"
+                               Text="Playing in somebody else's session instead? Use Join a server elsewhere above. You need their address and the slot name they gave you — London asks the server what that slot plays and sets the game up from there."/>
                 </StackPanel>
             </StackPanel>
         </ScrollViewer>

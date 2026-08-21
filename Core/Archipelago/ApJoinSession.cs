@@ -106,7 +106,49 @@ public sealed class ApJoinSession
             }
         }
 
-        var session = new ApJoinSession(plugin, slot.Name, seed.Id);
+        // askForPatch: false -- the seed's own patch was just laid where the
+        // plugin's resolver looks, so asking would demand a file that is
+        // already in place.
+        return await ConnectAndLaunchAsync(
+            plugin, $"127.0.0.1:{hosted.Host.Port}", slot.Name, "",
+            plugin.ApWorldName ?? slot.Game, seed.Id,
+            askForPatch: false, ct).ConfigureAwait(false);
+    }
+
+    /// UI hook: asked on the external path when the connected seed has no
+    /// stored patch for this slot. Returns true once one was imported. Set by
+    /// the main window; null means nobody can ask, and the launch proceeds --
+    /// the plugin's own SessionRomNote then says what that means.
+    public static Func<IGamePlugin, SeedPatchRequest, Task<bool>>? AskForSeedPatch { get; set; }
+
+    /// Join a slot on a server somebody else is running.
+    ///
+    /// No server is started and no patch is laid out: the session already
+    /// exists and the player supplies their own game as usual. Everything the
+    /// plugin is told is the same, because it is the same code path.
+    public static async Task<(ApJoinSession? Session, string Message)> StartExternalAsync(
+        ExternalSlot ext, IGamePlugin plugin, CancellationToken ct = default)
+    {
+        if (For(plugin) is { } already)
+            return (null, $"{plugin.DisplayName} is already playing as "
+                        + $"\"{already.SlotName}\". One session per game — stop "
+                        + "that one first.");
+
+        // askForPatch: true -- there is no seed folder here. If the seed
+        // needs a patch for this slot, the only place it can come from is
+        // the player, who got it from whoever generated the multiworld.
+        return await ConnectAndLaunchAsync(
+            plugin, ext.Address, ext.SlotName, ext.Password,
+            plugin.ApWorldName ?? ext.Game ?? "", ext.DisplayAddress,
+            askForPatch: true, ct).ConfigureAwait(false);
+    }
+
+    /// The shared half: connect as the slot, wire the plugin, launch the game.
+    private static async Task<(ApJoinSession? Session, string Message)> ConnectAndLaunchAsync(
+        IGamePlugin plugin, string address, string slotName, string password,
+        string gameName, string sessionLabel, bool askForPatch, CancellationToken ct)
+    {
+        var session = new ApJoinSession(plugin, slotName, sessionLabel);
         lock (_all) _all.Add(session);
 
         try
@@ -114,8 +156,7 @@ public sealed class ApJoinSession
             // 3. Connect as the slot. Wired the way the two-player proof and
             //    the live Minish run were wired -- that exact shape is what
             //    has been proven end to end.
-            var ap = new ApSession($"127.0.0.1:{hosted.Host.Port}", slot.Name, "",
-                                   plugin.ApWorldName ?? slot.Game);
+            var ap = new ApSession(address, slotName, password, gameName);
             var client = new ApClient(ap, plugin);
             session._client = client;
 
@@ -142,12 +183,12 @@ public sealed class ApJoinSession
             plugin.GetServerLocations = () => client.ConnectedMissing.ToArray();
             plugin.GetOwnSlot         = () => client.Slot;
             plugin.GetSlotData        = () => client.SlotData;
-            plugin.GetSeedName        = () => client.SeedName ?? seed.Id;
+            plugin.GetSeedName        = () => client.SeedName ?? sessionLabel;
 
             plugin.OnApServicesAttached(new JoinApServices(client));
             if (client.SlotData is { } sd) plugin.OnSlotData(sd);
 
-            string worldName = plugin.ApWorldName ?? slot.Game;
+            string worldName = gameName;
             Dictionary<string, long>? table = null;
             client.DataPackageReceived += (gameKey, data) =>
             {
@@ -187,9 +228,26 @@ public sealed class ApJoinSession
             plugin.GoalCompleted += () => session.Set(Stage.Playing, "Goal complete!");
             plugin.GameExited += _ => session.End("Game closed");
 
+            // 4½. The patch, on the external path only. The seed name exists
+            // now that we are connected, and this is the first moment the
+            // question "does the store hold this seed's patch for this slot?"
+            // can even be asked. Same reasoning as the library Play button --
+            // asked ONCE, because the import is stored against (seed, slot).
+            // A declined ask still launches: an unpatched game that runs is
+            // the plugin's SessionRomNote to explain, not a failed join.
+            if (askForPatch
+                && client.SeedName is { Length: > 0 } seedName
+                && plugin.GetUnmetSeedPatch(seedName, slotName) is { } patchReq
+                && AskForSeedPatch is { } ask)
+            {
+                session.Set(Stage.Connecting, "This seed needs its patch file…");
+                try { await ask(plugin, patchReq).ConfigureAwait(false); }
+                catch (Exception) { /* the prompt failing must not kill the join */ }
+            }
+
             // 5. The game itself.
             await plugin.LaunchAsync(ap).ConfigureAwait(false);
-            plugin.LastSlotName = slot.Name;
+            plugin.LastSlotName = slotName;
 
             // Push again what may have raced ahead of the launch: a plugin
             // that resets session state in LaunchAsync loses anything that
@@ -201,7 +259,7 @@ public sealed class ApJoinSession
                 plugin.OnCheckedLocations(client.ConnectedChecked.ToArray());
             }
 
-            session.Set(Stage.Playing, $"Playing on port {hosted.Host.Port}");
+            session.Set(Stage.Playing, $"Playing — {address}");
             return (session, "Joined.");
         }
         catch (OperationCanceledException)

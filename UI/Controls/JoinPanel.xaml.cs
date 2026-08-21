@@ -101,7 +101,12 @@ public partial class JoinPanel : System.Windows.Controls.UserControl
     private void RefreshCards()
     {
         PanelSlots.Children.Clear();
-        PanelJoinEmpty.Visibility = _seed == null ? Visibility.Visible : Visibility.Collapsed;
+        RefreshExternalCards();
+        // "Nothing to join yet" has to be true of BOTH halves. A player with no
+        // seeds of their own but five slots on a friend's server has plenty to
+        // join, and being told otherwise under the cards would be nonsense.
+        PanelJoinEmpty.Visibility = _seed == null && ExternalSlotStore.All().Count == 0
+            ? Visibility.Visible : Visibility.Collapsed;
         RefreshServerChip();
         if (_seed == null) return;
 
