@@ -5981,14 +5981,87 @@ public partial class MainWindow : Window
                 + "send that file");
             reportBtn.Margin = new Thickness(8, 0, 0, 0);
             reportBtn.Click += (_, _) => SaveProblemReport("requested by the player");
+
+            // Clearing lives HERE rather than beside Collect logs on a game's
+            // page: it sweeps every game and the launcher, so offering it from
+            // one game's page would understate what it does.
+            var clearBtn = SettingsButton("🧹 Clear all log files",
+                "Delete the collected logs from every game and from the launcher, "
+                + "so the next report contains only what happens after");
+            clearBtn.Margin = new Thickness(8, 0, 0, 0);
+            clearBtn.Click += (_, _) => ClearAllLogs();
             body.Children.Add(diagBtn);
             body.Children.Add(reportBtn);
+            body.Children.Add(clearBtn);
 
             GlobalSettingsPanel.Children.Add(SettingsCard("Troubleshooting",
                 "When something breaks, these put the whole story in one place — "
                 + "a bug report with them attached reaches the cause much faster.",
                 body));
         }
+    }
+
+    /// Delete every log the report would have collected, after saying how
+    /// many there are and what will survive.
+    ///
+    /// Counted BEFORE asking: "are you sure?" with no number attached is a
+    /// question nobody can answer. And the confirmation names what is NOT
+    /// touched, because the fear that stops people clearing logs is that a
+    /// save game goes with them.
+    private void ClearAllLogs()
+    {
+        var games = GameRegistry.All
+            .Select(p => (p.GameId, Directory: SafeGameDir(p), p.IsInstalled))
+            .ToList();
+
+        int count = 0;
+        long bytes = 0;
+        try
+        {
+            foreach (string f in ProblemReport.FindLogs(AppContext.BaseDirectory))
+            {
+                count++;
+                try { bytes += new FileInfo(f).Length; } catch (Exception) { }
+            }
+            foreach (var (_, dir, installed) in games)
+            {
+                if (!installed || string.IsNullOrWhiteSpace(dir)) continue;
+                foreach (string f in ProblemReport.FindLogs(dir))
+                {
+                    count++;
+                    try { bytes += new FileInfo(f).Length; } catch (Exception) { }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"[Logs] Could not look for log files: {ex.Message}");
+            return;
+        }
+
+        if (count == 0)
+        {
+            ConfirmDialog.ShowInfo(this, "Nothing to clear",
+                "There are no log files to remove — the next report will already "
+                + "contain only what happens from here.");
+            return;
+        }
+
+        if (!ConfirmDialog.Show(this,
+                "Clear all log files?",
+                $"This deletes {count} log file(s) — about {bytes / 1024:N0} KB — from "
+                + "every installed game and from the launcher itself.\n\n"
+                + "Your saves, your settings and your games are NOT touched. Only "
+                + "the crash logs, run logs and dumps a problem report collects.\n\n"
+                + "Do this before reproducing a bug and the next report will contain "
+                + "that bug and nothing else. It cannot be undone.",
+                "Clear them", "Keep them"))
+            return;
+
+        var res = ProblemReport.ClearLogs(games);
+        AppendLog($"[Logs] {res.Summary()}");
+        ToastService.Show("Logs cleared", res.Summary(),
+            res.Locked > 0 ? ToastKind.Warning : ToastKind.Success);
     }
 
     // -------------------------------------------------- sounds, in the rail
