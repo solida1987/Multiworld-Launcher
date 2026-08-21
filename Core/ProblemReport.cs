@@ -150,6 +150,23 @@ public static class ProblemReport
         {
             WriteText(zip, "diagnostics.txt", diagnosticsText);
 
+            // What WINDOWS saw. The launcher only knows a game exited; Windows
+            // knows whether it crashed, and in which module.
+            //
+            // This matters for the failure that has no other evidence: a game
+            // that vanishes leaving a clean log and no dump. Our own logs then
+            // say only "the last thing I did was fine", which is true and
+            // useless. The Application Error record names the faulting module —
+            // the game's own code, a graphics wrapper, or ours — and that is
+            // the difference between guessing and knowing.
+            string errors = ReadWindowsErrors();
+            if (errors.Length > 0)
+            {
+                WriteText(zip, "windows-errors.txt", errors);
+                manifest.AppendLine("  windows-errors.txt  (what Windows recorded "
+                                  + "about crashed programs)");
+            }
+
             // The launcher's own folder — its crash log lives next to the exe.
             AddFolder(zip, AppContext.BaseDirectory, "launcher", manifest, out int launcherCount);
             if (launcherCount == 0)
@@ -244,6 +261,72 @@ public static class ProblemReport
                 // A file held open by the running game is normal, not a failure.
                 manifest.AppendLine($"  {prefix}/{rel} — skipped ({ex.GetType().Name})");
             }
+        }
+    }
+
+    /// Recent crash and hang records from the Windows Application log.
+    ///
+    /// Read through wevtutil rather than the EventLog API: it ships with
+    /// Windows, needs no extra package, and cannot drag a UI thread down with
+    /// it. Never throws and never blocks for long — a report that is late or
+    /// missing one section still has everything else in it.
+    private static string ReadWindowsErrors()
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("=== What Windows recorded about crashed programs ===");
+        sb.AppendLine();
+        sb.AppendLine("If a game vanished with no error of its own, this is where it");
+        sb.AppendLine("says so. The line that matters names the FAULTING MODULE — the");
+        sb.AppendLine("file the crash actually happened inside.");
+        sb.AppendLine();
+
+        bool any = false;
+        foreach (var (label, provider) in new[]
+                 {
+                     ("Crashes", "Application Error"),
+                     ("Freezes", "Application Hang"),
+                     (".NET failures", ".NET Runtime"),
+                 })
+        {
+            string? text = RunTool("wevtutil",
+                $"qe Application /q:\"*[System[Provider[@Name='{provider}']]]\" "
+                + "/c:8 /rd:true /f:text");
+            if (string.IsNullOrWhiteSpace(text)) continue;
+            any = true;
+            sb.AppendLine($"---- {label} ({provider}) ----");
+            sb.AppendLine(text!.Trim());
+            sb.AppendLine();
+        }
+
+        return any ? sb.ToString() : "";
+    }
+
+    private static string? RunTool(string exe, string args)
+    {
+        try
+        {
+            using var p = System.Diagnostics.Process.Start(
+                new System.Diagnostics.ProcessStartInfo(exe, args)
+                {
+                    UseShellExecute = false,
+                    CreateNoWindow  = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError  = true,
+                });
+            if (p == null) return null;
+            string outText = p.StandardOutput.ReadToEnd();
+            // Bounded: a machine with a very noisy event log must not turn a
+            // problem report into a hang.
+            if (!p.WaitForExit(20_000))
+            {
+                try { p.Kill(entireProcessTree: true); } catch (Exception) { }
+                return null;
+            }
+            return p.ExitCode == 0 ? outText : null;
+        }
+        catch (Exception)
+        {
+            return null;
         }
     }
 
