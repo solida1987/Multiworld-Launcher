@@ -2458,7 +2458,31 @@ public partial class MainWindow : Window
         OverviewCommandBar.Children.Clear();
         if (_selectedPlugin == null) return;
 
-        foreach (var cmd in _selectedPlugin.GetCommands())
+        var commands = _selectedPlugin.GetCommands().ToList();
+
+        // Every game gets "Create YAML", not just the two that hand-wrote one.
+        // The generic builder reads the world's own option template, so it
+        // fits each game by itself — which is the only way three hundred of
+        // them can have this button without three hundred plugin edits.
+        //
+        // A plugin that already offers its own wins: Diablo II's knows about
+        // its experimental channel, and OpenTTD's knows about NewGRF sets.
+        // Neither is something a template can express.
+        if (!commands.Any(c => c.Label.Contains("YAML", StringComparison.OrdinalIgnoreCase)))
+        {
+            var plugin = _selectedPlugin;
+            commands.Insert(0, new GameCommand(
+                "✎  Create YAML",
+                "Build your Archipelago YAML for this game and save it — "
+                + "no text editor needed",
+                owner => Dialogs.YamlBuilderDialog.ShowFor(
+                             owner, plugin.DisplayName, plugin.ApWorldName),
+                // You write a YAML BEFORE you own the game — that is exactly
+                // when someone is joining a multiworld a friend generated.
+                NeedsInstall: false));
+        }
+
+        foreach (var cmd in commands)
         {
             if (cmd.NeedsInstall && !_selectedPlugin.IsInstalled) continue;
 
@@ -6719,6 +6743,36 @@ public partial class MainWindow : Window
                     string? apwMsg = apwRes.Summary();
                     if (apwMsg != null) AppendLog($"[{plugin.DisplayName}] {apwMsg}");
                 }
+            }
+
+            // And into the engine London itself generates with, which is a
+            // different thing from the mirror above: without this the game is
+            // installed but cannot be generated with, and Create YAML has no
+            // options to show because templates are built from the worlds the
+            // engine can load. Regenerating them takes a while, so it runs
+            // detached -- the install is already finished either way.
+            {
+                var eng = Core.Archipelago.ApEngine.Discover(
+                    string.IsNullOrWhiteSpace(SettingsStore.Load().ApEnginePath)
+                        ? null : SettingsStore.Load().ApEnginePath);
+                var target = plugin;
+                _ = Task.Run(async () =>
+                {
+                    var res = await Core.Archipelago.ApWorldProvisioner.ProvisionAsync(target, eng);
+                    if (res.WorldsCopied == 0 && res.Note == null) return;
+                    string line = res.Note != null
+                        ? $"[{target.DisplayName}] World added to Archipelago, but "
+                        + res.Note + "."
+                        : $"[{target.DisplayName}] World added to Archipelago and its "
+                        + "options refreshed — Create YAML now shows them.";
+                    Dispatcher.BeginInvoke(() =>
+                    {
+                        AppendLog(line);
+                        // The command row draws from what exists right now, and
+                        // what exists just changed.
+                        if (ReferenceEquals(_selectedPlugin, target)) SyncCommandBar();
+                    });
+                });
             }
 
             RefreshVersionBadges(plugin);
