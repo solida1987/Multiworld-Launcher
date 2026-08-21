@@ -60,6 +60,22 @@ public static class ProblemReport
         "crash.log", "error.log", "output_log.txt", "player.log",
     };
 
+    // ⚠ COLLECTED, NEVER DELETED.
+    //
+    // These are worth reading in a bug report -- the settings a game ran with
+    // and the version it thought it was -- but they are CONFIGURATION and
+    // STATE, not logs. Clearing them would throw away the player's settings
+    // and leave the game rebuilding state it had no reason to lose.
+    //
+    // This list exists because "Clear all log files" was written against
+    // WantedNames and would have deleted both of these. The proof did not
+    // catch it: its fake install had a settings.json, which is not one of the
+    // names this list actually holds.
+    private static readonly string[] NeverDelete =
+    {
+        "d2arch.ini", "version.dat",
+    };
+
     // Extensions worth sweeping up generically, for the other plugins that do
     // not follow the Diablo II naming.
     private static readonly string[] WantedExtensions = { ".dmp", ".crash" };
@@ -270,7 +286,13 @@ public static class ProblemReport
         void Sweep(string root)
         {
             IEnumerable<string> found;
-            try { found = FindLogs(root).ToList(); }
+            try
+            {
+                found = FindLogs(root)
+                        .Where(f => !NeverDelete.Contains(Path.GetFileName(f),
+                                                          StringComparer.OrdinalIgnoreCase))
+                        .ToList();
+            }
             catch (Exception) { return; }
 
             foreach (string f in found)

@@ -2482,6 +2482,26 @@ public partial class MainWindow : Window
                 NeedsInstall: false));
         }
 
+        // "Are the files still the ones we installed?" — asked for by testers
+        // after a crash nobody could explain. The launch-time check is
+        // size-only so it can finish before Play; this reads every byte, which
+        // is why it is a button and not something that happens every time.
+        //
+        // Offered only where there is a manifest to measure against. A game
+        // without one is not broken, and a button that always answers "cannot
+        // tell" is worse than no button.
+        if (_selectedPlugin.IsInstalled
+            && InstallVerifier.CanVerify(SafeGameDir(_selectedPlugin)))
+        {
+            var vp = _selectedPlugin;
+            commands.Add(new GameCommand(
+                "🔍  Verify files",
+                "Check every installed file against what was written at install "
+                + "time — finds damage a quick check cannot see",
+                owner => Dialogs.VerifyFilesDialog.ShowFor(
+                             owner, vp.DisplayName, SafeGameDir(vp))));
+        }
+
         foreach (var cmd in commands)
         {
             if (cmd.NeedsInstall && !_selectedPlugin.IsInstalled) continue;
