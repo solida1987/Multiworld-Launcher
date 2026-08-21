@@ -81,6 +81,12 @@ public static class InstallVerifier
     /// widening this to hide it would make the button worthless.
     private static readonly string[] GameManagedExtensions = { ".ini", ".dat", ".cfg" };
 
+    /// True when replacing this file would destroy something the player owns.
+    /// Exposed so the repair path can refuse it outright rather than relying on
+    /// the classifier upstream having got it right -- overwriting somebody's
+    /// settings is not a mistake worth leaving to one line of logic.
+    public static bool IsPlayerOwned(string path) => IsGameManaged(path);
+
     private static bool IsGameManaged(string path)
         => GameManagedExtensions.Contains(System.IO.Path.GetExtension(path),
                                           StringComparer.OrdinalIgnoreCase)
@@ -242,8 +248,19 @@ public static class InstallVerifier
             // to confirm it would only cost time.
             if (info.Length != f.Size)
             {
-                bad.Add(new BadFile(f.Path, Fault.WrongSize,
-                    $"{info.Length:N0} bytes, expected {f.Size:N0}"));
+                // A config the game writes to CHANGES SIZE — that is what
+                // saving a setting does. Reporting d2arch.ini as damage sent a
+                // tester chasing a fault that was his own keybindings, and
+                // worse, offered to "repair" it: replacing the file would have
+                // thrown his settings away to fix nothing.
+                //
+                // Damage is for files the game does not write. Everything the
+                // game owns is reported apart and never repaired.
+                bad.Add(new BadFile(f.Path,
+                    IsGameManaged(f.Path) ? Fault.ChangedSinceInstall : Fault.WrongSize,
+                    IsGameManaged(f.Path)
+                        ? "a different size — normal for a file the game writes to"
+                        : $"{info.Length:N0} bytes, expected {f.Size:N0}"));
                 continue;
             }
 
