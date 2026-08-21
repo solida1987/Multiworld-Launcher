@@ -783,12 +783,14 @@ public partial class MultiworldPanel : System.Windows.Controls.UserControl
     private void TabSeeds_Click(object sender, RoutedEventArgs e)    { RefreshSeeds(); Show(PanelSeeds); }
     private void TabNewSeed_Click(object sender, RoutedEventArgs e)  => Show(PanelNewSeed);
     private void TabApworlds_Click(object sender, RoutedEventArgs e) => Show(PanelApworlds);
+    private void TabGuide_Click(object sender, RoutedEventArgs e)    => Show(PanelGuide);
 
     private void Show(UIElement which)
     {
         PanelSeeds.Visibility    = ReferenceEquals(which, PanelSeeds)    ? Visibility.Visible : Visibility.Collapsed;
         PanelNewSeed.Visibility  = ReferenceEquals(which, PanelNewSeed)  ? Visibility.Visible : Visibility.Collapsed;
         PanelApworlds.Visibility = ReferenceEquals(which, PanelApworlds) ? Visibility.Visible : Visibility.Collapsed;
+        PanelGuide.Visibility    = ReferenceEquals(which, PanelGuide)    ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void BtnValidate_Click(object sender, RoutedEventArgs e) => _ = RunAsync(validateOnly: true);

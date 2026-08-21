@@ -38,7 +38,14 @@ public sealed record StoreGame(
     [property: JsonPropertyName("install_kind")]   string? InstallKind = null,
     /// Has a human actually played this through London? Built is not tested,
     /// and a card that hides the difference is a card that lies quietly.
-    [property: JsonPropertyName("tested")]         bool Tested = false);
+    [property: JsonPropertyName("tested")]         bool Tested = false,
+    /// Wide header art (Steam library_hero, a console title screen). An
+    /// ADDRESS, like the cover -- the launcher fetches it to the player's
+    /// machine; the catalogue never carries pixels.
+    [property: JsonPropertyName("banner")]         string? Banner = null,
+    /// Set when this entry is the same game as another entry -- a second
+    /// integration, not a different game. Points at the primary entry's id.
+    [property: JsonPropertyName("variant_of")]     string? VariantOf = null);
 
 public sealed record StoreIndex(
     [property: JsonPropertyName("count")]     int Count,

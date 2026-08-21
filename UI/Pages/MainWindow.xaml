@@ -159,12 +159,18 @@
                     <!-- Two places to be, not two tabs on one page: the
                          library is about one game at a time, Multiworld is
                          about seeds that span several. -->
-                    <Button x:Name="BtnModeLibrary"
-                            Content="Library"
+                    <!-- Home. Deselects the game and shows the landing page —
+                         the state the launcher also starts in. Lobby and
+                         Library stood here as two buttons for one job, merged
+                         on request 21/8: the sidebar IS the library, so the
+                         only thing a topbar button adds is the way home. -->
+                    <Button x:Name="BtnModeHome"
+                            Content="Home"
                             Style="{StaticResource BtnSecondaryStyle}"
                             Padding="12,4" Margin="0,0,6,0"
                             FontSize="11"
-                            Click="BtnModeLibrary_Click"/>
+                            ToolTip="Back to the landing page"
+                            Click="BtnModeHome_Click"/>
                     <Button x:Name="BtnModeMultiworld"
                             Content="Multiworld"
                             Style="{StaticResource BtnSecondaryStyle}"
@@ -204,13 +210,37 @@
                     <!-- "Store" read like money. It is a library of plugins,
                          so that is its name; the internal ids keep the old
                          word because published addresses do not move. -->
+                    <!-- The community lives outside this launcher, and
+                         pretending otherwise helps nobody. Both of these lead
+                         straight out to it. -->
+                    <Button x:Name="BtnModeStreamers"
+                            Content="Streamers"
+                            Style="{StaticResource BtnSecondaryStyle}"
+                            Padding="12,4" Margin="0,0,6,0"
+                            FontSize="11"
+                            ToolTip="Channels that run Archipelago sessions, in several languages"
+                            Click="BtnModeStreamers_Click"/>
+                    <Button x:Name="BtnModeDiscord"
+                            Content="Discord"
+                            Style="{StaticResource BtnSecondaryStyle}"
+                            Padding="12,4" Margin="0,0,6,0"
+                            FontSize="11"
+                            ToolTip="Archipelago communities on Discord — member counts read live"
+                            Click="BtnModeDiscord_Click"/>
                     <Button x:Name="BtnModeStore"
                             Content="Plugin Library"
                             Style="{StaticResource BtnSecondaryStyle}"
-                            Padding="12,4" Margin="0,0,10,0"
+                            Padding="12,4"
                             FontSize="11"
                             ToolTip="Every game plugin the catalogue offers — installing always shows the consent screen"
                             Click="BtnModeStore_Click"/>
+                    <Button x:Name="BtnModeSettings"
+                            Content="Settings"
+                            Style="{StaticResource BtnSecondaryStyle}"
+                            Padding="12,4" Margin="6,0,10,0"
+                            FontSize="11"
+                            ToolTip="Everything that applies to the launcher itself, not one game"
+                            Click="BtnModeSettings_Click"/>
                     <Button x:Name="BtnHelp"
                             Content="?"
                             ToolTip="Keyboard shortcuts (F1)"
@@ -736,6 +766,83 @@
                                        Foreground="{StaticResource BrushMuted}"
                                        Opacity="0.8" Margin="0,0,0,10"/>
                             <WrapPanel x:Name="HomeRecentCards" Orientation="Horizontal"/>
+                        </StackPanel>
+
+                        <!--  Live now — which of the Streamers-page people are
+                              on air at this moment, read from Twitch's public
+                              preview endpoint when the page opens. Hidden when
+                              nobody is: an empty "live" section is a lie with
+                              a heading. -->
+                        <StackPanel x:Name="HomeLiveSection" Visibility="Collapsed"
+                                    Margin="0,0,0,24">
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                                <Ellipse Width="8" Height="8" Fill="#E91916"
+                                         VerticalAlignment="Center" Margin="0,0,7,0"/>
+                                <TextBlock Text="STREAMING ARCHIPELAGO-STYLE RIGHT NOW"
+                                           FontSize="10" FontWeight="Bold"
+                                           Foreground="{StaticResource BrushMuted}"
+                                           Opacity="0.8"/>
+                            </StackPanel>
+                            <WrapPanel x:Name="HomeLiveCards"/>
+                        </StackPanel>
+
+                        <!--  Quick actions — the three places the topbar leads,
+                              one sentence each, for the player who has games
+                              and wonders what the launcher can DO. -->
+                        <StackPanel x:Name="HomeQuickRow" Visibility="Collapsed"
+                                    Margin="0,0,0,24">
+                            <TextBlock Text="WHAT THIS LAUNCHER DOES"
+                                       FontSize="10" FontWeight="Bold"
+                                       Foreground="{StaticResource BrushMuted}"
+                                       Opacity="0.8" Margin="0,0,0,10"/>
+                            <UniformGrid Columns="3">
+                                <Border Background="#141720" BorderBrush="#1E2233" BorderThickness="1"
+                                        CornerRadius="6" Padding="14,11" Margin="0,0,8,0"
+                                        Cursor="Hand" MouseLeftButtonDown="HomeQuickMultiworld_Click">
+                                    <StackPanel>
+                                        <TextBlock Text="Build a multiworld" FontSize="12" FontWeight="SemiBold"
+                                                   Foreground="{StaticResource BrushText}"/>
+                                        <TextBlock Text="Shuffle one or many games into a seed and host it — all on this machine."
+                                                   FontSize="10" TextWrapping="Wrap" Margin="0,3,0,0"
+                                                   Foreground="{StaticResource BrushMuted}"/>
+                                    </StackPanel>
+                                </Border>
+                                <Border Background="#141720" BorderBrush="#1E2233" BorderThickness="1"
+                                        CornerRadius="6" Padding="14,11" Margin="0,0,8,0"
+                                        Cursor="Hand" MouseLeftButtonDown="HomeQuickJoin_Click">
+                                    <StackPanel>
+                                        <TextBlock Text="Join a session" FontSize="12" FontWeight="SemiBold"
+                                                   Foreground="{StaticResource BrushText}"/>
+                                        <TextBlock Text="Play a slot in your own seed, or sign in to a server somebody else hosts."
+                                                   FontSize="10" TextWrapping="Wrap" Margin="0,3,0,0"
+                                                   Foreground="{StaticResource BrushMuted}"/>
+                                    </StackPanel>
+                                </Border>
+                                <Border Background="#141720" BorderBrush="#1E2233" BorderThickness="1"
+                                        CornerRadius="6" Padding="14,11"
+                                        Cursor="Hand" MouseLeftButtonDown="HomeQuickStore_Click">
+                                    <StackPanel>
+                                        <TextBlock Text="Get more games" FontSize="12" FontWeight="SemiBold"
+                                                   Foreground="{StaticResource BrushText}"/>
+                                        <TextBlock Text="The Plugin Library holds hundreds of games, each installed with one click."
+                                                   FontSize="10" TextWrapping="Wrap" Margin="0,3,0,0"
+                                                   Foreground="{StaticResource BrushMuted}"/>
+                                    </StackPanel>
+                                </Border>
+                            </UniformGrid>
+                        </StackPanel>
+
+                        <!--  News. Fed from the catalogue so it can say something
+                              new without a release; hidden entirely when there is
+                              nothing to say, because inventing news is worse than
+                              having none. -->
+                        <StackPanel x:Name="HomeNewsSection" Visibility="Collapsed"
+                                    Margin="0,0,0,24">
+                            <TextBlock Text="NEWS"
+                                       FontSize="10" FontWeight="Bold"
+                                       Foreground="{StaticResource BrushMuted}"
+                                       Opacity="0.8" Margin="0,0,0,10"/>
+                            <StackPanel x:Name="HomeNewsItems"/>
                         </StackPanel>
 
                         <!--  Getting started (first-run / no history)  -->
@@ -2128,12 +2235,14 @@
                                    Foreground="{StaticResource BrushMuted}"
                                    Text="All of it is open: the launcher, the plugin catalogue and the game mods, with the source published alongside every release."/>
 
+                        <!-- The ARCHIPELAGO link section that stood here moved
+                             into the Discord page in the topbar. In its place:
+                             the launcher's own notification sounds, which are
+                             global — burying a global volume slider inside one
+                             game's Settings tab made it look per-game. Filled
+                             by PopulateSoundRail(). -->
                         <Border Height="1" Background="#1E2233" Margin="0,18,0,16"/>
-
-                        <!-- Canonical Archipelago links (§13) — THE home of
-                             these links in the launcher; the sidebar and the
-                             status bar carry none. -->
-                        <TextBlock Text="ARCHIPELAGO"
+                        <TextBlock Text="SOUNDS"
                                    FontSize="10"
                                    FontWeight="Bold"
                                    Foreground="{StaticResource BrushMuted}"
@@ -2142,31 +2251,8 @@
                                    FontSize="11"
                                    TextWrapping="Wrap"
                                    Foreground="{StaticResource BrushMuted}"
-                                   Text="The project this launcher plays. It is not ours and we do not speak for it — these are its own places."/>
-
-                        <Button x:Name="BtnLinkWebsite"
-                                Style="{StaticResource BtnSecondaryStyle}"
-                                Padding="10,7"
-                                Margin="0,0,0,6"
-                                HorizontalContentAlignment="Left"
-                                Content="Official Archipelago website"
-                                ToolTip="archipelago.gg"
-                                Click="BtnLinkWebsite_Click"/>
-                        <Button x:Name="BtnLinkDiscord"
-                                Style="{StaticResource BtnSecondaryStyle}"
-                                Padding="10,7"
-                                Margin="0,0,0,6"
-                                HorizontalContentAlignment="Left"
-                                Content="Official Archipelago Discord"
-                                ToolTip="The Archipelago project&apos;s own Discord"
-                                Click="BtnLinkDiscord_Click"/>
-                        <Button x:Name="BtnLinkWiki"
-                                Style="{StaticResource BtnSecondaryStyle}"
-                                Padding="10,7"
-                                HorizontalContentAlignment="Left"
-                                Content="Official Archipelago wiki"
-                                ToolTip="Setup guides and documentation"
-                                Click="BtnLinkWiki_Click"/>
+                                   Text="What London plays when a check lands: progression items, traps, DeathLink and the goal. Off unless you turn it on."/>
+                        <StackPanel x:Name="RailSoundPanel"/>
 
                     </StackPanel>
                 </ScrollViewer>
@@ -2193,6 +2279,36 @@
             <local:StorePanel x:Name="PanelStore"
                               Grid.Column="0" Grid.ColumnSpan="3"
                               Visibility="Collapsed"/>
+
+            <!--  COMMUNITY  (streamers + discord, one control, two faces)
+                  WPF paints later children on top, so every full-surface panel
+                  has to sit after the community rail or the rail covers it.
+                  The gate counts this. -->
+            <local:CommunityPanel x:Name="PanelCommunity"
+                                  Grid.Column="0" Grid.ColumnSpan="3"
+                                  Visibility="Collapsed"/>
+
+            <!--  SETTINGS — everything that applies to the launcher itself.
+                  These rows lived inside every game's Settings tab, where a
+                  global server address looked like a per-game one. Filled by
+                  PopulateGlobalSettingsPanel(). -->
+            <Border x:Name="PanelSettings"
+                    Grid.Column="0" Grid.ColumnSpan="3"
+                    Visibility="Collapsed"
+                    Background="{StaticResource BrushBackground}">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="26,20,26,30">
+                    <StackPanel MaxWidth="760" HorizontalAlignment="Left">
+                        <TextBlock Text="Settings"
+                                   FontSize="21" FontWeight="Bold"
+                                   Foreground="{StaticResource BrushAccent}"/>
+                        <TextBlock Margin="0,6,0,18" TextWrapping="Wrap"
+                                   FontSize="12.5"
+                                   Foreground="{StaticResource BrushMuted}"
+                                   Text="Everything here applies to the launcher as a whole. Settings for one game live on that game's own page — and the notification sounds sit in the right rail on Home."/>
+                        <StackPanel x:Name="GlobalSettingsPanel"/>
+                    </StackPanel>
+                </ScrollViewer>
+            </Border>
 
         </Grid>  <!-- end content Grid -->
 

@@ -19,6 +19,10 @@
                         Padding="14,9" Margin="0,6,6,6" Click="TabNewSeed_Click"/>
                 <Button x:Name="TabApworlds" Content="Apworlds"  Style="{StaticResource BtnSecondaryStyle}"
                         Padding="14,9" Margin="0,6,6,6" Click="TabApworlds_Click"/>
+                <!--  Last, and deliberately not first: someone who already knows
+                      what they are doing should not have to walk past it. -->
+                <Button x:Name="TabGuide"    Content="How it works" Style="{StaticResource BtnSecondaryStyle}"
+                        Padding="14,9" Margin="0,6,6,6" Click="TabGuide_Click"/>
             </StackPanel>
         </Border>
 
@@ -247,6 +251,128 @@
             </StackPanel>
             <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="18,0,18,18">
                 <StackPanel x:Name="PanelApworldList"/>
+            </ScrollViewer>
+        </Grid>
+
+        <!--  ═══ How it works ═══════════════════════════════════════════════
+              Written for someone who has never run a multiworld. It explains
+              the idea before the buttons, because the buttons make no sense
+              without it. -->
+        <Grid x:Name="PanelGuide" Grid.Row="2" Visibility="Collapsed">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="26,20,26,30">
+                <StackPanel MaxWidth="880" HorizontalAlignment="Left">
+
+                    <TextBlock Text="How a multiworld works" FontSize="21" FontWeight="Bold"
+                               Foreground="{StaticResource BrushAccent}"/>
+                    <TextBlock Margin="0,10,0,0" TextWrapping="Wrap" FontSize="13.5" LineHeight="21"
+                               Foreground="{StaticResource BrushText}"
+                               Text="A multiworld takes the items out of one or more games, shuffles them together, and hands them back out across every player in the session. Your Fire Flower might be sitting in somebody else's dungeon; their key might be in your shop. Nobody finishes alone."/>
+                    <TextBlock Margin="0,8,0,0" TextWrapping="Wrap" FontSize="13.5" LineHeight="21"
+                               Foreground="{StaticResource BrushText}"
+                               Text="This tab is where a session is built and hosted. Everything runs on your own machine — the generator, the server, the lot. Nothing is uploaded anywhere and nobody else needs an account."/>
+
+                    <!-- ── What you need ── -->
+                    <Border Margin="0,20,0,0" Background="#141926" BorderBrush="#2A3348"
+                            BorderThickness="1" CornerRadius="4" Padding="18,14">
+                        <StackPanel>
+                            <TextBlock Text="Before you start" FontWeight="Bold" FontSize="14"
+                                       Foreground="{StaticResource BrushText}"/>
+                            <TextBlock Margin="0,8,0,0" TextWrapping="Wrap" FontSize="12.5" LineHeight="19"
+                                       Foreground="{StaticResource BrushMuted}"
+                                       Text="• The Archipelago engine. The bar above says whether it was found; if not, install it and point London at it.&#10;• A plugin for each game you want to play, from the Plugin Library.&#10;• Your own copy of each game. London never supplies one."/>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- ── The three steps ── -->
+                    <TextBlock Margin="0,24,0,0" Text="Building a seed, step by step"
+                               FontSize="16" FontWeight="Bold" Foreground="{StaticResource BrushText}"/>
+
+                    <StackPanel Margin="0,12,0,0">
+                        <TextBlock TextWrapping="Wrap" FontSize="13" LineHeight="20"
+                                   Foreground="{StaticResource BrushText}">
+                            <Run Text="1 · Pick a game" FontWeight="Bold" Foreground="{StaticResource BrushAccent}"/>
+                            <LineBreak/>
+                            <Run Text="Under New seed, the list at the bottom left holds every game this machine can generate. One entry per option template — if a game is missing, its plugin is not installed yet."/>
+                        </TextBlock>
+
+                        <TextBlock Margin="0,14,0,0" TextWrapping="Wrap" FontSize="13" LineHeight="20"
+                                   Foreground="{StaticResource BrushText}">
+                            <Run Text="2 · Add a slot" FontWeight="Bold" Foreground="{StaticResource BrushAccent}"/>
+                            <LineBreak/>
+                            <Run Text="A slot is one player in one game. Add as many as you like and mix games freely — that is the multiworld. Each slot starts on that game's default options; select it to change them. Two slots of the same game are fine, and so is one slot on its own."/>
+                        </TextBlock>
+
+                        <TextBlock Margin="0,14,0,0" TextWrapping="Wrap" FontSize="13" LineHeight="20"
+                                   Foreground="{StaticResource BrushText}">
+                            <Run Text="3 · Generate" FontWeight="Bold" Foreground="{StaticResource BrushAccent}"/>
+                            <LineBreak/>
+                            <Run Text="London checks the seed is actually finishable before it builds anything — every item reachable, every goal possible. Then it writes the seed and files it under Seeds. Check without generating runs the same check and writes nothing, which is the fast answer to “can this work?”"/>
+                        </TextBlock>
+
+                        <TextBlock Margin="0,14,0,0" TextWrapping="Wrap" FontSize="13" LineHeight="20"
+                                   Foreground="{StaticResource BrushText}">
+                            <Run Text="4 · Host it" FontWeight="Bold" Foreground="{StaticResource BrushAccent}"/>
+                            <LineBreak/>
+                            <Run Text="Open Seeds and press Host. That starts the server on your machine. Join then lists every slot in the seed, and each one plays with a single press."/>
+                        </TextBlock>
+                    </StackPanel>
+
+                    <!-- ── What you can do with it ── -->
+                    <TextBlock Margin="0,26,0,0" Text="Four things you can do with this"
+                               FontSize="16" FontWeight="Bold" Foreground="{StaticResource BrushText}"/>
+
+                    <Border Margin="0,12,0,0" Background="#141926" BorderBrush="#2A3348"
+                            BorderThickness="1" CornerRadius="4" Padding="18,14">
+                        <StackPanel>
+                            <TextBlock Text="A randomiser for one game" FontWeight="Bold" FontSize="13"
+                                       Foreground="{StaticResource BrushAccent}"/>
+                            <TextBlock Margin="0,5,0,0" TextWrapping="Wrap" FontSize="12.5" LineHeight="19"
+                                       Foreground="{StaticResource BrushMuted}"
+                                       Text="One slot is a complete seed. Generate it, host it, play it — you have a randomised run of that game, alone, with no server anywhere but here. Most people start here."/>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Margin="0,10,0,0" Background="#141926" BorderBrush="#2A3348"
+                            BorderThickness="1" CornerRadius="4" Padding="18,14">
+                        <StackPanel>
+                            <TextBlock Text="Several of your own games, shuffled together" FontWeight="Bold" FontSize="13"
+                                       Foreground="{StaticResource BrushAccent}"/>
+                            <TextBlock Margin="0,5,0,0" TextWrapping="Wrap" FontSize="12.5" LineHeight="19"
+                                       Foreground="{StaticResource BrushMuted}"
+                                       Text="Add several slots and play all of them yourself. The items are shuffled across the whole set, so progress in one game unlocks another: a key for your Zelda run turns up in your Pokémon game. Join opens each one in its own connection, and they can all be open at once."/>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Margin="0,10,0,0" Background="#141926" BorderBrush="#2A3348"
+                            BorderThickness="1" CornerRadius="4" Padding="18,14">
+                        <StackPanel>
+                            <TextBlock Text="Host for other people" FontWeight="Bold" FontSize="13"
+                                       Foreground="{StaticResource BrushAccent}"/>
+                            <TextBlock Margin="0,5,0,0" TextWrapping="Wrap" FontSize="12.5" LineHeight="19"
+                                       Foreground="{StaticResource BrushMuted}"
+                                       Text="The server Host starts is a real Archipelago server. Others can connect to it with their own client from anywhere they can reach your machine — they do not need London. Give them the address, the port and their slot name."/>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Margin="0,10,0,0" Background="#141926" BorderBrush="#2A3348"
+                            BorderThickness="1" CornerRadius="4" Padding="18,14">
+                        <StackPanel>
+                            <TextBlock Text="Join a seed somebody else made" FontWeight="Bold" FontSize="13"
+                                       Foreground="{StaticResource BrushAccent}"/>
+                            <TextBlock Margin="0,5,0,0" TextWrapping="Wrap" FontSize="12.5" LineHeight="19"
+                                       Foreground="{StaticResource BrushMuted}"
+                                       Text="You do not have to be the one who built it. The Join tab handles a seed hosted elsewhere too — you sign in to their server with your slot name, and London sets your game up the same way it would for your own seed."/>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- ── Practical notes ── -->
+                    <TextBlock Margin="0,26,0,0" Text="Worth knowing"
+                               FontSize="16" FontWeight="Bold" Foreground="{StaticResource BrushText}"/>
+                    <TextBlock Margin="0,10,0,0" TextWrapping="Wrap" FontSize="12.5" LineHeight="20"
+                               Foreground="{StaticResource BrushMuted}"
+                               Text="• The seed number decides the shuffle. Leave it empty for a random one; type the same number again to get exactly the same seed back.&#10;• Race mode hides the spoiler log, for when nobody should be able to look anything up.&#10;• A generated seed keeps working. Host it today, stop, host it again next week — the server picks the session up where it left off.&#10;• Some games need their own copy patched before the first play. London asks once per seed, then never again.&#10;• Nothing here is uploaded. The generator, the server and the seed all stay on this machine."/>
+
+                </StackPanel>
             </ScrollViewer>
         </Grid>
     </Grid>
