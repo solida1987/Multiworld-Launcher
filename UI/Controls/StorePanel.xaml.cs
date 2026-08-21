@@ -114,8 +114,14 @@ public partial class StorePanel : System.Windows.Controls.UserControl
 
     /// Where a report actually reaches someone. The whole banner above exists
     /// to send people here instead of to a publisher's support form.
-    private const string ReportUrl =
-        "https://app.betahub.io/projects/pr-1475268655/issues";
+    ///
+    /// Our Discord, not the bug tracker: someone whose game will not start
+    /// wants to describe it in a sentence and be answered, which is what a
+    /// chat is for. A tracker asks them to file a structured report first, and
+    /// most people simply do not. Taken from CommunityInfo so the launcher has
+    /// ONE invite address — two copies drift, and a dead invite here would
+    /// undo the whole point of the notice.
+    private static string ReportUrl => LauncherV2.Core.CommunityInfo.InviteUrl;
 
     private void TxtSupportLink_Click(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
