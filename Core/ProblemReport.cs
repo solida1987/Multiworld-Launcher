@@ -20,7 +20,7 @@ namespace LauncherV2.Core;
 // Desktop with an obvious name, and it is produced automatically when a game
 // exits abnormally as well as on demand.
 //
-internal static class ProblemReport
+public static class ProblemReport
 {
     // Per-file cap. Logs from a long session can reach tens of megabytes, and
     // the tail is the part that matters — so oversized files are truncated
@@ -30,6 +30,27 @@ internal static class ProblemReport
     // Safety net so a folder full of stale dumps cannot produce a zip nobody
     // can upload to Discord.
     private const int MaxFilesPerGame = 40;
+
+    // How far back a log is still worth sending. Older ones are counted in the
+    // manifest but not included: a report about today's crash carrying three
+    // months of unrelated dumps costs the reader more than it tells them.
+    private static readonly TimeSpan Window = TimeSpan.FromDays(14);
+
+    // When this run of the launcher began. Files written since are from the
+    // session the player is reporting about, which is nearly always the one
+    // that matters -- so they are kept apart rather than mixed in.
+    private static readonly DateTime SessionStart = GetSessionStart();
+
+    private static DateTime GetSessionStart()
+    {
+        try { return System.Diagnostics.Process.GetCurrentProcess().StartTime; }
+        catch (Exception)
+        {
+            // Some hosts refuse StartTime. An hour back is a poor guess but a
+            // safe one: it over-includes rather than hiding something.
+            return DateTime.Now - TimeSpan.FromHours(1);
+        }
+    }
 
     // Names we always want, matched case-insensitively anywhere in the game
     // folder tree.
@@ -54,7 +75,7 @@ internal static class ProblemReport
     // Throws only if the Desktop itself is unwritable; individual files that
     // cannot be read are recorded in the manifest instead of aborting.
     //
-    internal static string Build(string diagnosticsText,
+    public static string Build(string diagnosticsText,
                                  IEnumerable<(string GameId, string Directory, bool Installed)> games,
                                  string? trigger = null,
                                  string? targetPath = null)
@@ -99,6 +120,13 @@ internal static class ProblemReport
         manifest.AppendLine("No personal files are collected — only the game and launcher");
         manifest.AppendLine("folders, and only logs and configuration from them.");
         manifest.AppendLine();
+        manifest.AppendLine($"Logs are split by when they were written. Anything under");
+        manifest.AppendLine($"this-session/ was written after the launcher started at");
+        manifest.AppendLine($"{SessionStart:yyyy-MM-dd HH:mm:ss} — that is the run being reported.");
+        manifest.AppendLine($"earlier/ is older, kept for context. Files more than");
+        manifest.AppendLine($"{Window.TotalDays:F0} days old are not included at all; the count is");
+        manifest.AppendLine("listed below so you can ask for them.");
+        manifest.AppendLine();
         manifest.AppendLine("=== Files collected ===");
         manifest.AppendLine();
 
@@ -131,18 +159,10 @@ internal static class ProblemReport
                                   StringBuilder manifest, out int added)
     {
         added = 0;
-        List<string> files;
+        List<string> all;
         try
         {
-            files = Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
-                             .Where(f => !IsUnderSkippedDir(root, f))
-                             .Where(IsInteresting)
-                             // Newest first, so the per-game cap keeps what is
-                             // relevant to the crash that just happened rather
-                             // than whatever happens to sort first.
-                             .OrderByDescending(f => SafeWriteTime(f))
-                             .Take(MaxFilesPerGame)
-                             .ToList();
+            all = FindLogs(root).ToList();
         }
         catch (Exception ex)
         {
@@ -150,11 +170,34 @@ internal static class ProblemReport
             return;
         }
 
+        // Too old to be about anything being reported now. Counted, never
+        // silently dropped -- if the answer really is in a two-month-old file,
+        // the reader needs to know it exists and can ask for it.
+        var cutoff = DateTime.Now - Window;
+        int stale = all.Count(f => SafeWriteTime(f) < cutoff);
+        var files = all.Where(f => SafeWriteTime(f) >= cutoff)
+                       // Newest first, so the per-game cap keeps what is
+                       // relevant to the crash that just happened rather
+                       // than whatever happens to sort first.
+                       .OrderByDescending(f => SafeWriteTime(f))
+                       .Take(MaxFilesPerGame)
+                       .ToList();
+
+        if (stale > 0)
+            manifest.AppendLine($"  {prefix}/ — {stale} file(s) older than "
+                              + $"{Window.TotalDays:F0} days were left out. Ask for them "
+                              + "if this turns out to be an old problem.");
+
         foreach (string f in files)
         {
             string rel;
             try { rel = Path.GetRelativePath(root, f).Replace('\\', '/'); }
             catch { rel = Path.GetFileName(f); }
+
+            // The split that makes the zip readable: this run of the launcher,
+            // or before it.
+            bool thisSession = SafeWriteTime(f) >= SessionStart;
+            rel = (thisSession ? "this-session/" : "earlier/") + rel;
 
             try
             {
@@ -186,6 +229,72 @@ internal static class ProblemReport
                 manifest.AppendLine($"  {prefix}/{rel} — skipped ({ex.GetType().Name})");
             }
         }
+    }
+
+    /// Every file in a tree this report would collect. The ONE definition of
+    /// "a log", so clearing can never remove something collecting would not
+    /// have taken -- which is what keeps a "clear logs" button away from save
+    /// files.
+    public static IEnumerable<string> FindLogs(string root)
+    {
+        if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
+            return Array.Empty<string>();
+        return Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
+                        .Where(f => !IsUnderSkippedDir(root, f))
+                        .Where(IsInteresting);
+    }
+
+    public sealed record ClearResult(int Deleted, int Locked, long BytesFreed)
+    {
+        public string Summary() =>
+            Deleted == 0 && Locked == 0
+                ? "There were no log files to clear."
+                : $"Cleared {Deleted} log file(s), freeing {BytesFreed / 1024:N0} KB."
+                  + (Locked > 0
+                     ? $" {Locked} could not be removed — a game holding one open "
+                       + "is normal; they go on the next attempt."
+                     : "");
+    }
+
+    /// Delete the logs, so the next report carries only what happened after.
+    ///
+    /// Deletes exactly what Build would have collected and nothing else. A
+    /// file the running game holds open is skipped rather than fought over --
+    /// reporting it is more honest than pretending it went.
+    public static ClearResult ClearLogs(
+        IEnumerable<(string GameId, string Directory, bool Installed)> games)
+    {
+        int deleted = 0, locked = 0;
+        long freed = 0;
+
+        void Sweep(string root)
+        {
+            IEnumerable<string> found;
+            try { found = FindLogs(root).ToList(); }
+            catch (Exception) { return; }
+
+            foreach (string f in found)
+            {
+                try
+                {
+                    long size = new FileInfo(f).Length;
+                    File.Delete(f);
+                    deleted++;
+                    freed += size;
+                }
+                catch (Exception)
+                {
+                    locked++;
+                }
+            }
+        }
+
+        Sweep(AppContext.BaseDirectory);
+        foreach (var (_, dir, installed) in games)
+            if (installed && !string.IsNullOrWhiteSpace(dir))
+                Sweep(dir);
+
+        return new ClearResult(deleted, locked, freed);
     }
 
     private static bool IsInteresting(string path)
