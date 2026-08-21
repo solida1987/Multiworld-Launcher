@@ -324,6 +324,11 @@ public sealed class VerifyFilesDialog : Window
         // downloading over it will fail the same way.
         _repairable = r.Damage
             .Where(b => b.Fault != InstallVerifier.Fault.Unreadable)
+            // Belt and braces: a config or save-adjacent file must never be
+            // fetched over, even if something upstream mislabels it as damage.
+            // The cost of the check is nothing; the cost of being wrong is a
+            // player's settings.
+            .Where(b => !InstallVerifier.IsPlayerOwned(b.Path))
             .Select(b => b.Path)
             .Distinct()
             .ToList();
