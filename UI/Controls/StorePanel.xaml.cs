@@ -107,6 +107,26 @@ public partial class StorePanel : System.Windows.Controls.UserControl
     private void Filters_Changed(object sender, RoutedEventArgs e) => RenderCards();
     private void Filters_Changed(object sender, TextChangedEventArgs e) => RenderCards();
 
+    /// The name the catalogue credits our own worlds to. A game whose world
+    /// carries it is ours end to end — plugin AND world — which is the only
+    /// case where we can promise to fix something.
+    private const string OurAuthor = "solida1987";
+
+    /// Where a report actually reaches someone. The whole banner above exists
+    /// to send people here instead of to a publisher's support form.
+    private const string ReportUrl =
+        "https://app.betahub.io/projects/pr-1475268655/issues";
+
+    private void TxtSupportLink_Click(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        try
+        {
+            System.Diagnostics.Process.Start(
+                new System.Diagnostics.ProcessStartInfo { FileName = ReportUrl, UseShellExecute = true });
+        }
+        catch (Exception) { /* no browser is not a crash */ }
+    }
+
     private void BtnClearFilters_Click(object sender, RoutedEventArgs e)
     {
         TxtSearch.Text = "";
@@ -225,6 +245,40 @@ public partial class StorePanel : System.Windows.Controls.UserControl
                 + "It may work perfectly — it just has not been verified.",
         };
         body.Children.Add(badge);
+
+        // Who stands behind THIS one. Tested/Untested answers "has anyone
+        // played it"; this answers "who can fix it", which is a different
+        // question and the one people get wrong -- they go looking for the
+        // game's publisher.
+        //
+        // Ours means the world AND the plugin are ours, so a bug is entirely
+        // ours to fix. Everything else wraps somebody else's world: we can
+        // still take the report, but nobody has promised it works.
+        bool oursEndToEnd = string.Equals(game.WorldBy, OurAuthor,
+                                          StringComparison.OrdinalIgnoreCase);
+        body.Children.Add(new Border
+        {
+            CornerRadius = new CornerRadius(3),
+            Padding = new Thickness(6, 1, 6, 2),
+            Margin = new Thickness(0, 4, 0, 0),
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Background = new SolidColorBrush(oursEndToEnd
+                ? Color.FromRgb(0x1A, 0x33, 0x28) : Color.FromRgb(0x24, 0x26, 0x33)),
+            Child = new TextBlock
+            {
+                Text = oursEndToEnd ? "✓ Supported here" : "Community integration",
+                FontSize = 9.5,
+                FontWeight = FontWeights.Bold,
+                Foreground = (Brush)FindResource(oursEndToEnd ? "BrushSuccess" : "BrushMuted"),
+            },
+            ToolTip = oursEndToEnd
+                ? "Both the Archipelago world and this plugin are ours, so "
+                + "anything wrong with it is ours to fix. Report it to us."
+                : $"The world was written by {game.WorldBy}; the plugin around "
+                + "it is ours. Neither the game's publisher nor the world's "
+                + "author supports this, and neither should be contacted about "
+                + "it — send the report to us instead.",
+        });
 
         body.Children.Add(new TextBlock
         {
