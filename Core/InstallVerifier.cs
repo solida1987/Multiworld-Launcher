@@ -34,8 +34,9 @@ public static class InstallVerifier
         [property: JsonPropertyName("size")]   long Size);
 
     private sealed record Manifest(
-        [property: JsonPropertyName("version")] string? Version,
-        [property: JsonPropertyName("files")]   List<ManifestFile>? Files);
+        [property: JsonPropertyName("version")]         string? Version,
+        [property: JsonPropertyName("version_display")] string? VersionDisplay,
+        [property: JsonPropertyName("files")]           List<ManifestFile>? Files);
 
     public enum Fault
     {
@@ -91,7 +92,11 @@ public static class InstallVerifier
         long BytesRead,
         IReadOnlyList<BadFile> Bad,
         string? ManifestVersion,
-        string? CouldNotRun)
+        string? CouldNotRun,
+        /// Set when the record was written for a DIFFERENT version than the
+        /// one installed. Everything below it is then measured against the
+        /// wrong yardstick, and saying "5 files are wrong" would be a lie.
+        string? StaleRecord = null)
     {
         /// Faults that mean something is actually wrong. A config the game
         /// rewrote is not damage, and counting it as such would make every
@@ -102,12 +107,14 @@ public static class InstallVerifier
         public IReadOnlyList<BadFile> Changed =>
             Bad.Where(b => b.Fault == Fault.ChangedSinceInstall).ToList();
 
-        public bool Healthy => CouldNotRun == null && Damage.Count == 0;
+        public bool Healthy =>
+            CouldNotRun == null && StaleRecord == null && Damage.Count == 0;
 
         /// One line for the log and the toast.
         public string Summary()
         {
             if (CouldNotRun != null) return CouldNotRun;
+            if (StaleRecord != null) return StaleRecord;
 
             string aside = Changed.Count == 0 ? ""
                 : $" ({Changed.Count} config or data file(s) have been changed since "
@@ -148,8 +155,14 @@ public static class InstallVerifier
     ///
     /// Never throws for a file's sake: an unreadable file is a finding, not a
     /// crash. It throws only if cancelled.
+    /// <param name="installedVersion">
+    /// What the game says it is. When this and the record disagree, the record
+    /// is stale and no file comparison from it means anything -- that is
+    /// reported instead of a list of "wrong" files that are in fact correct.
+    /// </param>
     public static async Task<Result> VerifyAsync(
         string gameDirectory,
+        string? installedVersion = null,
         IProgress<(int Pct, string Msg)>? progress = null,
         CancellationToken ct = default)
     {
@@ -172,6 +185,23 @@ public static class InstallVerifier
         if (files == null || files.Count == 0)
             return new Result(0, 0, Array.Empty<BadFile>(), manifest?.Version,
                 "The install manifest lists no files, so there is nothing to check.");
+
+        // Before reading a single byte: is this record even about this build?
+        //
+        // A tester saw "5 files are the wrong size" for five files that were
+        // perfectly correct — his install record was from an earlier version.
+        // Comparing against it produced five confident, wrong accusations.
+        string? recorded = manifest?.VersionDisplay ?? manifest?.Version;
+        if (!string.IsNullOrWhiteSpace(recorded)
+            && !string.IsNullOrWhiteSpace(installedVersion)
+            && !SameVersion(recorded!, installedVersion!))
+        {
+            return new Result(files.Count, 0, Array.Empty<BadFile>(), recorded, null,
+                $"This install's record was written for {recorded}, but the game "
+                + $"reports {installedVersion}. Nothing can be checked against it — "
+                + "the record has to be refreshed first. Updating or repairing the "
+                + "game rewrites it.");
+        }
 
         var bad = new List<BadFile>();
         long bytesRead = 0;
@@ -242,6 +272,12 @@ public static class InstallVerifier
 
         return new Result(files.Count, bytesRead, bad, manifest?.Version, null);
     }
+
+    /// "v3.8.6" and "3.8.6" are the same version written two ways, and a
+    /// false mismatch here would hide every real one behind a wrong warning.
+    private static bool SameVersion(string a, string b)
+        => a.Trim().TrimStart('v', 'V').Equals(b.Trim().TrimStart('v', 'V'),
+                                               StringComparison.OrdinalIgnoreCase);
 
     private static async Task<string> Sha256Async(string path, CancellationToken ct)
     {

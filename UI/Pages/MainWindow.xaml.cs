@@ -2498,8 +2498,7 @@ public partial class MainWindow : Window
                 "🔍  Verify files",
                 "Check every installed file against what was written at install "
                 + "time — finds damage a quick check cannot see",
-                owner => Dialogs.VerifyFilesDialog.ShowFor(
-                             owner, vp.DisplayName, SafeGameDir(vp))));
+                owner => Dialogs.VerifyFilesDialog.ShowFor(owner, vp)));
         }
 
         foreach (var cmd in commands)
