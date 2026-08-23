@@ -59,6 +59,21 @@ public static class BridgeRegistry
             && e.Bridge.IsReady
             && e.Bridge.GetUnmetRequirement() is null);
 
+    /// A FINISHED bridge for this protocol is installed -- the question a
+    /// readiness badge should ask, and deliberately weaker than CanServe.
+    ///
+    /// CanServe also demands the bridge could connect this instant. For an
+    /// attach-style bridge (PINE) that means PCSX2 is already running with a
+    /// game loaded, which before the player presses Play is never true -- so
+    /// asking CanServe on the game page would paint every PS2 game "not ready"
+    /// forever. Asking nothing at all was the other failure, and the one we
+    /// actually shipped: pcsx2-qt.exe sat in Emulators\ with no PINE extension
+    /// installed anywhere, and the page said READY TO PLAY for a game that had
+    /// nothing to start it with. Pressing Play did nothing, silently.
+    public static bool BridgeInstalled(string protocol)
+        => BuiltIn.Contains(protocol)
+        || (ByProtocol.TryGetValue(protocol, out var e) && e.Bridge.IsReady);
+
     public static IEmulatorBridge? Find(string protocol)
         => ByProtocol.TryGetValue(protocol, out var e) ? e.Bridge : null;
 

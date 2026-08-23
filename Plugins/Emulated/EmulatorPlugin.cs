@@ -98,6 +98,23 @@ public abstract class EmulatorPlugin : IGamePlugin
     /// (e.g. GameId "pokemon_emerald" → games/pokemon_emerald.lua).
     protected virtual string LuaModuleName => GameId;
 
+    /// TRUE when the game's WORLD ships its own Archipelago client
+    /// (worlds.LauncherComponents Component, Type.CLIENT) and that client —
+    /// not London — reads the emulator's memory and talks to the AP server.
+    ///
+    /// London's job then shrinks to what only London can do: verify the disc,
+    /// start the emulator through the installed bridge extension, and tell the
+    /// player which client to start. It must NOT open pipes, load a Lua map,
+    /// or connect to the slot — doing any of those would fight the world's
+    /// client over the same session. See docs/EXTERNAL_CLIENT_KIND.md in the
+    /// catalogue for the full contract. First user: Burnout 3 over PINE.
+    protected virtual bool WorldCarriesOwnClient => false;
+
+    /// The name the world registers its client under in the Archipelago
+    /// Launcher (e.g. "Burnout 3 Client"). Shown to the player; null falls
+    /// back to a generic phrase.
+    protected virtual string? WorldClientName => null;
+
     /// Which bridge extension starts this game and carries its checks.
     /// "bizhawk" for anything driven by the in-emulator Lua connector; a
     /// manifest-driven plugin overrides this from its own game.json, and a
@@ -149,8 +166,23 @@ public abstract class EmulatorPlugin : IGamePlugin
     /// appeared to do nothing. The ROM never moved.
     public bool    IsInstalled       => RomPath != null && File.Exists(RomPath);
 
-    /// The chosen backend's executable is where it should be.
-    public bool    EmulatorReady     => IsEmulatorPresent;
+    /// The chosen backend's executable is where it should be AND something is
+    /// installed that can drive it.
+    ///
+    /// ⚠ This used to be IsEmulatorPresent alone, and that half-answer is what
+    /// put a green "READY TO PLAY" on Burnout 3 while no PINE extension was
+    /// installed: PCSX2 was in Emulators\, so the exe check passed, and the
+    /// badge promised a launch that could not happen. An emulator nothing can
+    /// speak to is not readiness -- it is a program sitting in a folder.
+    public bool    EmulatorReady     => IsEmulatorPresent
+        && LauncherV2.Core.Extensions.BridgeRegistry.BridgeInstalled(ClientProtocol);
+
+    public string? BridgeProblem
+        => LauncherV2.Core.Extensions.BridgeRegistry.BridgeInstalled(ClientProtocol)
+            ? null
+            : LauncherV2.Core.Extensions.BridgeRegistry
+                .ExplainMissing(ClientProtocol, DisplayName)
+              ?? $"Nothing installed can carry checks for {DisplayName}.";
     public bool    IsRunning         { get; private set; }
 
     /// Returns the emulator directory (where BizHawk lives) as the game folder.
@@ -540,6 +572,17 @@ public abstract class EmulatorPlugin : IGamePlugin
             }
         }
 
+        // A world that ships its own client gets the shortest path of all:
+        // start the emulator via the bridge extension and stand aside. This
+        // branch sits BEFORE the dialect dispatch because none of the three
+        // connector paths below may run — each of them would start reading
+        // memory or opening pipes that the world's own client owns.
+        if (WorldCarriesOwnClient)
+        {
+            await LaunchForExternalClientAsync(launchRom, ct);
+            return;
+        }
+
         // §14: NWA backends (snes9x-emunwa) launch + bridge over TCP, not the
         // BizHawk Lua named pipes. Branch here so the proven pipe path below is
         // only ever reached by Pipe-dialect backends (BizHawk) — unchanged.
@@ -789,6 +832,84 @@ public abstract class EmulatorPlugin : IGamePlugin
             // The connect attempt below reports the real consequence.
             Trace($"could not enable Network Access in snes9x.conf: {ex.Message}");
         }
+    }
+
+    /// Launch for a world that carries its own client (WorldCarriesOwnClient).
+    ///
+    /// What this deliberately does NOT do: open pipes, load a Lua module,
+    /// connect NWA/SNI, or join the AP session as the game's slot. The world's
+    /// client does all of that, and a second reader on the same session is a
+    /// bug, not redundancy. London contributes the disc gate (already passed),
+    /// the emulator start, and an honest note about the one step that remains.
+    private async Task LaunchForExternalClientAsync(string launchRom, CancellationToken ct)
+    {
+        string emulatorsRoot = Path.Combine(AppContext.BaseDirectory, "Emulators");
+        var bridge = LauncherV2.Core.Extensions.BridgeRegistry.Find(ClientProtocol);
+        if (bridge is null)
+            throw new InvalidOperationException(
+                LauncherV2.Core.Extensions.BridgeRegistry
+                    .ExplainMissing(ClientProtocol, DisplayName)
+                ?? $"No bridge extension is installed for \"{ClientProtocol}\".");
+
+        // The bridge's own readiness text (PCSX2 not running is fine here —
+        // we are about to start it — but a missing BIOS is not, and the
+        // bridge's message explains that better than a generic failure).
+        // Only requirements about FILES block the launch; "not running yet"
+        // is exactly the state this method exists to fix.
+        string? unmet = bridge.GetUnmetRequirement();
+        if (unmet != null && !unmet.Contains("not answering")
+                          && !unmet.Contains("could not be reached")
+                          && !unmet.Contains("no game is loaded"))
+            throw new InvalidOperationException(unmet);
+
+        var plan = bridge.GetLaunchPlan(
+            new LauncherV2.Core.Extensions.BridgeContext(
+                GameId, RomSystem, launchRom, EmulatorDirectory,
+                ScriptPath: "",                        // no Lua on this path
+                ConfigPath: "",
+                Fullscreen: StartFullscreen),
+            emulatorsRoot);
+        if (plan is null)
+            throw new InvalidOperationException(
+                $"{bridge.DisplayName} did not say what to start. Check that "
+              + $"your copy is in Emulators\\ as its note describes.");
+
+        var psi = new ProcessStartInfo
+        {
+            FileName         = plan.ExePath,
+            Arguments        = plan.Arguments,
+            WorkingDirectory = plan.WorkingDirectory,
+            UseShellExecute  = false,
+        };
+        foreach (var kv in plan.Environment ?? new Dictionary<string, string>())
+            psi.EnvironmentVariables[kv.Key] = kv.Value;
+
+        var proc = Process.Start(psi)
+            ?? throw new InvalidOperationException($"Failed to start {bridge.DisplayName}.");
+        _emuProcess = proc;
+        IsRunning = true;
+        ConnectorAttached = false;      // truthfully: London attaches nothing
+        proc.EnableRaisingEvents = true;
+        proc.Exited += (_, _) =>
+        {
+            IsRunning = false;
+            int code = 0; try { code = proc.ExitCode; } catch { /* gone */ }
+            GameExited?.Invoke(code);
+        };
+
+        string clientName = WorldClientName ?? $"the {DisplayName} client";
+        Trace($"{bridge.DisplayName} started (pid {proc.Id}) — world carries its "
+            + $"own client ({clientName}); London attaches nothing on purpose");
+
+        // The one step London cannot do for them, said plainly instead of
+        // discovered as an hour of silence in a multiworld.
+        SessionRomNote ??=
+            $"[{DisplayName}] The game is running. This world talks to " +
+            $"Archipelago through its own client, not through this launcher: " +
+            $"open the Archipelago Launcher and start \"{clientName}\", then " +
+            $"connect it to your session. Checks appear there, not here.";
+
+        await Task.CompletedTask;
     }
 
     private async Task LaunchViaNwaAsync(EmulatorBackend backend, string launchRom,

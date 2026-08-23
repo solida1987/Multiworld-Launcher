@@ -151,19 +151,42 @@ public static class EmulatorBackends
                 PinnedTag:    "2.11.1"),
         },
 
-        // PCSX2 — dedicated PS1/PS2 emulator.
-        // PSX games (MediEvil) show "PCSX2 (coming soon)" honestly and the user
-        // understands BizHawk is the current path for PSX AP play.
-        // will flip true once a Lua/NWA bridge is ported to the PCSX2 scripting
-        // interface (PINE protocol / QMT).
+        // PCSX2 — the PlayStation 2 emulator.
+        //
+        // ⚠ This entry used to say Systems = ["PSX"]. That was wrong twice over:
+        // modern PCSX2 does not emulate the PS1 at all, and PSX titles run under
+        // BizHawk here. PS2 was simply missing from the catalogue.
+        //
+        // The bridge now exists as an extension — PINE, PCSX2's own memory
+        // interface, no in-emulator script needed — and is proven against a
+        // stand-in written from the emulator's own PINE.cpp
+        // (extensions/pcsx2/proof, negative-tested). BridgeReady stays FALSE
+        // until it has carried a real check out of a real game on a real PCSX2,
+        // which is the same line IEmulatorBridge.IsReady draws. The SNI bridge
+        // already taught this house the difference between code that compiles
+        // and a bridge that works.
         new EmulatorBackend
         {
             Id            = "pcsx2",
             DisplayName   = "PCSX2",
-            Systems       = new[] { "PSX" },
-            BridgeReady   = false,
+            Systems       = new[] { "PS2" },
+            // Transport proven live 23 Aug 2026: PCSX2 v2.6.3, NFSU2 booted
+            // from CHD, MsgTitle answered, 256-byte read/write/restore and a
+            // 5000-byte chunked read all passed (extensions/pcsx2/proof
+            // --live). LiveVerified stays false until a real game carries a
+            // real check through a session -- same line snes9x stands behind.
+            BridgeReady   = true,
+            LiveVerified  = false,
             HomepageUrl   = "https://pcsx2.net",
             ExeName       = "pcsx2-qt.exe",
+            Source = new LauncherV2.Core.Emulators.EmulatorSource(
+                Author:       "the PCSX2 team",
+                Licence:      "LGPL-3.0-or-later",
+                LicenceUrl:   "https://github.com/PCSX2/pcsx2/blob/master/COPYING.LGPL",
+                DownloadPage: "https://github.com/PCSX2/pcsx2/releases",
+                Owner:        "PCSX2",
+                Repo:         "pcsx2",
+                AssetPattern: "windows-x64-Qt.7z"),
         },
 
         // snes9x — the literal §14 Discord request ("SNES: BizHawk or snes9x").

@@ -45,7 +45,16 @@ public sealed record StoreGame(
     [property: JsonPropertyName("banner")]         string? Banner = null,
     /// Set when this entry is the same game as another entry -- a second
     /// integration, not a different game. Points at the primary entry's id.
-    [property: JsonPropertyName("variant_of")]     string? VariantOf = null);
+    [property: JsonPropertyName("variant_of")]     string? VariantOf = null,
+    /// Which of the store's three lists this game belongs to: "stable",
+    /// "unstable" or "adult". Assigned by the catalogue build from the
+    /// community games sheet and content_policy.json -- each decision there
+    /// carries its own source -- never by the launcher guessing. "adult" is
+    /// hidden until the player confirms they are 18 or older.
+    [property: JsonPropertyName("section")]        string Section = "stable",
+    /// The words behind the section: "Stable", "Unstable", "Broken on Main",
+    /// "Proven in London" (our own live test register), or "Unknown".
+    [property: JsonPropertyName("stability")]      string Stability = "Unknown");
 
 public sealed record StoreIndex(
     [property: JsonPropertyName("count")]     int Count,
@@ -73,6 +82,25 @@ public static class StoreCatalog
     /// only when there has never been a good copy.
     public static async Task<StoreIndex?> FetchAsync(CancellationToken ct = default)
     {
+        // A store.json placed beside the launcher wins over the published one.
+        // This is how an UNPUBLISHED catalogue build gets looked at in the
+        // test install before anyone decides to ship it: nothing goes to
+        // GitHub, the file goes in Data\, and this install shows it. Deleting
+        // the file puts the launcher back on the published truth.
+        try
+        {
+            string local = Path.Combine(AppDomain.CurrentDomain.BaseDirectory,
+                                        "Data", "store_override.json");
+            if (File.Exists(local))
+            {
+                var over = JsonSerializer.Deserialize<StoreIndex>(
+                    File.ReadAllText(local));
+                if (over is { Games.Length: > 0 })
+                    return over;
+            }
+        }
+        catch { /* an unreadable override must not take the store down */ }
+
         try
         {
             using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(25) };

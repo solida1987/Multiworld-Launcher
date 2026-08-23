@@ -233,16 +233,35 @@ public sealed class ApJoinSession
             // question "does the store hold this seed's patch for this slot?"
             // can even be asked. Same reasoning as the library Play button --
             // asked ONCE, because the import is stored against (seed, slot).
-            // A declined ask still launches: an unpatched game that runs is
-            // the plugin's SessionRomNote to explain, not a failed join.
+            //
+            // ⚠ A DECLINED ASK NOW STOPS THE JOIN. It used to launch anyway --
+            // the return value of ask() was discarded on this very line -- on
+            // the theory that an unpatched game that runs beats no game at all,
+            // with the plugin's SessionRomNote left to explain. It does not:
+            // the unpatched game sends nothing and receives nothing while
+            // looking completely normal, so the player finds out an evening
+            // later. If they cannot produce the patch, the honest outcome is
+            // that the join does not happen.
             if (askForPatch
                 && client.SeedName is { Length: > 0 } seedName
                 && plugin.GetUnmetSeedPatch(seedName, slotName) is { } patchReq
                 && AskForSeedPatch is { } ask)
             {
                 session.Set(Stage.Connecting, "This seed needs its patch file…");
-                try { await ask(plugin, patchReq).ConfigureAwait(false); }
-                catch (Exception) { /* the prompt failing must not kill the join */ }
+                bool got;
+                // A prompt that THROWS is our bug, not the player's answer, and
+                // must not read as "they said no" -- carry on in that case.
+                try { got = await ask(plugin, patchReq).ConfigureAwait(false); }
+                catch (Exception) { got = true; }
+
+                if (!got)
+                {
+                    session.End("Cancelled — the seed's patch was not provided");
+                    await client.DisconnectAsync().ConfigureAwait(false);
+                    return (null, $"{plugin.DisplayName} needs this seed's patch "
+                                + "file before it can join. Nothing was started. "
+                                + "Press Play again once you have it.");
+                }
             }
 
             // 5. The game itself.

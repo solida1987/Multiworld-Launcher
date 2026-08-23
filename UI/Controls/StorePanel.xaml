@@ -95,11 +95,62 @@
                                        Text="Ask us on Discord  →"/>
                         </StackPanel>
                     </Border>
+
+                    <!--  The four lists. Separate on purpose — they answer four
+                          different questions and mixing them made every answer
+                          mushy: what is ours alone, what works, what is known
+                          shaky, and what an adult has to ask to see. -->
+                    <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                        <Button x:Name="BtnSecExclusive" Content="London Exclusive"
+                                Style="{StaticResource BtnSecondaryStyle}"
+                                Padding="14,6" Margin="0,0,8,0" Click="Section_Click"
+                                ToolTip="Worlds made by us or our community — they exist nowhere else"/>
+                        <Button x:Name="BtnSecStable" Content="Stable"
+                                Style="{StaticResource BtnSecondaryStyle}"
+                                Padding="14,6" Margin="0,0,8,0" Click="Section_Click"
+                                ToolTip="The community games sheet rates these worlds Stable"/>
+                        <Button x:Name="BtnSecUnstable" Content="Unstable"
+                                Style="{StaticResource BtnSecondaryStyle}"
+                                Padding="14,6" Margin="0,0,8,0" Click="Section_Click"
+                                ToolTip="Rated Unstable or Broken by the sheet, or simply unproven — expect rough edges"/>
+                        <Button x:Name="BtnSecAdult" Content="18+"
+                                Style="{StaticResource BtnSecondaryStyle}"
+                                Padding="14,6" Click="Section_Click"
+                                ToolTip="Games with mature content ratings. Hidden until you confirm you are 18 or older"/>
+                    </StackPanel>
                 </StackPanel>
             </Border>
 
             <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="18,0,18,18">
                 <StackPanel>
+                    <!--  The 18+ list's door. Shown INSTEAD of the cards until
+                          the player states they are an adult; the statement is
+                          theirs to make and is remembered with its date. -->
+                    <Border x:Name="PanelAdultGate" Visibility="Collapsed"
+                            Margin="0,24,0,0" MaxWidth="640"
+                            HorizontalAlignment="Center"
+                            Background="#1B1017" BorderBrush="#4A1830"
+                            BorderThickness="1" CornerRadius="6" Padding="22,18,22,20">
+                        <StackPanel>
+                            <TextBlock FontSize="15" FontWeight="Bold"
+                                       Foreground="{StaticResource BrushText}"
+                                       Text="This list is for adults"/>
+                            <TextBlock Margin="0,10,0,0" FontSize="12" LineHeight="19"
+                                       TextWrapping="Wrap"
+                                       Foreground="{StaticResource BrushText}"
+                                       Text="The games behind this screen carry mature content ratings — violence, gore, horror, crime — from their own publishers and rating boards. Games that are primarily sexual content are not in this launcher at all, on any list."/>
+                            <TextBlock Margin="0,8,0,0" FontSize="12" LineHeight="19"
+                                       TextWrapping="Wrap"
+                                       Foreground="{StaticResource BrushText}"
+                                       Text="By continuing you state that you are 18 years of age or older, and that showing you this list is legal where you live. This is your statement, not our verification — and it is remembered, so you will not be asked again."/>
+                            <Button x:Name="BtnAdultConfirm" Margin="0,14,0,0"
+                                    HorizontalAlignment="Left" Padding="16,8"
+                                    Style="{StaticResource BtnSecondaryStyle}"
+                                    Content="I am 18 or older — show the list"
+                                    Click="BtnAdultConfirm_Click"/>
+                        </StackPanel>
+                    </Border>
+
                     <WrapPanel x:Name="PanelGames"/>
                     <TextBlock x:Name="TxtStoreEmpty" Visibility="Collapsed"
                                Margin="0,60,0,0" HorizontalAlignment="Center"

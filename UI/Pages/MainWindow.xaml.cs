@@ -1127,8 +1127,10 @@ public partial class MainWindow : Window
     // RomRequired → "Install ROM…" (install ends in the ROM picker)
     // AutoMod → "Find original game…" until the user located their own
     // install, then "Install mod"
+    // ManualSetup → "Set up manually…" (the launcher installs what it can —
+    // usually the world file — and opens the setup guide for the rest)
     // The label is a promise about what the click does — BtnPlay_Click routes
-    // the AutoMod locate step accordingly.
+    // the AutoMod locate step and the ManualSetup guide step accordingly.
     private string NotInstalledActionLabel(IGamePlugin plugin)
         => EffectiveInstallCapability(plugin) switch
         {
@@ -1136,20 +1138,22 @@ public partial class MainWindow : Window
             InstallCapability.AutoMod     => OriginalInstallRegistered(plugin)
                                                  ? "Install mod"
                                                  : "Find original game…",
+            InstallCapability.ManualSetup => "Set up manually…",
             _                             => "Install",
         };
 
-    // Capability from the catalog entry when one matches this plugin;
-    // otherwise fall back to the plugin type (emulated games need a ROM,
-    // everything else with a plugin installs itself).
-    // can ALWAYS be installed by the launcher, so ManualSetup never applies
-    // here — map anything unknown to AutoInstall rather than dead-ending.
+    // The plugin's own answer, taken at its word.
+    //
+    // This used to promote ManualSetup to AutoInstall, on the theory that "a
+    // game the launcher is showing is a game the launcher can install". That
+    // theory died with the PC catalogue: a game whose mod lives on
+    // Thunderstore, or whose setup is a page of the author's own steps, is on
+    // the shelf AND not installable by us — and relabelling it "Install" made
+    // the button promise the whole job while the code did at most half. The
+    // click still runs the install (whatever part of it the plugin can do);
+    // only the WORDS stop overclaiming.
     private InstallCapability EffectiveInstallCapability(IGamePlugin plugin)
-        // The plugin's own answer. ManualSetup is never right here -- a game
-        // the launcher is showing is a game the launcher can install.
-        => plugin.InstallCapability == InstallCapability.ManualSetup
-               ? InstallCapability.AutoInstall
-               : plugin.InstallCapability;
+        => plugin.InstallCapability;
 
     // True when the user already located a valid original install for this
     // AutoMod game (and the folder still exists).
@@ -1194,9 +1198,13 @@ public partial class MainWindow : Window
     // Asked once per (seed, slot) — the plugin stores the answer, so joining
     // the same seed again never asks.
     //
-    // Declining is allowed and returns false: the game still starts, just
-    // unpatched and silent, which is what the caller then logs. Refusing to
-    // launch would strand anyone whose patch is momentarily elsewhere.
+    // ⚠ THERE IS NO "PLAY WITHOUT IT". The second button used to say exactly
+    // that, on the theory that someone whose patch is momentarily elsewhere
+    // should not be stranded. But the unpatched game is not a lesser version
+    // of the multiworld -- it is a different game that sends nothing, receives
+    // nothing, and looks fine while doing it. Offering it as a choice invites
+    // the player to spend an evening in a session that was never connected.
+    // The honest pair is: find the file, or come back when you have it.
     private bool EnsureSeedPatch(IGamePlugin plugin, SeedPatchRequest req)
     {
         // Most games hand out a patch; a few hand out the finished, randomized
@@ -1219,8 +1227,7 @@ public partial class MainWindow : Window
                 "Your own game file is never modified; the randomized copy is a " +
                 "separate file in the launcher's library.";
 
-            if (!ConfirmDialog.Show(this, title, body,
-                                    button, "Play without it"))
+            if (!ConfirmDialog.Show(this, title, body, button, "Cancel"))
                 return false;
 
             var dlg = new Microsoft.Win32.OpenFileDialog
@@ -1838,11 +1845,21 @@ public partial class MainWindow : Window
                         b => string.Equals(b.Id, plugin.SelectedEmulatorId,
                                            StringComparison.OrdinalIgnoreCase))
                     ?.DisplayName ?? "the chosen emulator";
-                AddOverviewBadge($"{emuName.ToUpperInvariant()} NOT FOUND",
-                    Color.FromRgb(0xF5, 0x9E, 0x0B),
-                    $"{plugin.DisplayName} is set to launch on {emuName}, which is not " +
-                    "on this machine. Pick another with the button next to Play, or put " +
-                    "the emulator in its folder — the game itself is installed.");
+
+                // Two different missing things wear the same amber pill, and
+                // saying the wrong one sends the player looking in the wrong
+                // place. "PCSX2 NOT FOUND" is a lie when pcsx2-qt.exe is
+                // sitting right there and what is actually absent is the
+                // bridge extension that knows how to talk to it.
+                if (plugin.BridgeProblem is { } bridgeProblem)
+                    AddOverviewBadge("BRIDGE NOT INSTALLED",
+                        Color.FromRgb(0xF5, 0x9E, 0x0B), bridgeProblem);
+                else
+                    AddOverviewBadge($"{emuName.ToUpperInvariant()} NOT FOUND",
+                        Color.FromRgb(0xF5, 0x9E, 0x0B),
+                        $"{plugin.DisplayName} is set to launch on {emuName}, which is not " +
+                        "on this machine. Pick another with the button next to Play, or put " +
+                        "the emulator in its folder — the game itself is installed.");
             }
 
             bool capShown = false;
@@ -2113,11 +2130,12 @@ public partial class MainWindow : Window
     private void SyncOverviewPlayButton()
     {
         string label = BtnPlay.Content as string ?? "Play";
-        // "Find original game…" (§10 AutoMod) is a locate step, not a launch —
-        // no ▶ glyph on that one.
+        // "Find original game…" (§10 AutoMod) is a locate step and "Set up
+        // manually…" opens a guide — neither is a launch, so no ▶ glyph.
         BtnOverviewPlay.Content =
-              label.StartsWith("Stop", StringComparison.Ordinal) ? $"■  {label}"
-            : label.StartsWith("Find", StringComparison.Ordinal) ? label
+              label.StartsWith("Stop", StringComparison.Ordinal)   ? $"■  {label}"
+            : label.StartsWith("Find", StringComparison.Ordinal)   ? label
+            : label.StartsWith("Set up", StringComparison.Ordinal) ? label
             : $"▶  {label}";
         BtnOverviewPlay.IsEnabled = BtnPlay.IsEnabled;
         BtnOverviewPlay.ToolTip   = BtnPlay.ToolTip;
@@ -3963,8 +3981,8 @@ public partial class MainWindow : Window
                 "The launcher installs the emulator and the Archipelago mod — you supply the game ROM.",
                 Color.FromRgb(0xF5, 0x9E, 0x0B)),
             _ => (
-                "Manual setup required",
-                "The launcher cannot automate this game yet — use the install guide and links to set it up yourself.",
+                "Partly manual setup",
+                "The launcher installs what it can (usually the Archipelago world) and shows the author's own steps for the rest — part of the setup is done by hand.",
                 Color.FromRgb(0x8A, 0x90, 0xA8)),
         };
 
@@ -6872,11 +6890,24 @@ public partial class MainWindow : Window
             RefreshWelcomeChecklist();
             RefreshOverview(plugin);   // installed-state badges + action row
             SetStatus("Install complete.");
-            ToastService.Show(
-                wasInstalled
-                    ? $"Game updated to {plugin.InstalledVersion ?? "latest"}"
-                    : $"Game installed — {plugin.InstalledVersion ?? "latest"}",
-                plugin.DisplayName, ToastKind.Success);
+            // "Game installed" must not outrun the checker: a PC game whose
+            // mod could not be placed automatically is installed-with-one-
+            // step-left, and the toast is the first thing the player reads.
+            var stillMissing = plugin.IsInstalled
+                ? plugin.DetectComponents()
+                        .Where(c => c.Need == ComponentNeed.Required && !c.Present)
+                        .ToList()
+                : new List<GameComponent>();
+            if (stillMissing.Count > 0)
+                ToastService.Show("Installed — one step left",
+                    $"{plugin.DisplayName}: {stillMissing[0].Name} is still missing. "
+                  + "The game's page shows what to do.", ToastKind.Warning);
+            else
+                ToastService.Show(
+                    wasInstalled
+                        ? $"Game updated to {plugin.InstalledVersion ?? "latest"}"
+                        : $"Game installed — {plugin.InstalledVersion ?? "latest"}",
+                    plugin.DisplayName, ToastKind.Success);
             success = true;
 
             // Add to library on first install (not on updates).
@@ -7174,8 +7205,24 @@ public partial class MainWindow : Window
         // A failed/cancelled install must not fall through to launch (P2-11/P2-3).
         if (!_selectedPlugin.IsInstalled)
         {
+            // "Set up manually…" promised a setup, not a launch. Install what
+            // the plugin can (usually the world file), then open its guided
+            // setup and STOP — auto-launching a game whose setup is by hand
+            // would connect an AP session for a game that cannot answer yet.
+            bool manualSetup =
+                EffectiveInstallCapability(_selectedPlugin) == InstallCapability.ManualSetup;
+
             bool installed = await RunInstallAsync(_selectedPlugin);
             if (!installed || !_selectedPlugin.IsInstalled) return;
+
+            if (manualSetup)
+            {
+                if (_selectedPlugin.HasComponentSetup)
+                    _selectedPlugin.ShowComponentSetup(this);
+                RefreshOverview(_selectedPlugin);
+                RefreshButtons(_selectedPlugin);
+                return;
+            }
         }
 
         // The install dir must contain the copied original files before launch.

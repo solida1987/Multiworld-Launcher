@@ -275,6 +275,7 @@ public sealed class SafePluginProxy : IGamePlugin
     public bool RomReady => Get<bool>(() => _inner.RomReady, false);
 
     public bool EmulatorReady => Get<bool>(() => _inner.EmulatorReady, false);
+    public string? BridgeProblem => Get<string?>(() => _inner.BridgeProblem, null);
 
     public IReadOnlyList<EmulatorBackend> AvailableBackends()
         => Get<IReadOnlyList<EmulatorBackend>>(

@@ -69,6 +69,19 @@ public sealed class LauncherSettings
     [JsonPropertyName("game_art_consent")]
     public bool? GameArtConsent { get; set; } = null;
 
+    // The store's 18+ list: has the player confirmed they are an adult?
+    // False until they press the button; the list stays hidden until then.
+    //
+    // This is an honesty screen, not verification -- anyone can press a
+    // button, exactly as on every age-gated storefront. What it does is make
+    // the claim THEIRS: the launcher never showed age-gated content to anyone
+    // who did not first state they are 18. The date records when they did.
+    [JsonPropertyName("adult_content_confirmed")]
+    public bool AdultContentConfirmed { get; set; } = false;
+
+    [JsonPropertyName("adult_content_confirmed_at")]
+    public string AdultContentConfirmedAt { get; set; } = "";
+
     // Where the Archipelago engine lives, when the player pointed us at one.
     // Empty means "look in the usual places" -- a nominated path always wins,
     // because a machine can hold more than one install and guessing between

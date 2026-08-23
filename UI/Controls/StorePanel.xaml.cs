@@ -31,6 +31,11 @@ public partial class StorePanel : System.Windows.Controls.UserControl
     private readonly List<CheckBox> _platformBoxes = new();
     private readonly List<CheckBox> _genreBoxes = new();
     private bool _coversAllowed;
+
+    /// Which of the four lists is open: "exclusive", "stable", "unstable" or
+    /// "adult". They are separate lists rather than a filter because they
+    /// answer four different questions, and the 18+ one has a door.
+    private string _section = "stable";
     private static readonly Dictionary<string, BitmapImage> _coverCache = new();
 
     private static string CoverCacheDir => Path.Combine(
@@ -147,22 +152,82 @@ public partial class StorePanel : System.Windows.Controls.UserControl
         _ = LoadAsync();
     }
 
+    // ------------------------------------------------------------- sections
+
+    private void Section_Click(object sender, RoutedEventArgs e)
+    {
+        _section = ReferenceEquals(sender, BtnSecExclusive) ? "exclusive"
+                 : ReferenceEquals(sender, BtnSecUnstable)  ? "unstable"
+                 : ReferenceEquals(sender, BtnSecAdult)     ? "adult"
+                 :                                            "stable";
+        RenderCards();
+    }
+
+    /// The player's statement, made once and remembered with its date. It is
+    /// an honesty screen, not verification — what matters is that the list was
+    /// never shown to anyone who had not first made the claim themselves.
+    private void BtnAdultConfirm_Click(object sender, RoutedEventArgs e)
+    {
+        var s = SettingsStore.Load();
+        s.AdultContentConfirmed = true;
+        s.AdultContentConfirmedAt = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm 'UTC'");
+        SettingsStore.Save(s);
+        RenderCards();
+    }
+
+    private void PaintSectionButtons()
+    {
+        foreach (var (btn, name) in new[] {
+            (BtnSecExclusive, "exclusive"), (BtnSecStable, "stable"),
+            (BtnSecUnstable, "unstable"),   (BtnSecAdult, "adult") })
+        {
+            btn.FontWeight = name == _section ? FontWeights.Bold : FontWeights.Normal;
+            btn.Opacity    = name == _section ? 1.0 : 0.65;
+        }
+    }
+
     // ------------------------------------------------------------------ cards
+
+    private static readonly Dictionary<string, string> SectionLabel = new()
+    {
+        ["exclusive"] = "London Exclusive",
+        ["stable"]    = "Stable",
+        ["unstable"]  = "Unstable",
+        ["adult"]     = "18+",
+    };
 
     private void RenderCards()
     {
         PanelGames.Children.Clear();
+        PaintSectionButtons();
         if (_index == null) return;
 
-        var shown = StoreCatalog.Filter(_index.Games, TxtSearch.Text,
+        // The 18+ list's door: until the player has stated they are an adult,
+        // the section shows the statement instead of a single card. Nothing is
+        // rendered behind it — a gate whose content is merely covered up is a
+        // gate only until the first screen-reader or resize.
+        bool gated = _section == "adult" && !SettingsStore.Load().AdultContentConfirmed;
+        PanelAdultGate.Visibility = gated ? Visibility.Visible : Visibility.Collapsed;
+        if (gated)
+        {
+            TxtStoreCount.Text = "Plugin Library — 18+";
+            TxtStoreEmpty.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        var inSection = _index.Games.Where(g => g.Section == _section).ToArray();
+        var shown = StoreCatalog.Filter(inSection, TxtSearch.Text,
                                         Ticked(_platformBoxes), Ticked(_genreBoxes));
         if (ChkTestedOnly.IsChecked == true)
             shown = shown.Where(g => g.Tested).ToList();
 
-        TxtStoreCount.Text = shown.Count == _index.Games.Length
-            ? $"Plugin Library — {_index.Games.Length} games"
-            : $"Plugin Library — {shown.Count} of {_index.Games.Length} games";
-        TxtStoreEmpty.Text = "Nothing matches those filters.";
+        string label = SectionLabel.GetValueOrDefault(_section, _section);
+        TxtStoreCount.Text = shown.Count == inSection.Length
+            ? $"Plugin Library — {label}: {inSection.Length} games"
+            : $"Plugin Library — {label}: {shown.Count} of {inSection.Length} games";
+        TxtStoreEmpty.Text = inSection.Length == 0
+            ? "Nothing in this list yet."
+            : "Nothing matches those filters.";
         TxtStoreEmpty.Visibility = shown.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
 
         foreach (var game in shown)

@@ -343,6 +343,13 @@ public interface IGamePlugin
     /// cannot fix. A missing emulator is its own problem with its own answer.
     bool EmulatorReady => true;
 
+    /// Why nothing can drive this game's emulator, in words for the player.
+    /// Null when a finished bridge for its protocol is installed.
+    ///
+    /// The protocol itself stays private to the plugin -- the UI has no
+    /// business knowing the word "pine". It needs the answer, not the key.
+    string? BridgeProblem => null;
+
     /// Backends this game can run on, in the order they should be offered.
     /// Empty means "not an emulated game" -- it never means "no choice".
     IReadOnlyList<EmulatorBackend> AvailableBackends()
