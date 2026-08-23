@@ -300,6 +300,45 @@ public static class EmulatorBackends
                 PinnedTag:    "1.63-sa1"),
         },
 
+        // Citron — Nintendo Switch. A LAUNCHER and nothing more: the one
+        // Switch world in the catalogue (Super Mario Odyssey) puts a mod
+        // INSIDE the game that connects out to its own client, so no memory
+        // bridge exists or is claimed. London's part ends when the game is
+        // running with the mod folder in place.
+        //
+        // Why Citron and not Ryujinx: Ryujinx's repositories are gone —
+        // ryujinx-mirror/ryujinx is DMCA-blocked by Nintendo (March 2025,
+        // confirmed via the API's 451 response). Citron is the fork that is
+        // alive: GPL-3.0 by its own LICENSE file, Windows builds on every
+        // release, pushed to the week this entry was written.
+        new EmulatorBackend
+        {
+            Id            = "citron",
+            DisplayName   = "Citron",
+            Systems       = new[] { "SWITCH", "Switch" },
+            // No bridge will ever be needed: the game mod does the talking.
+            BridgeReady   = true,
+            LiveVerified  = false,
+            HomepageUrl   = "https://citron-neo.org/",
+            ExeName       = "citron.exe",
+            // ⚠ The player must supply their own Switch firmware and keys, as
+            // with every Switch emulator. The launcher fetches only the
+            // emulator itself, from its own release, after the player has
+            // seen who wrote it and under what terms.
+            Source = new LauncherV2.Core.Emulators.EmulatorSource(
+                Author:       "the Citron project",
+                Licence:      "GPL-3.0",
+                LicenceUrl:   "https://github.com/citron-neo/emulator/blob/master/LICENSE.txt",
+                DownloadPage: "https://github.com/citron-neo/emulator/releases",
+                Owner:        "citron-neo",
+                Repo:         "emulator",
+                // Their releases are date-tagged nightlies with a hash in the
+                // asset name, so the pattern must wildcard the middle. msvc is
+                // the conventional Windows build; clangtron is their
+                // experimental one.
+                AssetPattern: "Citron-windows-nightly-*-x64-msvc.zip"),
+        },
+
         // SNI — not an emulator but the SNES community's bridge program: it
         // attaches to snes9x-emunwa, RetroArch, or real hardware (FX Pak Pro)
         // and serves their memory over one protocol. Picking it means "I run my

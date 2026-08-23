@@ -30,6 +30,7 @@ public partial class StorePanel : System.Windows.Controls.UserControl
     private StoreIndex? _index;
     private readonly List<CheckBox> _platformBoxes = new();
     private readonly List<CheckBox> _genreBoxes = new();
+    private readonly List<CheckBox> _modKindBoxes = new();
     private bool _coversAllowed;
 
     /// Which of the four lists is open: "exclusive", "stable", "unstable" or
@@ -80,8 +81,10 @@ public partial class StorePanel : System.Windows.Controls.UserControl
     {
         PanelPlatforms.Children.Clear();
         PanelGenres.Children.Clear();
+        PanelModKinds.Children.Clear();
         _platformBoxes.Clear();
         _genreBoxes.Clear();
+        _modKindBoxes.Clear();
         if (_index == null) return;
 
         CheckBox Make(string label, StackPanel host, List<CheckBox> track)
@@ -102,7 +105,25 @@ public partial class StorePanel : System.Windows.Controls.UserControl
 
         foreach (string p in _index.Platforms) Make(p, PanelPlatforms, _platformBoxes);
         foreach (string g in _index.Genres)    Make(g, PanelGenres, _genreBoxes);
+
+        // Fixed, not derived from what happens to be in the catalogue: the
+        // four boxes must be there before the first fan game is, or the filter
+        // appears the day a game does and nobody knows it was ever missing.
+        // The label is for the player; Tag carries the value the data uses.
+        foreach (var (val, label) in new[] {
+                     ("official", "Commercial release"),
+                     ("rom_hack", "ROM hack"),
+                     ("fan_game", "Fan game"),
+                     ("fan_port", "Fan port") })
+            Make(label, PanelModKinds, _modKindBoxes).Tag = val;
     }
+
+    /// Ticked boxes by the VALUE behind them, not the words on them. The
+    /// player reads "ROM hack"; the data says "rom_hack".
+    private static List<string> TickedTags(IEnumerable<CheckBox> boxes)
+        => boxes.Where(b => b.IsChecked == true)
+                .Select(b => (string)b.Tag)
+                .ToList();
 
     private static List<string> Ticked(IEnumerable<CheckBox> boxes)
         => boxes.Where(b => b.IsChecked == true)
@@ -142,7 +163,8 @@ public partial class StorePanel : System.Windows.Controls.UserControl
     {
         TxtSearch.Text = "";
         ChkTestedOnly.IsChecked = false;
-        foreach (var b in _platformBoxes.Concat(_genreBoxes)) b.IsChecked = false;
+        foreach (var b in _platformBoxes.Concat(_genreBoxes).Concat(_modKindBoxes))
+            b.IsChecked = false;
         RenderCards();
     }
 
@@ -217,7 +239,8 @@ public partial class StorePanel : System.Windows.Controls.UserControl
 
         var inSection = _index.Games.Where(g => g.Section == _section).ToArray();
         var shown = StoreCatalog.Filter(inSection, TxtSearch.Text,
-                                        Ticked(_platformBoxes), Ticked(_genreBoxes));
+                                        Ticked(_platformBoxes), Ticked(_genreBoxes),
+                                        null, TickedTags(_modKindBoxes));
         if (ChkTestedOnly.IsChecked == true)
             shown = shown.Where(g => g.Tested).ToList();
 
@@ -233,6 +256,31 @@ public partial class StorePanel : System.Windows.Controls.UserControl
         foreach (var game in shown)
             PanelGames.Children.Add(BuildCard(game));
     }
+
+
+    /// The word for the card. null means a commercial release, which needs no
+    /// badge -- every game without one is the published article.
+    private static string? ModKindLabel(string? kind) => kind switch
+    {
+        "rom_hack" => "ROM hack",
+        "fan_game" => "Fan game",
+        "fan_port" => "Fan port",
+        _          => null,
+    };
+
+    private static string ModKindHelp(string? kind) => kind switch
+    {
+        "rom_hack" => "A modified version of the original cartridge. You supply "
+                    + "the original game; the hack is applied to your own copy. "
+                    + "It runs on the same console and needs the same emulator.",
+        "fan_game" => "Not a commercial release -- built by fans, from scratch or "
+                    + "on someone else's engine. It is free to download from its "
+                    + "own project, and its authors, not the publisher, made it.",
+        "fan_port" => "The original game rebuilt to run natively, usually from a "
+                    + "decompilation. It is the same game; you still supply your "
+                    + "own copy of it for the port to use.",
+        _          => "",
+    };
 
     private UIElement BuildCard(StoreGame game)
     {
@@ -316,6 +364,31 @@ public partial class StorePanel : System.Windows.Controls.UserControl
                 + "It may work perfectly — it just has not been verified.",
         };
         body.Children.Add(badge);
+
+        // Is this the game on the box, or somebody's remake of it? A ROM hack
+        // of Super Mario 64 is still a Nintendo 64 game and stays in that
+        // filter -- but a player who searches for Super Mario 64 and installs
+        // a hack of it without being told has been misled by omission. The
+        // console says where it runs; this says what it is.
+        if (ModKindLabel(game.ModKind) is { } modLabel)
+        {
+            body.Children.Add(new Border
+            {
+                CornerRadius = new CornerRadius(3),
+                Padding = new Thickness(6, 1, 6, 2),
+                Margin = new Thickness(0, 4, 0, 0),
+                HorizontalAlignment = HorizontalAlignment.Left,
+                Background = new SolidColorBrush(Color.FromRgb(0x2B, 0x22, 0x30)),
+                Child = new TextBlock
+                {
+                    Text = modLabel,
+                    FontSize = 9.5,
+                    FontWeight = FontWeights.Bold,
+                    Foreground = (Brush)FindResource("BrushMuted"),
+                },
+                ToolTip = ModKindHelp(game.ModKind),
+            });
+        }
 
         // Who stands behind THIS one. Tested/Untested answers "has anyone
         // played it"; this answers "who can fix it", which is a different

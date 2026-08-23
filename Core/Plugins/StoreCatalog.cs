@@ -54,7 +54,17 @@ public sealed record StoreGame(
     [property: JsonPropertyName("section")]        string Section = "stable",
     /// The words behind the section: "Stable", "Unstable", "Broken on Main",
     /// "Proven in London" (our own live test register), or "Unknown".
-    [property: JsonPropertyName("stability")]      string Stability = "Unknown");
+    [property: JsonPropertyName("stability")]      string Stability = "Unknown",
+    /// Whether this is the published game or someone's remake of it:
+    /// "rom_hack", "fan_game", "fan_port", or null for a commercial release.
+    ///
+    /// It does NOT move the game off its console -- a Nintendo 64 ROM hack is
+    /// still a Nintendo 64 game and belongs in that filter. It answers a
+    /// different question: will the player recognise the box this came in?
+    /// Someone looking for Super Mario 64 should not have to install it to
+    /// find out it is a hack of it, and someone hunting for hacks should be
+    /// able to ask for exactly those.
+    [property: JsonPropertyName("mod_kind")]       string? ModKind = null);
 
 public sealed record StoreIndex(
     [property: JsonPropertyName("count")]     int Count,
@@ -137,7 +147,8 @@ public static class StoreCatalog
         string? query,
         IReadOnlyCollection<string>? platforms = null,
         IReadOnlyCollection<string>? genres = null,
-        IReadOnlyCollection<string>? families = null)
+        IReadOnlyCollection<string>? families = null,
+        IReadOnlyCollection<string>? modKinds = null)
     {
         var q = (query ?? "").Trim();
         return games.Where(g =>
@@ -151,7 +162,12 @@ public static class StoreCatalog
                 && (families is not { Count: > 0 }
                     || families.Contains(g.Family))
                 && (genres is not { Count: > 0 }
-                    || g.Genres.Any(genres.Contains)))
+                    || g.Genres.Any(genres.Contains))
+                // "official" is a real choice, not the absence of one: a
+                // player who ticks only it is asking to be shown commercial
+                // releases, and null is what those carry.
+                && (modKinds is not { Count: > 0 }
+                    || modKinds.Contains(g.ModKind ?? "official")))
             .OrderBy(g => g.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
     }

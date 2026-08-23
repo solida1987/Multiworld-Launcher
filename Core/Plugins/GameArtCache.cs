@@ -1,6 +1,9 @@
 using System;
+using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Net;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
@@ -23,11 +26,24 @@ public static class GameArtCache
 {
     private static int _ran;
 
+    // A cached image used to be permanent: FetchOneAsync skipped any path that
+    // already existed, so a wrong address stayed wrong on the player's machine
+    // forever -- correcting the catalogue changed nothing for anyone who had
+    // already seen it. This record is what makes a correction travel: it
+    // remembers WHICH address produced each file, so a changed address is a
+    // reason to fetch again.
     public static string IconPath(string gameId) =>
         Path.Combine(AppContext.BaseDirectory, "Assets", $"{gameId}.png");
 
     public static string BannerPath(string gameId) =>
         Path.Combine(AppContext.BaseDirectory, "Assets", "Heroes", $"{gameId}_hero.png");
+
+    // Steam can also swap the art behind an unchanged address -- that is how
+    // Timespinner came to show its sequel's key art. Re-asking on every launch
+    // would be hundreds of needless requests, so we re-ask at most this often,
+    // and then only with If-Modified-Since, which costs a 304 when nothing
+    // changed.
+    private static readonly TimeSpan Recheck = TimeSpan.FromDays(30);
 
     /// Fetch missing icons and banners for every installed game the store
     /// knows. Once per process, in the background, best effort file by file:
@@ -50,37 +66,64 @@ public static class GameArtCache
         using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
         http.DefaultRequestHeaders.UserAgent.ParseAdd("MultiworldLauncher");
 
+        var sources = ArtSourceLog.Load();
         bool got = false;
         foreach (var plugin in GameRegistry.All)
         {
             if (ct.IsCancellationRequested) break;
             if (!byId.TryGetValue(plugin.GameId, out var entry)) continue;
 
-            got |= await FetchOneAsync(http, entry.Cover, IconPath(plugin.GameId), ct)
-                       .ConfigureAwait(false);
-            got |= await FetchOneAsync(http, entry.Banner, BannerPath(plugin.GameId), ct)
-                       .ConfigureAwait(false);
+            got |= await FetchOneAsync(http, entry.Cover, IconPath(plugin.GameId),
+                                       sources, ct).ConfigureAwait(false);
+            got |= await FetchOneAsync(http, entry.Banner, BannerPath(plugin.GameId),
+                                       sources, ct).ConfigureAwait(false);
         }
+        ArtSourceLog.Save(sources);
         if (got) changed?.Invoke();
     }
 
     private static async Task<bool> FetchOneAsync(
-        HttpClient http, string? url, string dest, CancellationToken ct)
+        HttpClient http, string? url, string dest,
+        Dictionary<string, ArtSource> sources, CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(url) || File.Exists(dest)) return false;
+        if (string.IsNullOrWhiteSpace(url)) return false;
+
+        string key = Path.GetFileName(dest);
+        sources.TryGetValue(key, out var known);
+
+        var reason = ArtCachePolicy.Decide(File.Exists(dest), url, known?.Url, known?.Fetched,
+                                           DateTime.UtcNow, Recheck);
+        if (reason == ArtFetchReason.UpToDate) return false;
+        ArtCachePolicy.TryParseUtc(known?.Fetched, out DateTime stamp);
+
         try
         {
-            byte[] bytes = await http.GetByteArrayAsync(url, ct).ConfigureAwait(false);
+            using var req = new HttpRequestMessage(HttpMethod.Get, url);
+            // Only a time-based re-check may be answered with "unchanged". A
+            // changed address must fetch, whatever the file's date says.
+            if (ArtCachePolicy.MayUseIfModifiedSince(reason) && stamp > DateTime.MinValue)
+                req.Headers.IfModifiedSince = stamp;
+
+            using var resp = await http.SendAsync(req, ct).ConfigureAwait(false);
+            if (resp.StatusCode == HttpStatusCode.NotModified)
+            {
+                sources[key] = new ArtSource { Url = url, Fetched = DateTime.UtcNow.ToString("o") };
+                return false;                       // same picture, new date
+            }
+            resp.EnsureSuccessStatusCode();
+            byte[] bytes = await resp.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);
+
             // An error page saved as a .png poisons the cache forever, because
-            // File.Exists then says the art is there. Only plausible image
-            // payloads may claim the path.
-            if (bytes.Length < 128) return false;
+            // File.Exists then says the art is there. Only real image payloads
+            // may claim the path.
+            if (!ArtSourceLog.LooksLikeImage(bytes)) return false;
             Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
             // Write-then-move so a crash mid-download never leaves a half
             // file at the name every future check trusts.
             string tmp = dest + ".part";
             await File.WriteAllBytesAsync(tmp, bytes, ct).ConfigureAwait(false);
             File.Move(tmp, dest, overwrite: true);
+            sources[key] = new ArtSource { Url = url, Fetched = DateTime.UtcNow.ToString("o") };
             return true;
         }
         catch (Exception)

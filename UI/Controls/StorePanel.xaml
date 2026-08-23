@@ -25,6 +25,13 @@
                                Foreground="{StaticResource BrushMuted}" Margin="0,16,0,6"/>
                     <StackPanel x:Name="PanelPlatforms"/>
 
+                    <!-- What the thing IS, as opposed to where it runs. A ROM
+                         hack stays under its console in SYSTEM; this is the
+                         second question, asked separately. -->
+                    <TextBlock Text="TYPE" FontSize="10" FontWeight="Bold"
+                               Foreground="{StaticResource BrushMuted}" Margin="0,16,0,6"/>
+                    <StackPanel x:Name="PanelModKinds"/>
+
                     <TextBlock Text="GENRE" FontSize="10" FontWeight="Bold"
                                Foreground="{StaticResource BrushMuted}" Margin="0,16,0,6"/>
                     <StackPanel x:Name="PanelGenres"/>

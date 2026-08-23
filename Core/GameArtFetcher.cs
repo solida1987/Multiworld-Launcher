@@ -57,6 +57,11 @@ public static class GameArtFetcher
         IProgress<string>? progress = null,
         CancellationToken ct = default)
     {
+        // Both writers of these files share one record of which address
+        // produced each one, so a corrected address is not lost because the
+        // other path happened to run first.
+        var fetchedNow = LauncherV2.Core.Plugins.ArtSourceLog.Load();
+
         var wanted = games.Where(g => !string.IsNullOrWhiteSpace(g.GameId)
                                       && !string.IsNullOrWhiteSpace(g.IconPath))
                           .ToList();
@@ -96,9 +101,12 @@ public static class GameArtFetcher
             {
                 byte[] data = await http.GetByteArrayAsync(url, ct).ConfigureAwait(false);
 
-                // A redirect to an error page is bytes too. Only a real PNG.
-                if (data.Length < 2000 || data[0] != 0x89 || data[1] != 0x50
-                    || data[2] != 0x4E || data[3] != 0x47)
+                // A redirect to an error page is bytes too, so the payload
+                // must look like a picture. ⚠ This used to demand a PNG
+                // signature -- and 355 of the catalogue's 478 covers are JPEG,
+                // so three out of four games were told their download "was not
+                // an image". The name ends in .png; the bytes never had to.
+                if (!LauncherV2.Core.Plugins.ArtSourceLog.LooksLikeImage(data))
                 {
                     progress?.Report($"{gameId}: the download was not an image");
                     failed++;
@@ -111,6 +119,9 @@ public static class GameArtFetcher
                 string tmp = iconPath + ".part";
                 await File.WriteAllBytesAsync(tmp, data, ct).ConfigureAwait(false);
                 File.Move(tmp, iconPath, overwrite: true);
+                fetchedNow[System.IO.Path.GetFileName(iconPath)] =
+                    new LauncherV2.Core.Plugins.ArtSource
+                    { Url = url, Fetched = DateTime.UtcNow.ToString("o") };
                 ok++;
                 progress?.Report($"{gameId}: cover downloaded");
             }
@@ -122,6 +133,7 @@ public static class GameArtFetcher
             }
         }
 
+        LauncherV2.Core.Plugins.ArtSourceLog.Save(fetchedNow);
         return new Result(ok, failed, had);
     }
 }
