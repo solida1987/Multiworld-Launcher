@@ -111,6 +111,11 @@ public partial class App : Application
         // they approved, come back from here. Everything else arrives as a
         // problem line — a game that silently vanishes is a support request, a
         // game that says why is not.
+        // Finish what the last session could not: files an uninstall left
+        // behind because the process still held them. Must run BEFORE the
+        // plugins load and lock their files again.
+        LauncherV2.Core.Plugins.PendingDeletes.Run();
+
         GameRegistry.LoadFromDisk(out var pluginProblems);
 
         // Held for the main window, which owns the log. Debug.WriteLine was

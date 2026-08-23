@@ -27,6 +27,12 @@ public sealed class LibraryEntry
     [JsonPropertyName("game_id")]     public string           GameId     { get; set; } = "";
     [JsonPropertyName("is_favorite")] public bool             IsFavorite { get; set; }
     [JsonPropertyName("added_at")]    public DateTimeOffset   AddedAt    { get; set; }
+    /// When Play was last pressed for this game. Null = never played through
+    /// London. Old library files simply lack the field and read back as null.
+    [JsonPropertyName("last_played")] public DateTimeOffset?  LastPlayed { get; set; }
+    /// The user's own shelf for this game ("RPGs", "With the kids", ...).
+    /// Null = not filed anywhere. Free text, owned entirely by the player.
+    [JsonPropertyName("folder")]      public string?          Folder     { get; set; }
 }
 
 public static class LibraryStore
@@ -167,6 +173,45 @@ public static class LibraryStore
         _entries.Insert(Math.Max(0, idx), moved);
         Save();
     }
+
+    /// Stamp "played now". Called from the Play button and nowhere else, so
+    /// the sidebar's Last played sort reflects launches, not browsing.
+    public static void TouchPlayed(string gameId)
+    {
+        var entry = _entries.FirstOrDefault(e => e.GameId == gameId);
+        if (entry == null) return;
+        entry.LastPlayed = DateTimeOffset.UtcNow;
+        Save();
+    }
+
+    public static DateTimeOffset? GetLastPlayed(string gameId)
+        => _entries.FirstOrDefault(e => e.GameId == gameId)?.LastPlayed;
+
+    public static DateTimeOffset GetAddedAt(string gameId)
+        => _entries.FirstOrDefault(e => e.GameId == gameId)?.AddedAt ?? DateTimeOffset.MinValue;
+
+    public static string? GetFolder(string gameId)
+        => _entries.FirstOrDefault(e => e.GameId == gameId)?.Folder;
+
+    /// File a game on a shelf; null takes it off again. Unknown ids are a
+    /// quiet no-op -- the menu can only offer games that exist.
+    public static void SetFolder(string gameId, string? folder)
+    {
+        var entry = _entries.FirstOrDefault(e => e.GameId == gameId);
+        if (entry == null) return;
+        entry.Folder = string.IsNullOrWhiteSpace(folder) ? null : folder.Trim();
+        Save();
+    }
+
+    /// Every shelf that currently holds at least one game, alphabetically.
+    /// Shelves have no life of their own -- empty ones simply stop existing,
+    /// so there is nothing to manage and nothing to leak.
+    public static IReadOnlyList<string> AllFolders()
+        => _entries.Where(e => !string.IsNullOrWhiteSpace(e.Folder))
+                   .Select(e => e.Folder!)
+                   .Distinct(StringComparer.OrdinalIgnoreCase)
+                   .OrderBy(f => f, StringComparer.OrdinalIgnoreCase)
+                   .ToList();
 
     // Toggle or set the favorite flag for a game.
     // If the game is not in the library it is added first.

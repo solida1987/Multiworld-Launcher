@@ -641,13 +641,57 @@
                                   VerticalScrollBarVisibility="Auto"
                                   HorizontalScrollBarVisibility="Disabled">
                         <StackPanel>
+                            <!-- Library header with the view controls. With
+                                 thirty games installed, one long scroll becomes the
+                                 sidebar experience, so how the list is shown
+                                 is the player's call: order, grouping, and how
+                                 much room each game takes. -->
                             <Border Padding="12,8,12,6"
                                     BorderBrush="#1E2233"
                                     BorderThickness="0,0,0,1">
-                                <TextBlock Text="MY LIBRARY"
-                                           FontSize="10"
-                                           FontWeight="Bold"
-                                           Foreground="{StaticResource BrushMuted}"/>
+                                <StackPanel>
+                                    <TextBlock Text="MY LIBRARY"
+                                               FontSize="10"
+                                               FontWeight="Bold"
+                                               Foreground="{StaticResource BrushMuted}"/>
+                                    <!-- The view controls get their own row.
+                                         Docked beside the label they overlapped
+                                         it the moment the sidebar was narrow;
+                                         fixed widths in a fluid column lie. The
+                                         star columns split whatever exists. -->
+                                    <Grid Margin="0,6,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="6"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="6"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <ComboBox x:Name="CmbSidebarSort"
+                                                  Grid.Column="0"
+                                                  Height="22"
+                                                  FontSize="10"
+                                                  ToolTip="How the list is ordered"
+                                                  SelectionChanged="SidebarView_Changed"/>
+                                        <ComboBox x:Name="CmbSidebarGroup"
+                                                  Grid.Column="2"
+                                                  Height="22"
+                                                  FontSize="10"
+                                                  ToolTip="How the list is grouped"
+                                                  SelectionChanged="SidebarView_Changed"/>
+                                        <Button x:Name="BtnSidebarDensity"
+                                                Grid.Column="4"
+                                                Width="26" Height="22"
+                                                Padding="0"
+                                                FontSize="11"
+                                                Background="#0C1020"
+                                                Foreground="{StaticResource BrushMuted}"
+                                                BorderBrush="#2A3050"
+                                                Cursor="Hand"
+                                                ToolTip="Switch between full cards and compact rows"
+                                                Click="BtnSidebarDensity_Click"/>
+                                    </Grid>
+                                </StackPanel>
                             </Border>
                             <StackPanel x:Name="GameListPanel"/>
                         </StackPanel>

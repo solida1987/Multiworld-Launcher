@@ -82,6 +82,34 @@ public static class GameArtCache
         if (got) changed?.Invoke();
     }
 
+    /// Fetch ONE game's art right now, regardless of the once-per-process
+    /// prefetch. This is what makes a newly installed game get its cover in
+    /// the same session -- the prefetch ran before the game existed, and
+    /// "restart the launcher to see the picture" is not an answer.
+    public static async Task FetchForGameAsync(string gameId,
+                                               Action? changed = null,
+                                               CancellationToken ct = default)
+    {
+        StoreIndex? index;
+        try { index = await StoreCatalog.FetchAsync(ct).ConfigureAwait(false); }
+        catch (Exception) { return; }
+        var entry = index?.Games?.FirstOrDefault(g =>
+            string.Equals(g.Id, gameId, StringComparison.OrdinalIgnoreCase));
+        if (entry == null) return;
+
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+        http.DefaultRequestHeaders.UserAgent.ParseAdd("MultiworldLauncher");
+
+        var sources = ArtSourceLog.Load();
+        bool got = false;
+        got |= await FetchOneAsync(http, entry.Cover, IconPath(gameId), sources, ct)
+                   .ConfigureAwait(false);
+        got |= await FetchOneAsync(http, entry.Banner, BannerPath(gameId), sources, ct)
+                   .ConfigureAwait(false);
+        ArtSourceLog.Save(sources);
+        if (got) changed?.Invoke();
+    }
+
     private static async Task<bool> FetchOneAsync(
         HttpClient http, string? url, string dest,
         Dictionary<string, ArtSource> sources, CancellationToken ct)

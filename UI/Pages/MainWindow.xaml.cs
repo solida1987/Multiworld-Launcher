@@ -269,6 +269,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        InitSidebarViewControls();
 
         // Home-page logo, loaded from Assets/ beside the exe. A failure is
         // REPORTED via the startup warning — a silent catch hid a real deletion.
@@ -400,6 +401,13 @@ public partial class MainWindow : Window
         // and one rebuild at the end repaints the sidebar and the lobby.
         _ = Core.Plugins.GameArtCache.PrefetchAsync(changed: () => Dispatcher.BeginInvoke(() =>
         {
+            // The prefetch may have OVERWRITTEN files whose old pixels are
+            // memoised -- forget them all, or the repaint shows the old art.
+            foreach (var pl in GameRegistry.All)
+            {
+                EvictBitmap(Core.Plugins.GameArtCache.IconPath(pl.GameId));
+                EvictBitmap(Core.Plugins.GameArtCache.BannerPath(pl.GameId));
+            }
             RebuildGameList();
             RefreshHomePage();
         }));
@@ -615,6 +623,84 @@ public partial class MainWindow : Window
         if (anyInstalled) RebuildGameList();
     }
 
+    // The player's view of the library: density, grouping, order. Loaded
+    // once; every change writes straight back so a restart keeps the choice.
+    private Core.SidebarPrefs _sidebarPrefs = Core.SidebarPrefs.Load();
+    private bool _sidebarViewReady;   // guards SelectionChanged during init
+
+    // Platform label per game id, read from the store catalogue's cached
+    // index. The plugin interface deliberately does not expose the console
+    // (SafePluginProxy hides concrete types), and the store already knows.
+    private Dictionary<string, string>? _platformById;
+
+    private string PlatformOf(string gameId)
+    {
+        if (_platformById == null)
+        {
+            _platformById = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                string cache = System.IO.Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "MultiworldLauncher", "store_cache.json");
+                if (File.Exists(cache))
+                {
+                    var idx = System.Text.Json.JsonSerializer
+                        .Deserialize<Core.Plugins.StoreIndex>(File.ReadAllText(cache));
+                    foreach (var g in idx?.Games ?? Array.Empty<Core.Plugins.StoreGame>())
+                        _platformById[g.Id] = string.IsNullOrWhiteSpace(g.PlatformLabel)
+                            ? g.Platform : g.PlatformLabel;
+                }
+            }
+            catch { /* no cache, no grouping data -- "Other" carries them */ }
+        }
+        return _platformById.TryGetValue(gameId, out var plat) && plat.Length > 0
+            ? plat : "Other";
+    }
+
+    private void InitSidebarViewControls()
+    {
+        CmbSidebarSort.Items.Clear();
+        foreach (var (tag, label) in new[] {
+                     ("custom", "My order"), ("name", "Name"),
+                     ("recent", "Last played"), ("added", "Recently added") })
+            CmbSidebarSort.Items.Add(new ComboBoxItem { Content = label, Tag = tag, FontSize = 10 });
+        CmbSidebarGroup.Items.Clear();
+        foreach (var (tag, label) in new[] {
+                     ("status", "By status"), ("platform", "By console"),
+                     ("folder", "My folders") })
+            CmbSidebarGroup.Items.Add(new ComboBoxItem { Content = label, Tag = tag, FontSize = 10 });
+
+        SelectComboByTag(CmbSidebarSort, _sidebarPrefs.Sort);
+        SelectComboByTag(CmbSidebarGroup, _sidebarPrefs.Group);
+        BtnSidebarDensity.Content = _sidebarPrefs.Density == "rows" ? "\u2630" : "\u25A4";
+        _sidebarViewReady = true;
+    }
+
+    private static void SelectComboByTag(ComboBox box, string tag)
+    {
+        foreach (ComboBoxItem it in box.Items)
+            if ((string)it.Tag == tag) { box.SelectedItem = it; return; }
+        box.SelectedIndex = 0;
+    }
+
+    private void SidebarView_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_sidebarViewReady) return;
+        _sidebarPrefs.Sort  = (CmbSidebarSort.SelectedItem  as ComboBoxItem)?.Tag as string ?? "custom";
+        _sidebarPrefs.Group = (CmbSidebarGroup.SelectedItem as ComboBoxItem)?.Tag as string ?? "status";
+        _sidebarPrefs.Save();
+        RebuildGameList();
+    }
+
+    private void BtnSidebarDensity_Click(object sender, RoutedEventArgs e)
+    {
+        _sidebarPrefs.Density = _sidebarPrefs.Density == "rows" ? "cards" : "rows";
+        _sidebarPrefs.Save();
+        BtnSidebarDensity.Content = _sidebarPrefs.Density == "rows" ? "\u2630" : "\u25A4";
+        RebuildGameList();
+    }
+
     // Library — sidebar rebuild
 
     // Rebuilds the sidebar game list from the library (respects favorites + order).
@@ -637,36 +723,60 @@ public partial class MainWindow : Window
         // outcome GameRegistry.LoadFromDisk explicitly adds to the library to
         // avoid. The player is told twice instead: a banner on the game page and
         // a warning at launch.
-        //
-        // This line used to read `!(p is EmulatorPlugin ep && !ep.ChecksImplemented)`,
-        // which never fired for a plugin (a plugin arrives as SafePluginProxy,
-        // never as an EmulatorPlugin). Correcting the type test made the filter
-        // real for the first time and emptied the whole library.
 
-        var favorites    = plugins.Where(p => LibraryStore.IsFavorite(p!.GameId)).ToList();
-        var installed    = plugins.Where(p => !LibraryStore.IsFavorite(p!.GameId) && p!.IsInstalled).ToList();
-        var notInstalled = plugins.Where(p => !LibraryStore.IsFavorite(p!.GameId) && !p!.IsInstalled).ToList();
+        // Order first, groups after: the sort applies INSIDE every group, so
+        // "By console" plus "Name" reads as a shelf per console, alphabetised.
+        plugins = _sidebarPrefs.Sort switch
+        {
+            "name"   => plugins.OrderBy(p => p!.DisplayName,
+                            StringComparer.OrdinalIgnoreCase).ToList(),
+            // Never-played games sink below every played one and keep their
+            // relative order, rather than pretending a date exists for them.
+            "recent" => plugins.OrderByDescending(p =>
+                            LibraryStore.GetLastPlayed(p!.GameId)
+                            ?? DateTimeOffset.MinValue).ToList(),
+            "added"  => plugins.OrderByDescending(p =>
+                            LibraryStore.GetAddedAt(p!.GameId)).ToList(),
+            _        => plugins,   // "custom": the stored drag order
+        };
+
+        var favorites = plugins.Where(p => LibraryStore.IsFavorite(p!.GameId)).ToList();
+        var rest      = plugins.Where(p => !LibraryStore.IsFavorite(p!.GameId)).ToList();
 
         if (favorites.Count > 0)
-        {
-            GameListPanel.Children.Add(BuildSidebarSectionHeader("FAVORITES"));
-            foreach (var p in favorites)
-                GameListPanel.Children.Add(BuildGameCard(p!));
-        }
+            AddSidebarGroup("FAVORITES", favorites, collapsible: false);
 
-        if (installed.Count > 0)
+        switch (_sidebarPrefs.Group)
         {
-            GameListPanel.Children.Add(BuildSidebarSectionHeader("INSTALLED"));
-            foreach (var p in installed)
-                GameListPanel.Children.Add(BuildGameCard(p!));
-        }
+            case "platform":
+                foreach (var grp in rest.GroupBy(p => PlatformOf(p!.GameId))
+                                        .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase))
+                    AddSidebarGroup(grp.Key.ToUpperInvariant(), grp.ToList(), collapsible: true);
+                break;
 
-        if (notInstalled.Count > 0)
-        {
-            GameListPanel.Children.Add(BuildNotInstalledSectionHeader(notInstalled.Count));
-            if (_showNotInstalled)
-                foreach (var p in notInstalled)
-                    GameListPanel.Children.Add(BuildGameCard(p!));
+            case "folder":
+                var filed = rest.Where(p => LibraryStore.GetFolder(p!.GameId) != null).ToList();
+                var loose = rest.Where(p => LibraryStore.GetFolder(p!.GameId) == null).ToList();
+                foreach (var grp in filed.GroupBy(p => LibraryStore.GetFolder(p!.GameId)!)
+                                         .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase))
+                    AddSidebarGroup(grp.Key.ToUpperInvariant(), grp.ToList(), collapsible: true);
+                if (loose.Count > 0)
+                    AddSidebarGroup("UNSORTED", loose, collapsible: true);
+                break;
+
+            default:   // "status" -- the original three sections
+                var installed    = rest.Where(p => p!.IsInstalled).ToList();
+                var notInstalled = rest.Where(p => !p!.IsInstalled).ToList();
+                if (installed.Count > 0)
+                    AddSidebarGroup("INSTALLED", installed, collapsible: true);
+                if (notInstalled.Count > 0)
+                {
+                    GameListPanel.Children.Add(BuildNotInstalledSectionHeader(notInstalled.Count));
+                    if (_showNotInstalled)
+                        foreach (var p in notInstalled)
+                            GameListPanel.Children.Add(BuildGameCard(p!));
+                }
+                break;
         }
 
         if (!plugins.Any())
@@ -687,6 +797,32 @@ public partial class MainWindow : Window
         // Re-highlight the currently selected game if it's still in the list
         if (_selectedPlugin != null && _gameCards.ContainsKey(_selectedPlugin.GameId))
             HighlightGameCard(_selectedPlugin);
+    }
+
+    /// One shelf: a header (clickable when collapsible) and its cards. A
+    /// collapsed shelf still says how many games it hides -- a header that
+    /// hides an unknown amount is how things get lost.
+    private void AddSidebarGroup(string name, List<IGamePlugin?> members, bool collapsible)
+    {
+        bool collapsed = collapsible && _sidebarPrefs.IsCollapsed(name);
+        var header = BuildSidebarSectionHeader(
+            collapsible ? (collapsed ? "\u25B8 " : "\u25BE ") + name + "  (" + members.Count + ")"
+                        : name);
+        if (collapsible)
+        {
+            header.Cursor = Cursors.Hand;
+            string captured = name;
+            header.MouseLeftButtonDown += (_, e) =>
+            {
+                e.Handled = true;
+                _sidebarPrefs.ToggleCollapsed(captured);
+                RebuildGameList();
+            };
+        }
+        GameListPanel.Children.Add(header);
+        if (collapsed) return;
+        foreach (var pl in members)
+            GameListPanel.Children.Add(BuildGameCard(pl!));
     }
 
     private static TextBlock BuildSidebarSectionHeader(string label)
@@ -6916,6 +7052,20 @@ public partial class MainWindow : Window
             if (!wasInstalled)
             {
                 LibraryStore.Add(plugin.GameId);
+
+                // The cover, NOW -- not after a restart. The background
+                // prefetch ran before this game existed; fetch just this one
+                // and repaint the sidebar when it lands.
+                _ = Core.Plugins.GameArtCache.FetchForGameAsync(
+                        plugin.GameId,
+                        () => Dispatcher.Invoke(() =>
+                        {
+                            EvictBitmap(Core.Plugins.GameArtCache.IconPath(plugin.GameId));
+                            EvictBitmap(Core.Plugins.GameArtCache.BannerPath(plugin.GameId));
+                            RebuildGameList();
+                            if (_selectedPlugin?.GameId == plugin.GameId)
+                                SelectGame(plugin);
+                        }));
                 RebuildGameList();
             }
 
@@ -7158,6 +7308,10 @@ public partial class MainWindow : Window
     private async void BtnPlay_Click(object sender, RoutedEventArgs e)
     {
         if (_selectedPlugin == null) return;
+
+        // The sidebar's "Last played" order is fed HERE and nowhere else, so
+        // it reflects launches -- not browsing, not selecting.
+        LibraryStore.TouchPlayed(_selectedPlugin.GameId);
 
         // One game at a time (P2-5): while a DIFFERENT game runs, this Play
         // button is inert — a second launch would fight the live session.
@@ -9404,6 +9558,11 @@ public partial class MainWindow : Window
     {
         var muted   = (Brush)FindResource("BrushMuted");
         var success = (Brush)FindResource("BrushSuccess");
+        // "rows" is the Steam-style answer to a thirty-game scroll: one line
+        // of text and a small picture. Same card, same menu, same drag -- the
+        // two densities may only differ in SIZE, or the compact view slowly
+        // becomes a second, lesser sidebar.
+        bool compact = _sidebarPrefs.Density == "rows";
 
         var border = new Border
         {
@@ -9435,15 +9594,26 @@ public partial class MainWindow : Window
 
         // --- Favorite star toggle (right side, before dot) ---
         bool fav = LibraryStore.IsFavorite(plugin.GameId);
-        var starBtn = new TextBlock
+        // The star was 12px of bare glyph -- "really tiny on a 4K monitor",
+        // a tester's words. The glyph grew, and the CLICKABLE area is a padded
+        // container around it, not the glyph's own pixels: a target is its
+        // hit-box, not its ink.
+        var starGlyph = new TextBlock
         {
             Text              = fav ? "★" : "☆",
-            FontSize          = 12,
+            FontSize          = compact ? 13 : 16,
             Foreground        = fav
                 ? new SolidColorBrush(Color.FromRgb(0xF5, 0xC5, 0x18))
-                : new SolidColorBrush(Color.FromRgb(0x3A, 0x3F, 0x55)),
+                : new SolidColorBrush(Color.FromRgb(0x4A, 0x50, 0x6A)),
+            VerticalAlignment   = VerticalAlignment.Center,
+            HorizontalAlignment = HorizontalAlignment.Center,
+        };
+        var starBtn = new Border
+        {
+            Child             = starGlyph,
+            Background        = Brushes.Transparent,   // transparent still hit-tests
+            Padding           = new Thickness(5, 2, 5, 2),
             VerticalAlignment = VerticalAlignment.Center,
-            Margin            = new Thickness(2, 0, 4, 0),
             Cursor            = Cursors.Hand,
             ToolTip           = fav ? "Unpin from top" : "Pin to top",
         };
@@ -9464,8 +9634,8 @@ public partial class MainWindow : Window
         // --- Game icon (36×36) ---
         var imgBorder = new Border
         {
-            Width             = 36,
-            Height            = 36,
+            Width             = compact ? 20 : 36,
+            Height            = compact ? 20 : 36,
             CornerRadius      = new CornerRadius(4),
             Background        = new SolidColorBrush(Color.FromRgb(0x0C, 0x10, 0x20)),
             Margin            = new Thickness(0, 0, 10, 0),
@@ -9490,11 +9660,13 @@ public partial class MainWindow : Window
         textStack.Children.Add(new TextBlock
         {
             Text         = plugin.DisplayName,
-            FontWeight   = FontWeights.SemiBold,
-            FontSize     = 12,
+            FontWeight   = compact ? FontWeights.Normal : FontWeights.SemiBold,
+            FontSize     = compact ? 11 : 12,
             Foreground   = (Brush)FindResource("BrushText"),
             TextWrapping = TextWrapping.NoWrap,
+            TextTrimming = TextTrimming.CharacterEllipsis,
         });
+        if (!compact)
         textStack.Children.Add(new TextBlock
         {
             Text       = plugin.Subtitle,
@@ -9509,6 +9681,18 @@ public partial class MainWindow : Window
         string statusLabel = plugin.IsRunning   ? "Running"
                            : plugin.IsInstalled ? "Installed"
                                                 : "Not installed";
+        if (compact)
+        {
+            // One line means ONE line. The dot on the right already carries
+            // running/installed/absent; the pill would be the second line.
+            dot.ToolTip = statusLabel;
+            border.Padding = new Thickness(8, 3, 6, 3);
+            imgBorder.Margin = new Thickness(0, 0, 7, 0);
+            row.Children.Add(textStack);
+            border.Child = row;
+            WireGameCardBehaviour(border, plugin);
+            return border;
+        }
         var statusBr = plugin.IsRunning   ? success
                      : plugin.IsInstalled ? new SolidColorBrush(Color.FromRgb(0x3A, 0x55, 0x3A))
                                           : muted;
@@ -9530,6 +9714,15 @@ public partial class MainWindow : Window
         row.Children.Add(textStack);
 
         border.Child = row;
+        WireGameCardBehaviour(border, plugin);
+        return border;
+    }
+
+    /// Selection, drag-to-reorder and the context menu -- identical for both
+    /// densities, deliberately shared: the compact view must never become a
+    /// second sidebar with fewer abilities.
+    private void WireGameCardBehaviour(Border border, IGamePlugin plugin)
+    {
         border.MouseLeftButtonDown += (_, e) =>
         {
             _dragStartPoint = e.GetPosition(null);
@@ -9586,7 +9779,6 @@ public partial class MainWindow : Window
         border.ContextMenu = BuildGameCardContextMenu(plugin);
 
         _gameCards[plugin.GameId] = border;
-        return border;
     }
 
     private ContextMenu BuildGameCardContextMenu(IGamePlugin plugin)
@@ -9650,6 +9842,77 @@ public partial class MainWindow : Window
         };
         menu.Items.Add(removeItem);
 
+        // --- Folders: the player's own shelves. The submenu lists every
+        // shelf that exists plus "New folder"; a shelf with no games in it
+        // simply stops existing, so there is nothing else to manage.
+        var folderMenu = new MenuItem
+        {
+            Header     = "Move to Folder",
+            Background = Brushes.Transparent,
+            Foreground = (Brush)FindResource("BrushText"),
+        };
+        string? currentFolder = LibraryStore.GetFolder(plugin.GameId);
+        foreach (string f in LibraryStore.AllFolders())
+        {
+            var item = new MenuItem
+            {
+                Header      = f,
+                IsCheckable = true,
+                IsChecked   = string.Equals(f, currentFolder, StringComparison.OrdinalIgnoreCase),
+                Foreground  = (Brush)FindResource("BrushText"),
+                Background  = Brushes.Transparent,
+            };
+            string captured = f;
+            item.Click += (_, _) =>
+            {
+                LibraryStore.SetFolder(plugin.GameId,
+                    string.Equals(captured, currentFolder, StringComparison.OrdinalIgnoreCase)
+                        ? null : captured);
+                RebuildGameList();
+            };
+            folderMenu.Items.Add(item);
+        }
+        var newFolder = new MenuItem
+        {
+            Header     = "New Folder...",
+            Foreground = (Brush)FindResource("BrushText"),
+            Background = Brushes.Transparent,
+        };
+        newFolder.Click += (_, _) =>
+        {
+            string? name = PromptDialog.Show(this, "New folder",
+                "Name the folder this game goes into:", "");
+            if (string.IsNullOrWhiteSpace(name)) return;
+            LibraryStore.SetFolder(plugin.GameId, name);
+            // Folders only show when the list is grouped by them -- switching
+            // here means the click has a visible result instead of a silent one.
+            if (_sidebarPrefs.Group != "folder")
+            {
+                _sidebarPrefs.Group = "folder";
+                _sidebarPrefs.Save();
+                SelectComboByTag(CmbSidebarGroup, "folder");
+            }
+            RebuildGameList();
+        };
+        if (folderMenu.Items.Count > 0) folderMenu.Items.Add(new Separator());
+        folderMenu.Items.Add(newFolder);
+        if (currentFolder != null)
+        {
+            var clear = new MenuItem
+            {
+                Header     = "Remove from \u201C" + currentFolder + "\u201D",
+                Foreground = (Brush)FindResource("BrushText"),
+                Background = Brushes.Transparent,
+            };
+            clear.Click += (_, _) =>
+            {
+                LibraryStore.SetFolder(plugin.GameId, null);
+                RebuildGameList();
+            };
+            folderMenu.Items.Add(clear);
+        }
+        menu.Items.Add(folderMenu);
+
         if (plugin.IsInstalled && !string.IsNullOrEmpty(plugin.GameDirectory) &&
             Directory.Exists(plugin.GameDirectory))
         {
@@ -9669,7 +9932,102 @@ public partial class MainWindow : Window
             menu.Items.Add(openFolder);
         }
 
+        // --- Uninstall: removes what LONDON put on this machine for the game,
+        // and only that. The player's own files and every emulator stay.
+        menu.Items.Add(new Separator());
+        var uninstall = new MenuItem
+        {
+            Header     = "Uninstall...",
+            Background = Brushes.Transparent,
+            Foreground = new SolidColorBrush(Color.FromRgb(0xCC, 0x60, 0x60)),
+        };
+        uninstall.Click += (_, _) => UninstallGame(plugin);
+        menu.Items.Add(uninstall);
+
         return menu;
+    }
+
+    /// Uninstall = delete what LONDON put on this machine for this game, and
+    /// only that. The plan comes from UninstallPlan (proved in
+    /// tools/UninstallProof); this method shows it verbatim, gets a yes, and
+    /// carries it out. A plugin DLL the process still holds is deleted on the
+    /// next start instead of failing the whole uninstall.
+    private void UninstallGame(IGamePlugin plugin)
+    {
+        var plan = Core.Plugins.UninstallPlan.Build(
+            plugin.GameId, plugin.GameDirectory, AppContext.BaseDirectory);
+        var lines = new List<string>();
+        foreach (var item in plan)
+            if (item.IsDirectory ? Directory.Exists(item.Path) : File.Exists(item.Path))
+                lines.Add("\u2022 " + item.What + "\n   " + item.Path);
+        if (lines.Count == 0)
+        {
+            ToastService.Show("Nothing to uninstall",
+                plugin.DisplayName + " has nothing of London's on this machine.",
+                ToastKind.Info);
+            return;
+        }
+
+        bool yes = ConfirmDialog.Show(this,
+            "Uninstall " + plugin.DisplayName + "?",
+            "This deletes what London installed for this game:\n\n"
+            + string.Join("\n", lines) + "\n\n"
+            + Core.Plugins.UninstallPlan.Keeps(plugin.GameDirectory, AppContext.BaseDirectory),
+            "Uninstall", "Cancel");
+        if (!yes) return;
+
+        // Let go of the plugin before deleting its directory. Unload only
+        // SCHEDULES the assembly's release, so the DLL can stay locked for
+        // the rest of the process -- that case is handled below, not ignored.
+        bool wasSelected = _selectedPlugin?.GameId == plugin.GameId;
+        GameRegistry.UnloadFromDisk(plugin.GameId);
+
+        var failed = new List<string>();
+        foreach (var item in plan)
+        {
+            try
+            {
+                if (item.IsDirectory && Directory.Exists(item.Path))
+                    Directory.Delete(item.Path, recursive: true);
+                else if (!item.IsDirectory && File.Exists(item.Path))
+                    File.Delete(item.Path);
+            }
+            catch (Exception)
+            {
+                failed.Add(item.Path);
+            }
+        }
+
+        if (failed.Count > 0)
+        {
+            // Finish the job at next start, before any plugin is loaded and
+            // can lock its own files again.
+            Core.Plugins.PendingDeletes.Add(failed);
+            AppendLog("[Uninstall] " + plugin.DisplayName + ": "
+                + failed.Count + " item(s) still in use; they are removed at next start.");
+        }
+
+        LibraryStore.Remove(plugin.GameId);
+        RebuildGameList();
+        ToastService.Show("Uninstalled", plugin.DisplayName
+            + (failed.Count > 0
+                ? " is uninstalled; a locked file finishes at next start."
+                : " is uninstalled. Your own files were not touched."),
+            ToastKind.Success);
+
+        if (wasSelected)
+        {
+            var firstId = LibraryStore.GetSortedGameIds().FirstOrDefault();
+            var next = firstId != null ? GameRegistry.Find(firstId) : null;
+            if (next != null) SelectGame(next);
+            else
+            {
+                PanelGame.Visibility  = Visibility.Collapsed;
+                PanelEmpty.Visibility = Visibility.Visible;
+                _selectedPlugin       = null;
+                RefreshHomePage();
+            }
+        }
     }
 
     private void HighlightGameCard(IGamePlugin plugin)
@@ -9711,6 +10069,15 @@ public partial class MainWindow : Window
 
     // Cached, frozen bitmap for a LOCAL image path.
     // missing or fails to decode (callers already tolerate a null Source).
+    /// Forget a decoded image so the next paint reads the file again. Called
+    /// when the art cache overwrites a file -- the memo would otherwise show
+    /// the OLD picture for the rest of the session, which is exactly the
+    /// "corrected art never arrives" bug wearing a second costume.
+    private static void EvictBitmap(string? path)
+    {
+        if (!string.IsNullOrEmpty(path)) _bitmapCache.Remove(path);
+    }
+
     private static BitmapImage? LoadCachedBitmap(string? path)
     {
         if (string.IsNullOrEmpty(path)) return null;
