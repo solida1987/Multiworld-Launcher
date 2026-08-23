@@ -189,6 +189,80 @@ public static class EmulatorBackends
                 AssetPattern: "windows-x64-Qt.7z"),
         },
 
+        // Dolphin — GameCube and Wii. A LAUNCHER, not a memory bridge: every
+        // GC/Wii world in the catalogue reads Dolphin itself through
+        // dolphin-memory-engine and registers its own Archipelago client, so
+        // London starts the disc and stands aside. See
+        // extensions/dolphin/DolphinBridge.cs for the four worlds and the
+        // lines in each that say so.
+        new EmulatorBackend
+        {
+            Id            = "dolphin",
+            DisplayName   = "Dolphin",
+            Systems       = new[] { "GC", "Wii", "WII" },
+            BridgeReady   = true,
+            // Nothing has been started through it on this machine yet.
+            LiveVerified  = false,
+            HomepageUrl   = "https://dolphin-emu.org/download/",
+            ExeName       = "Dolphin.exe",
+            Source = new LauncherV2.Core.Emulators.EmulatorSource(
+                Author:       "the Dolphin Emulator project",
+                Licence:      "GPL-2.0-or-later",
+                LicenceUrl:   "https://github.com/dolphin-emu/dolphin/blob/master/COPYING",
+                DownloadPage: "https://dolphin-emu.org/download/",
+                Owner:        "dolphin-emu",
+                Repo:         "dolphin",
+                AssetPattern: null),
+        },
+
+        // DuckStation — PlayStation 1. Also a launcher: Spyro 3, the world
+        // that put it on our list, ships its own Windows client and attaches
+        // to DuckStation itself. See extensions/duckstation/.
+        new EmulatorBackend
+        {
+            Id            = "duckstation",
+            DisplayName   = "DuckStation",
+            Systems       = new[] { "PSX", "PS1" },
+            BridgeReady   = true,
+            LiveVerified  = false,
+            HomepageUrl   = "https://www.duckstation.org/",
+            // ⚠ DuckStation has shipped its Qt build under several names.
+            // The bridge resolves any duckstation*.exe; this is the one its
+            // current release uses, and it is what the folder note asks for.
+            ExeName       = "duckstation-qt-x64-ReleaseLTCG.exe",
+            Source = new LauncherV2.Core.Emulators.EmulatorSource(
+                Author:       "Connor McLaughlin (stenzek) and contributors",
+                Licence:      "CC-BY-NC-ND-4.0 — non-commercial, no derivatives",
+                LicenceUrl:   "https://github.com/stenzek/duckstation/blob/master/LICENSE",
+                DownloadPage: "https://www.duckstation.org/",
+                Owner:        "stenzek",
+                Repo:         "duckstation",
+                AssetPattern: null),
+        },
+
+        // Daxanadu — Faxanadu, and only Faxanadu. Its author is precise about
+        // what it is: "an NES emulator that only works with a Faxanadu rom
+        // file". Archipelago is built into the program, so London starts it
+        // and the player connects from its own ARCHIPELAGO menu.
+        new EmulatorBackend
+        {
+            Id            = "daxanadu",
+            DisplayName   = "Daxanadu",
+            Systems       = new[] { "NES" },
+            BridgeReady   = true,
+            LiveVerified  = false,
+            HomepageUrl   = "https://github.com/Daivuk/Daxanadu/releases",
+            ExeName       = "Daxanadu.exe",
+            Source = new LauncherV2.Core.Emulators.EmulatorSource(
+                Author:       "Daivuk",
+                Licence:      "MIT",
+                LicenceUrl:   "https://github.com/Daivuk/Daxanadu/blob/main/LICENSE",
+                DownloadPage: "https://github.com/Daivuk/Daxanadu/releases",
+                Owner:        "Daivuk",
+                Repo:         "Daxanadu",
+                AssetPattern: "Daxanadu_*.zip"),
+        },
+
         // snes9x — the literal §14 Discord request ("SNES: BizHawk or snes9x").
         // Uses the snes9x-nwa fork (NWA TCP protocol, no in-emu script); modern
         // core based on snes9x 1.62.3 (matrix §2, §6.2).
