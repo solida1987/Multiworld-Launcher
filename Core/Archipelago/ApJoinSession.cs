@@ -49,6 +49,15 @@ public sealed class ApJoinSession
     /// Raised on pool threads; the UI hops itself.
     public event Action? Changed;
 
+    /// The live AP connection this session runs on. Exposed so the launcher's
+    /// trackers (Items, Progression) can follow a joined game the same way
+    /// they follow one started from the library — they used to sit at zero
+    /// for every joined session, because this client was private.
+    public ApClient? Client { get; private set; }
+
+    /// Fired once a session is connected and its game is being launched.
+    public static event Action<ApJoinSession>? Started;
+
     private ApClient? _client;
 
     private ApJoinSession(IGamePlugin plugin, string slotName, string seedId)
@@ -289,6 +298,10 @@ public sealed class ApJoinSession
                 plugin.OnLocationTable(t2);
                 plugin.OnCheckedLocations(client.ConnectedChecked.ToArray());
             }
+
+            session.Client = client;
+            try { Started?.Invoke(session); }
+            catch { /* a tracker that fails must not end the session */ }
 
             session.Set(Stage.Playing, $"Playing — {address}");
             return (session, "Joined.");

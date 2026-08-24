@@ -434,6 +434,13 @@ public partial class MainWindow : Window
         Core.Archipelago.ApJoinSession.AskForSeedPatch = (plugin, req) =>
             Dispatcher.InvokeAsync(() => EnsureSeedPatch(plugin, req)).Task;
 
+        // Joined sessions get the same Items and Progression trackers as
+        // library sessions. They used to sit at zero for every joined game —
+        // the join flow ran on its own private client, and nothing here ever
+        // heard about it.
+        Core.Archipelago.ApJoinSession.Started += js =>
+            Dispatcher.Invoke(() => WireJoinSessionTrackers(js));
+
         // Wire achievement notifications.
         // grants can fire on plugin pipe threads (check counters), and a
         // synchronous hop would park the pipe's read loop on the UI thread.
@@ -1688,6 +1695,52 @@ public partial class MainWindow : Window
             HorizontalAlignment = HorizontalAlignment.Center,
         });
         return new Grid { Children = { stack } };
+    }
+
+    /// Feed the Items and Progression trackers from a joined session.
+    ///
+    /// Mirrors the library-session wiring above, with one difference: the
+    /// join flow is already connected when this runs, so the connected state
+    /// is fed directly instead of waiting for an event that fired before we
+    /// subscribed. One set of trackers means the most recent session to start
+    /// is the one the tabs show — same rule the library path lives by.
+    private void WireJoinSessionTrackers(Core.Archipelago.ApJoinSession js)
+    {
+        var ap = js.Client;
+        if (ap == null) return;
+        var plugin = js.Plugin;
+
+        _tracker.OnConnected(ap.Slot, ap.Players);
+        _locationTracker.OnConnected(ap.ConnectedChecked, ap.ConnectedMissing, ap.Players);
+
+        ap.DataPackageReceived += (gameKey, data) =>
+        {
+            bool own = string.Equals(gameKey, plugin.ApWorldName,
+                                     StringComparison.OrdinalIgnoreCase);
+            _tracker.OnDataPackage(gameKey, data, own);
+            _locationTracker.OnDataPackage(gameKey, data, own);
+            if (own)
+            {
+                var allIds = _locationTracker.GetAllIds();
+                if (allIds.Length > 0)
+                    _ = ap.LocationScoutsAsync(allIds, createAsHint: 0);
+            }
+        };
+        ap.ItemsReceived += (items, receiverSlot, _) =>
+            _tracker.RecordItems(items, receiverSlot);
+        ap.LocationInfoReceived += items =>
+        {
+            _locationTracker.OnLocationInfo(items);
+            SynthesizeSentHistory(ap, items);
+        };
+        ap.ServerCheckedLocations += ids =>
+            _locationTracker.OnLocationsChecked(ids);
+
+        _locationTracker.Changed -= OnLocationTrackerChanged;
+        _locationTracker.Changed += OnLocationTrackerChanged;
+
+        _ = FetchAllDataPackagesAsync(ap, plugin.ApWorldName);
+        RefreshProgressionPanel();
     }
 
     // ROMs tab — the per-seed patched-ROM library (emulated games only)
