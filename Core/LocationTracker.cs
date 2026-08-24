@@ -30,6 +30,13 @@ public sealed class LocationEntry
     public int    ItemFlags    { get; set; }
     public bool   IsChecked    { get; set; }
 
+    /// A hint for this location has actually been bought or received.
+    /// The tracker scouts EVERY location silently to rebuild history — that
+    /// data must never be shown for unchecked spots, or the panel becomes a
+    /// free mirror of the whole seed. Hints are the paid way to see ahead;
+    /// this flag is what separates them from the free way.
+    public bool   IsHinted     { get; set; }
+
     // AP item classification from flags bitmask
     public bool IsProgression  => (ItemFlags & 0b001) != 0;
     public bool IsUseful       => (ItemFlags & 0b010) != 0;
@@ -80,6 +87,20 @@ public sealed class LocationTracker
     // --- Public aggregates ---
     public int Total   { get { lock (_sync) return _entries.Count; } }
     public int Checked { get { lock (_sync) return _entries.Values.Count(e => e.IsChecked); } }
+
+    /// Mark one location as hinted, by name — hints arrive as text, not ids.
+    public void MarkHintedByName(string locationName)
+    {
+        if (string.IsNullOrEmpty(locationName)) return;
+        bool changed = false;
+        lock (_sync)
+        {
+            foreach (var e in _entries.Values)
+                if (!e.IsHinted && e.LocationName == locationName)
+                { e.IsHinted = true; changed = true; }
+        }
+        if (changed) Changed?.Invoke();
+    }
     public int Missing
     {
         get

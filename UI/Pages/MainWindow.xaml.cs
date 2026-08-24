@@ -1147,9 +1147,13 @@ public partial class MainWindow : Window
         PanelGameBadges.Children.Clear();
         foreach (var label in plugin.GameBadges)
         {
+            // Deliberately colourless. These are LABELS — the platform, how
+            // the install works — not checks. Amber next to a row of green
+            // checkmarks read as "something is wrong here", and players kept
+            // asking why they could not make these two turn green.
             PanelGameBadges.Children.Add(new Border
             {
-                Background        = new SolidColorBrush(Color.FromArgb(0x28, 0xF5, 0x9E, 0x0B)),
+                Background        = new SolidColorBrush(Color.FromArgb(0x14, 0xFF, 0xFF, 0xFF)),
                 CornerRadius      = new CornerRadius(2),
                 Padding           = new Thickness(6, 2, 6, 2),
                 VerticalAlignment = VerticalAlignment.Center,
@@ -1157,7 +1161,7 @@ public partial class MainWindow : Window
                 {
                     Text       = label,
                     FontSize   = 10,
-                    Foreground = new SolidColorBrush(Color.FromRgb(0xF5, 0x9E, 0x0B)),
+                    Foreground = (Brush)FindResource("BrushMuted"),
                 }
             });
         }
@@ -4887,7 +4891,11 @@ public partial class MainWindow : Window
                 // "Hint" button for unchecked locations (right, only when connected)
                 if (!entry.IsChecked && connected)
                 {
-                    string tooltip = entry.IsScouted
+                    // The scouted name only appears once a hint was PAID for.
+                    // The silent all-scout exists to rebuild history, and a
+                    // tooltip that names the prize is the same spoiler with a
+                    // hover step in front of it.
+                    string tooltip = entry.IsScouted && entry.IsHinted
                         ? $"Buy hint for: {entry.ItemName}"
                         : "Buy hint for this location";
                     var hintBtn = new Button
@@ -4922,7 +4930,9 @@ public partial class MainWindow : Window
                     TextDecorations = entry.IsChecked ? TextDecorations.Strikethrough : null,
                     TextTrimming    = TextTrimming.CharacterEllipsis,
                 });
-                if (entry.IsScouted && !entry.IsChecked)
+                // Shown only for locations someone actually hinted. Checked
+                // spots tell their story in the Items tab instead.
+                if (entry.IsScouted && entry.IsHinted && !entry.IsChecked)
                 {
                     Brush itemFg = entry.IsProgression
                         ? gold
@@ -8339,6 +8349,8 @@ public partial class MainWindow : Window
         var entry = NormalizeHintEntry(hint);
         if (!_hintKeys.Add(HintKey(entry))) return;
         _hints.Add(entry);
+        // A real hint about OUR world unlocks that one line in Progression.
+        if (entry.IsOurs) _locationTracker.MarkHintedByName(entry.LocationName);
         if (_currentTab == PageTab.Progression)
             RefreshProgressionPanel();
     }
@@ -8494,6 +8506,10 @@ public partial class MainWindow : Window
                     _hints.Add(entry);
                     byKey[key] = entry;
                     dirty = true;
+                    // Backlog hints are real hints somebody paid for in an
+                    // earlier session — they unlock the Progression line too.
+                    if (entry.IsOurs)
+                        _locationTracker.MarkHintedByName(entry.LocationName);
                 }
                 else if (byKey.TryGetValue(key, out var existing))
                 {

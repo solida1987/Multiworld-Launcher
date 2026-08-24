@@ -120,6 +120,14 @@ public static class ApWorldProvisioner
             }
             await Task.WhenAll(outTask, errTask).ConfigureAwait(false);
 
+            // Archipelago's component finishes by OPENING the templates folder
+            // in Explorer — helpful when a person ran it by hand, and pure
+            // noise when London ran it in the background. Several players have
+            // reported the mystery window. We cannot change Archipelago, but
+            // we can close the exact window our own call just caused: only
+            // Explorer, only that folder, only right now.
+            CloseExplorerAt(engine.TemplatesDir);
+
             return proc.ExitCode == 0;
         }
         catch (Exception)
@@ -130,6 +138,46 @@ public static class ApWorldProvisioner
         {
             _gate.Release();
         }
+    }
+
+    /// Close Explorer windows showing exactly this folder. Scoped on
+    /// purpose: matching by path means a window the player opened on some
+    /// OTHER folder can never be touched, and matching right after our own
+    /// generator ran means the one we close is the one we caused.
+    private static void CloseExplorerAt(string folder)
+    {
+        try
+        {
+            string want = Path.GetFullPath(folder)
+                              .TrimEnd(Path.DirectorySeparatorChar);
+            Type? shellType = Type.GetTypeFromProgID("Shell.Application");
+            if (shellType == null) return;
+
+            // The window can appear a moment after the process exits, so look
+            // a few times before concluding there is nothing to clean up.
+            for (int attempt = 0; attempt < 6; attempt++)
+            {
+                dynamic shell = Activator.CreateInstance(shellType)!;
+                bool closed = false;
+                foreach (dynamic w in shell.Windows())
+                {
+                    string? url;
+                    try { url = w.LocationURL as string; } catch { continue; }
+                    if (string.IsNullOrEmpty(url)) continue;
+                    if (!url.StartsWith("file:///", StringComparison.OrdinalIgnoreCase)) continue;
+                    string path = Uri.UnescapeDataString(url.Substring(8))
+                                     .Replace('/', Path.DirectorySeparatorChar)
+                                     .TrimEnd(Path.DirectorySeparatorChar);
+                    if (string.Equals(path, want, StringComparison.OrdinalIgnoreCase))
+                    {
+                        try { w.Quit(); closed = true; } catch { }
+                    }
+                }
+                if (closed) return;
+                System.Threading.Thread.Sleep(500);
+            }
+        }
+        catch (Exception) { /* a window we cannot close is only cosmetic */ }
     }
 
     /// True when this game already has an option template to draw a form from.
