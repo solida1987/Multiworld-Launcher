@@ -141,7 +141,13 @@ public abstract class EmulatorPlugin : IGamePlugin
     /// The host must never ask `plugin is EmulatorPlugin` -- a plugin loaded
     /// from a package is a proxy, and the test would quietly answer "no" for
     /// every catalogue game while still answering "yes" for the built-in ones.
-    public bool  UsesRomLibrary     => true;
+    /// Does this game need the player to supply a game file?
+    ///
+    /// True for every cartridge and disc, which is why it was a constant for
+    /// a long time. A native PC game is the exception: the player owns the
+    /// installed game, there is no ROM to point at, and asking for one is a
+    /// question with no right answer.
+    public virtual bool UsesRomLibrary => true;
     public bool? ApConnectorAttached => ConnectorAttached;
 
     // ── Version state ─────────────────────────────────────────────────────────

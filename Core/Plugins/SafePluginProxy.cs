@@ -175,6 +175,9 @@ public sealed class SafePluginProxy : IGamePlugin
     public void OnLocationTable(IReadOnlyDictionary<string, long> nameToId)
         => Guard(() => _inner.OnLocationTable(nameToId));
 
+    public void OnItemTable(IReadOnlyDictionary<string, long> nameToId)
+        => Guard(() => _inner.OnItemTable(nameToId));
+
     public void OnLocationHints(IReadOnlyDictionary<long, string> idToLabel)
         => Guard(() => _inner.OnLocationHints(idToLabel));
 

@@ -490,6 +490,12 @@ public interface IGamePlugin
     // The seed's location name -> id table, for games that report by name.
     void OnLocationTable(IReadOnlyDictionary<string, long> nameToId) { }
 
+    // The seed's item name -> id table, for games whose mod resolves items by
+    // name. Same source as the location table (the DataPackage), forwarded
+    // for the same reason: the plugin must not carry a second copy of a table
+    // the server already holds.
+    void OnItemTable(IReadOnlyDictionary<string, long> nameToId) { }
+
     // Locations the server reports as already checked -- at connect (resume)
     // and live (a collect, a co-op check). Games that track their own state
     // ignore it; games whose UI shows check progress need it to stay honest.

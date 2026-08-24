@@ -190,12 +190,23 @@ public sealed class ApJoinSession
 
             string worldName = gameName;
             Dictionary<string, long>? table = null;
+            Dictionary<string, long>? itemTable = null;
             client.DataPackageReceived += (gameKey, data) =>
             {
                 if (!string.Equals(gameKey, worldName, StringComparison.OrdinalIgnoreCase))
                     return;
                 // Extract while the JsonElement is alive -- the client does
                 // not clone it for this event.
+                // Items ride in the same payload as locations, and a game
+                // whose mod resolves items by name needs both halves.
+                if (data.TryGetProperty("item_name_to_id", out var itemMap))
+                {
+                    var items = new Dictionary<string, long>(StringComparer.Ordinal);
+                    foreach (var kv in itemMap.EnumerateObject())
+                        items[kv.Name] = kv.Value.GetInt64();
+                    itemTable = items;
+                    plugin.OnItemTable(items);
+                }
                 if (!data.TryGetProperty("location_name_to_id", out var locMap)) return;
                 var byName = new Dictionary<string, long>(StringComparer.Ordinal);
                 foreach (var kv in locMap.EnumerateObject())
@@ -272,6 +283,7 @@ public sealed class ApJoinSession
             // that resets session state in LaunchAsync loses anything that
             // arrived before it. All three calls are idempotent by contract.
             if (client.SlotData is { } sd2) plugin.OnSlotData(sd2);
+            if (itemTable is { } it2) plugin.OnItemTable(it2);
             if (table is { } t2)
             {
                 plugin.OnLocationTable(t2);

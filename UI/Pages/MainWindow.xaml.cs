@@ -7957,6 +7957,11 @@ public partial class MainWindow : Window
                     foreach (var kv in locs) byName[kv.Value] = kv.Key;
                     var tablePlugin = _runningPlugin ?? _selectedPlugin;
                     tablePlugin?.OnLocationTable(byName);
+                    // Same for items: a mod that resolves items by name gets
+                    // the table from the same DataPackage payload.
+                    var itemsByName = new Dictionary<string, long>(items.Count, StringComparer.Ordinal);
+                    foreach (var kv in items) itemsByName[kv.Value] = kv.Key;
+                    tablePlugin?.OnItemTable(itemsByName);
                     // Resume sync, now that the plugin can name the ids.
                     tablePlugin?.OnCheckedLocations(ap.ConnectedChecked.ToArray());
                 }
