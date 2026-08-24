@@ -2066,7 +2066,12 @@ public partial class MainWindow : Window
             {
                 if (capShown && badge.Equals("ROM needed", StringComparison.OrdinalIgnoreCase))
                     continue;   // the capability pill already says it
-                AddOverviewBadge(badge.ToUpperInvariant(), Color.FromRgb(0xF5, 0x9E, 0x0B));
+                // Neutral grey, not amber: these are LABELS (platform, install
+                // kind), and amber in the same row as green ✓ checks kept
+                // being read as "two requirements I somehow cannot satisfy".
+                // Same lesson as the sidebar header — this was the SECOND
+                // place the badges were painted, and only the first got fixed.
+                AddOverviewBadge(badge.ToUpperInvariant(), Color.FromRgb(0x8A, 0x93, 0xA6));
             }
         }
 
