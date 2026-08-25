@@ -60,8 +60,7 @@ public static class EmulatorInstaller
         foreach (var a in assets.EnumerateArray())
         {
             string name = a.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "";
-            if (name.Length == 0
-                || name.IndexOf(src.AssetPattern, StringComparison.OrdinalIgnoreCase) < 0)
+            if (!AssetPattern.Matches(name, src.AssetPattern))
                 continue;
 
             string url = a.TryGetProperty("browser_download_url", out var u)
