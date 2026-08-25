@@ -53,6 +53,12 @@ public sealed class Snes9xLuaBridge : IDisposable
     private readonly Table  _module;
     private readonly byte[] _wram = new byte[WramSize];
     private readonly ConcurrentQueue<ItemMeta> _incoming = new();
+    // Passthrough: no per-tick WRAM snapshot — every read goes straight to the
+    // transport. For consoles whose modules use absolute process addresses
+    // (the 3DS over Azahar), where "all of WRAM" is not a thing that can be
+    // fetched up front and a module's reads are pointer-chases anyway.
+    private readonly bool _passthrough;
+    private readonly int  _tickMs;
 
     private CancellationTokenSource? _cts;
     private volatile bool _disconnected;
@@ -74,12 +80,19 @@ public sealed class Snes9xLuaBridge : IDisposable
 
     /// The transport-agnostic form: any ISnesMemory will do. `tag` names the
     /// transport in log lines so an SNI session does not read as snes9x.
+    /// `passthrough` skips the per-tick WRAM snapshot (3DS: absolute
+    /// addresses, nothing to snapshot); `tickMs` slows the poll for wires
+    /// where one tick costs many round-trips (Azahar reads course flags in
+    /// ~170 UDP exchanges — 4 Hz there matches the world's own client).
     public Snes9xLuaBridge(ISnesMemory mem, string moduleLuaPath, BridgeConfig config,
-                           Action<string>? log = null, string tag = "snes9x")
+                           Action<string>? log = null, string tag = "snes9x",
+                           bool passthrough = false, int tickMs = TickMs)
     {
         _mem = mem;
         _tag = tag;
         _log = log;
+        _passthrough = passthrough;
+        _tickMs = tickMs;
 
         // Pure-managed interpreter.
         // everything our modules use; the file/io globals they DON'T use are
@@ -133,10 +146,14 @@ public sealed class Snes9xLuaBridge : IDisposable
             try
             {
                 // 1. One CORE_READ of all WRAM → the per-tick snapshot the memory
-                // shim serves reads from.
-                byte[] snap = _mem.ReadAsync("WRAM", 0, WramSize, ct)
-                                  .GetAwaiter().GetResult();
-                Buffer.BlockCopy(snap, 0, _wram, 0, Math.Min(snap.Length, WramSize));
+                // shim serves reads from. Passthrough transports skip this:
+                // their modules read on demand.
+                if (!_passthrough)
+                {
+                    byte[] snap = _mem.ReadAsync("WRAM", 0, WramSize, ct)
+                                      .GetAwaiter().GetResult();
+                    Buffer.BlockCopy(snap, 0, _wram, 0, Math.Min(snap.Length, WramSize));
+                }
 
                 // 2. poll() → newly-checked AP location ids.
                 var newChecks = new List<long>();
@@ -216,7 +233,7 @@ public sealed class Snes9xLuaBridge : IDisposable
                 break;
             }
 
-            try { Task.Delay(TickMs, ct).Wait(ct); }
+            try { Task.Delay(_tickMs, ct).Wait(ct); }
             catch (OperationCanceledException) { break; }
         }
     }
@@ -287,6 +304,19 @@ public sealed class Snes9xLuaBridge : IDisposable
         mem["read_u16_le"]  = DynValue.NewCallback((_, a) => DynValue.NewNumber(ReadU16(Addr(a), Domain(a, 1))));
         mem["write_u8"]     = DynValue.NewCallback((_, a) => { WriteU8(Addr(a), (int)a[1].Number, Domain(a, 2)); return DynValue.Nil; });
         mem["write_u16_le"] = DynValue.NewCallback((_, a) => { WriteU16(Addr(a), (int)a[1].Number, Domain(a, 2)); return DynValue.Nil; });
+        // The wider forms the 3DS modules need: pointers are u32, and flag
+        // buffers are read as blocks so one poll is not 700 round-trips.
+        // read_bytes returns a 1-based Lua table of byte values.
+        mem["read_u32_le"]  = DynValue.NewCallback((_, a) => DynValue.NewNumber(ReadU32(Addr(a), Domain(a, 1))));
+        mem["write_u32_le"] = DynValue.NewCallback((_, a) => { WriteU32(Addr(a), (long)a[1].Number, Domain(a, 2)); return DynValue.Nil; });
+        mem["read_bytes"]   = DynValue.NewCallback((_, a) =>
+        {
+            int len = (int)a[1].Number;
+            byte[] b = ReadBlock(Addr(a), len, Domain(a, 2));
+            var t = new Table(_script);
+            for (int i = 0; i < b.Length; i++) t[i + 1] = (double)b[i];
+            return DynValue.NewTable(t);
+        });
         _script.Globals["memory"] = mem;
     }
 
@@ -314,7 +344,7 @@ public sealed class Snes9xLuaBridge : IDisposable
 
     private int ReadU8(int addr, string region)
     {
-        if (region == "WRAM")
+        if (!_passthrough && region == "WRAM")
             return (addr >= 0 && addr < _wram.Length) ? _wram[addr] : 0;
         byte[] b = _mem.ReadAsync(region, addr, 1).GetAwaiter().GetResult();
         return b.Length > 0 ? b[0] : 0;
@@ -322,7 +352,7 @@ public sealed class Snes9xLuaBridge : IDisposable
 
     private int ReadU16(int addr, string region)
     {
-        if (region == "WRAM")
+        if (!_passthrough && region == "WRAM")
         {
             if (addr < 0 || addr + 1 >= _wram.Length) return 0;
             return _wram[addr] | (_wram[addr + 1] << 8);
@@ -331,19 +361,52 @@ public sealed class Snes9xLuaBridge : IDisposable
         return b.Length >= 2 ? b[0] | (b[1] << 8) : 0;
     }
 
+    private long ReadU32(int addr, string region)
+    {
+        byte[] b = ReadBlock(addr, 4, region);
+        if (b.Length < 4) return 0;
+        return b[0] | ((long)b[1] << 8) | ((long)b[2] << 16) | ((long)b[3] << 24);
+    }
+
+    private byte[] ReadBlock(int addr, int len, string region)
+    {
+        if (len <= 0) return Array.Empty<byte>();
+        if (!_passthrough && region == "WRAM")
+        {
+            if (addr < 0 || addr + len > _wram.Length) return new byte[len];
+            var copy = new byte[len];
+            Buffer.BlockCopy(_wram, addr, copy, 0, len);
+            return copy;
+        }
+        return _mem.ReadAsync(region, addr, len).GetAwaiter().GetResult();
+    }
+
     private void WriteU8(int addr, int value, string region)
     {
         byte[] data = { (byte)(value & 0xFF) };
         _mem.WriteAsync(region, addr, data).GetAwaiter().GetResult();
-        if (region == "WRAM" && addr >= 0 && addr < _wram.Length) _wram[addr] = data[0];
+        if (!_passthrough && region == "WRAM" && addr >= 0 && addr < _wram.Length)
+            _wram[addr] = data[0];
     }
 
     private void WriteU16(int addr, int value, string region)
     {
         byte[] data = { (byte)(value & 0xFF), (byte)((value >> 8) & 0xFF) };
         _mem.WriteAsync(region, addr, data).GetAwaiter().GetResult();
-        if (region == "WRAM" && addr >= 0 && addr + 1 < _wram.Length)
+        if (!_passthrough && region == "WRAM" && addr >= 0 && addr + 1 < _wram.Length)
         { _wram[addr] = data[0]; _wram[addr + 1] = data[1]; }
+    }
+
+    private void WriteU32(int addr, long value, string region)
+    {
+        byte[] data =
+        {
+            (byte)(value & 0xFF), (byte)((value >> 8) & 0xFF),
+            (byte)((value >> 16) & 0xFF), (byte)((value >> 24) & 0xFF),
+        };
+        _mem.WriteAsync(region, addr, data).GetAwaiter().GetResult();
+        if (!_passthrough && region == "WRAM" && addr >= 0 && addr + 3 < _wram.Length)
+            Buffer.BlockCopy(data, 0, _wram, addr, 4);
     }
 
     public void Dispose()

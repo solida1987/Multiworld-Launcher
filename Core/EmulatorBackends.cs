@@ -34,7 +34,9 @@ namespace LauncherV2.Core;
 // Attach = the launcher starts nothing: it attaches to a helper the player
 // (or the launcher, when the helper is in its folder) runs — SNI — and runs
 // the game logic itself over that helper's protocol.
-public enum BridgeDialect { Pipe, Nwa, Attach }
+// Azahar = launcher is a UDP client of the 3DS emulator's scripting server
+// and runs the game logic itself via Snes9xLuaBridge in passthrough mode.
+public enum BridgeDialect { Pipe, Nwa, Attach, Azahar }
 
 // One emulator backend the launcher can describe (and, when BridgeReady, drive).
 public sealed record EmulatorBackend
@@ -347,9 +349,10 @@ public static class EmulatorBackends
         },
 
         // Azahar — the living Citra fork, and the only way London reaches a
-        // 3DS game. No bridge transport will ever be needed here: the 3DS
-        // worlds ship their own Archipelago client, and it speaks Azahar's
-        // scripting protocol on 127.0.0.1:45987 directly.
+        // 3DS game. The launcher itself is the client of Azahar's scripting
+        // server (UDP 127.0.0.1:45987) and runs the game's AP logic module in
+        // Snes9xLuaBridge passthrough mode — no world client, no extra window,
+        // same as every other emulator.
         //
         // ⚠ That server is OFF unless the config says otherwise. The azahar
         // runner extension writes [Debugging] enable_rpc_server=true before
@@ -361,13 +364,14 @@ public static class EmulatorBackends
             DisplayName   = "Azahar (3DS)",
             Systems       = new[] { "3DS", "N3DS" },
             BridgeReady   = true,
+            Dialect       = BridgeDialect.Azahar,
             // TRANSPORT verified live 25 Aug 2026: config written, Azahar
             // launched with a real A Link Between Worlds dump ("Azahar 2126.0
             // | The Legend of Zelda" in its title bar), UDP 45987 listening,
-            // the world client's own handshake answered with its 16-byte
-            // header, and a memory read at 0x08000000 returned real bytes.
-            // ⚠ What is NOT yet proven is the pairing: no check has been
-            // carried through by the world's own client.
+            // the handshake answered with its 16-byte header, and a memory
+            // read at 0x08000000 returned real bytes. A full session (checks
+            // out, items in) was carried the same day — by the world's client
+            // then, by this in-launcher bridge now; the wire is identical.
             LiveVerified  = true,
             HomepageUrl   = "https://azahar-emu.org/",
             ExeName       = "azahar.exe",

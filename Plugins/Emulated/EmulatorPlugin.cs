@@ -362,6 +362,10 @@ public abstract class EmulatorPlugin : IGamePlugin
     // NWA (_nwaBridge), different wire — see LaunchViaSniAsync.
     private LauncherV2.Core.Extensions.IEmulatorBridge? _sniTransport;
 
+    // The Azahar UDP transport when the 3DS backend is active. Same Lua
+    // bridge again (_nwaBridge), third wire — see LaunchViaAzaharAsync.
+    private AzaharMemory? _azaharMemory;
+
     /// Per-launch pipe name disambiguator: a previous launch's servers may
     /// still be winding down (attach timeout, EmuHawk just killed) when the
     /// next launch creates new ones — same-name single-instance pipes would
@@ -602,6 +606,11 @@ public abstract class EmulatorPlugin : IGamePlugin
         if (nwaBackend.Dialect == BridgeDialect.Attach)
         {
             await LaunchViaSniAsync(nwaBackend, launchRom, session, ct);
+            return;
+        }
+        if (nwaBackend.Dialect == BridgeDialect.Azahar)
+        {
+            await LaunchViaAzaharAsync(nwaBackend, launchRom, session, ct);
             return;
         }
 
@@ -1237,6 +1246,145 @@ public abstract class EmulatorPlugin : IGamePlugin
         bridge.Start(ct);
     }
 
+    // ── Azahar (3DS) path ───────────────────────────────────────────────────
+
+    /// Start Azahar through its bridge extension (which switches the
+    /// scripting server on and points the SD card at this seed's folder),
+    /// connect to that server over UDP, and run this game's Lua module
+    /// launcher-side in passthrough mode — the same Snes9xLuaBridge as NWA
+    /// and SNI, on a third wire. No world client, no extra window: the
+    /// player presses Play and London is the whole connection.
+    private async Task LaunchViaAzaharAsync(EmulatorBackend backend, string launchRom,
+                                            ApSession session, CancellationToken ct)
+    {
+        StartTrace();
+        DisposeNwa();
+
+        // The extension owns everything that must happen BEFORE the process
+        // starts: [Debugging] enable_rpc_server=true (off by default — the
+        // emulator would run perfectly and answer nothing) and the per-seed
+        // SD card under user/sdmc_sessions/<rom stem>/.
+        string emulatorsRoot = Path.Combine(AppContext.BaseDirectory, "Emulators");
+        var runner = LauncherV2.Core.Extensions.BridgeRegistry.Find(ClientProtocol)
+            ?? throw new InvalidOperationException(
+                LauncherV2.Core.Extensions.BridgeRegistry
+                    .ExplainMissing(ClientProtocol, DisplayName)
+                ?? $"No bridge extension is installed for \"{ClientProtocol}\".");
+        if (runner.GetUnmetRequirement() is { Length: > 0 } unmet)
+            throw new InvalidOperationException(unmet);
+
+        var plan = runner.GetLaunchPlan(
+            new LauncherV2.Core.Extensions.BridgeContext(
+                GameId, RomSystem, launchRom, EmulatorDirectory,
+                Fullscreen: StartFullscreen),
+            emulatorsRoot)
+            ?? throw new InvalidOperationException(
+                $"{runner.DisplayName} did not say what to start. Check that "
+              + "your copy is in Emulators\\ as its note describes.");
+
+        var psi = new ProcessStartInfo
+        {
+            FileName         = plan.ExePath,
+            Arguments        = plan.Arguments,
+            WorkingDirectory = plan.WorkingDirectory,
+            UseShellExecute  = false,
+        };
+        var proc = Process.Start(psi)
+            ?? throw new InvalidOperationException($"Failed to start {backend.DisplayName}.");
+        _emuProcess = proc;
+        IsRunning = true;
+        ConnectorAttached = false;
+        proc.EnableRaisingEvents = true;
+        proc.Exited += (_, _) =>
+        {
+            IsRunning = false;
+            ScrubApConfigPassword();
+            int code = 0; try { code = proc.ExitCode; } catch { /* gone */ }
+            GameExited?.Invoke(code);
+        };
+        Trace($"{backend.DisplayName} started (pid {proc.Id}) — waiting for its scripting server");
+
+        // The scripting server answers as soon as the emulator's UI is up,
+        // but the GAME needs longer: reads of the AP header only make sense
+        // once the process is booted and mapped. So the wait is two-stage —
+        // handshake first, then a probe read of the header address. The probe
+        // retries inside the same deadline; a module started before memory is
+        // readable would die on its first tick.
+        var mem = new AzaharMemory();
+        bool up = false;
+        var deadline = DateTime.UtcNow.AddSeconds(90);
+        while (DateTime.UtcNow < deadline && !ct.IsCancellationRequested && !proc.HasExited)
+        {
+            if (!up)
+            {
+                up = await mem.HandshakeAsync(ct);
+                if (!up) { try { await Task.Delay(1000, ct); } catch { break; } continue; }
+                Trace("Azahar scripting server answered — probing game memory");
+            }
+            try
+            {
+                await mem.ReadAsync("WRAM", 0x100000, 4, ct);   // any mapped code address
+                break;                                          // readable → game is up
+            }
+            catch (OperationCanceledException) { break; }
+            catch { try { await Task.Delay(1000, ct); } catch { break; } }
+        }
+
+        if (!up || ct.IsCancellationRequested || proc.HasExited)
+        {
+            mem.Dispose();
+            Trace("Azahar scripting server never answered — game runs without AP sync");
+            SessionRomNote ??= $"[{DisplayName}] {backend.DisplayName} started but its "
+                + "scripting server did not answer on UDP 45987, so nothing you do in "
+                + "the game will reach Archipelago. The launcher switches that server "
+                + "on in qt-config.ini before starting; if this keeps happening, check "
+                + "that no other program is holding that port.";
+            return;
+        }
+
+        _azaharMemory = mem;
+        ConnectorAttached = true;
+        Trace($"Azahar connected — starting Lua bridge ({LuaModuleName}, passthrough)");
+
+        string modulePath = Path.Combine(ScriptsDirectory, "games", LuaModuleName + ".lua");
+        var cfg = new BridgeConfig
+        {
+            SlotNumber = GetOwnSlot?.Invoke() ?? 0,
+            Locations  = GetServerLocations?.Invoke() ?? Array.Empty<long>(),
+            SlotData   = ConvertSlotData(GetSlotData?.Invoke()),
+        };
+
+        Snes9xLuaBridge bridge;
+        try
+        {
+            // 250 ms tick: one poll costs ~170 UDP round-trips here, and the
+            // world's own client polled at the same 4 Hz.
+            bridge = new Snes9xLuaBridge(mem, modulePath, cfg, log: Trace,
+                                         tag: "azahar", passthrough: true, tickMs: 250);
+        }
+        catch (Exception ex)
+        {
+            Trace($"Lua bridge failed to start: {ex.Message}");
+            SessionRomNote ??= $"[{DisplayName}] connected to {backend.DisplayName} but the "
+                + $"AP logic module failed to load ({ex.Message}) — game runs without sync.";
+            mem.Dispose();
+            _azaharMemory = null;
+            return;
+        }
+        bridge.LocationsChecked += ids =>
+        { try { LocationsChecked?.Invoke(ids); } catch (Exception ex) { Trace($"LocationsChecked handler: {ex.Message}"); } };
+        bridge.GoalCompleted += () =>
+        { try { GoalCompleted?.Invoke(); } catch (Exception ex) { Trace($"GoalCompleted handler: {ex.Message}"); } };
+        bridge.Disconnected += why => Trace($"Azahar bridge disconnected: {why}");
+        _nwaBridge = bridge;
+
+        // Replay the item backlog (full stream from index 0) — the module
+        // paces delivery against the game's own received count, so a resumed
+        // save picks up exactly where it left off.
+        lock (_itemsLock) { _nwaDelivered = 0; PushItemsToNwaBridgeLocked(); }
+        bridge.Start(ct);
+    }
+
     /// Top-level slot_data (JsonElement) → the bool/long/double/string map the
     /// Lua modules read (e.g. remote_items). Null/non-object → null.
     private static IReadOnlyDictionary<string, object?>? ConvertSlotData(JsonElement? slotData)
@@ -1262,9 +1410,11 @@ public abstract class EmulatorPlugin : IGamePlugin
         try { _nwaBridge?.Dispose(); } catch { }
         try { _nwaClient?.Dispose(); } catch { }
         try { _sniTransport?.DisconnectAsync().GetAwaiter().GetResult(); } catch { }
+        try { _azaharMemory?.Dispose(); } catch { }
         _nwaBridge = null;
         _nwaClient = null;
         _sniTransport = null;
+        _azaharMemory = null;
         _nwaDelivered = 0;
     }
 
