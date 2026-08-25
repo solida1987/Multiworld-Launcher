@@ -346,6 +346,39 @@ public static class EmulatorBackends
                 AssetPattern: "Citron-windows-nightly-*-x64-msvc.zip"),
         },
 
+        // Azahar — the living Citra fork, and the only way London reaches a
+        // 3DS game. No bridge transport will ever be needed here: the 3DS
+        // worlds ship their own Archipelago client, and it speaks Azahar's
+        // scripting protocol on 127.0.0.1:45987 directly.
+        //
+        // ⚠ That server is OFF unless the config says otherwise. The azahar
+        // runner extension writes [Debugging] enable_rpc_server=true before
+        // every launch — without it the emulator runs perfectly and answers
+        // nothing, which is exactly how snes9x lost a whole session.
+        new EmulatorBackend
+        {
+            Id            = "azahar",
+            DisplayName   = "Azahar (3DS)",
+            Systems       = new[] { "3DS", "N3DS" },
+            BridgeReady   = true,
+            LiveVerified  = false,
+            HomepageUrl   = "https://azahar-emu.org/",
+            ExeName       = "azahar.exe",
+            // ⚠ The player must supply their own 3DS system files, which only
+            // their own console can produce. The launcher fetches only the
+            // emulator, from its own release, after showing whose work it is.
+            Source = new LauncherV2.Core.Emulators.EmulatorSource(
+                Author:       "the Azahar team (a fork of Citra)",
+                Licence:      "GPL-2.0",
+                LicenceUrl:   "https://github.com/azahar-emu/azahar/blob/master/license.txt",
+                DownloadPage: "https://github.com/azahar-emu/azahar/releases",
+                Owner:        "azahar-emu",
+                Repo:         "azahar",
+                // Three Windows toolchains are published; msvc is the
+                // conventional one, and the version sits mid-name.
+                AssetPattern: "azahar-windows-msvc-*.zip"),
+        },
+
         // SNI — not an emulator but the SNES community's bridge program: it
         // attaches to snes9x-emunwa, RetroArch, or real hardware (FX Pak Pro)
         // and serves their memory over one protocol. Picking it means "I run my
