@@ -944,11 +944,29 @@ public abstract class EmulatorPlugin : IGamePlugin
     {
         try
         {
-            string engine = LauncherV2.Core.SettingsStore.Load().ApEnginePath;
-            if (string.IsNullOrWhiteSpace(engine)) return false;
-            string exe = Path.Combine(engine,
-                LauncherV2.Core.Archipelago.ApEngine.LauncherExeName);
-            if (!File.Exists(exe)) return false;
+            // Three places the engine can live, tried in order and TESTED --
+            // an empty ap_engine_path must not kill the one-button start when
+            // the same settings file names the install one line down
+            // (apworld_sync_dir points at the AP root), or when it sits at
+            // the standard path.
+            var st = LauncherV2.Core.SettingsStore.Load();
+            string? exe = null;
+            foreach (string root in new[] { st.ApEnginePath, st.ApworldSyncDir,
+                                            @"C:\ProgramData\Archipelago" })
+            {
+                if (string.IsNullOrWhiteSpace(root)) continue;
+                string cand = Path.Combine(root,
+                    LauncherV2.Core.Archipelago.ApEngine.LauncherExeName);
+                if (File.Exists(cand)) { exe = cand; break; }
+            }
+            if (exe is null)
+            {
+                Trace("world client not started: no Archipelago install found "
+                    + "(ap_engine_path, apworld_sync_dir and the default all "
+                    + "came up empty)");
+                return false;
+            }
+            string engine = Path.GetDirectoryName(exe)!;
 
             // CommonClient wants host:port; the session may carry a scheme.
             string server = session.ServerUri
