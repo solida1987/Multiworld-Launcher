@@ -1903,7 +1903,10 @@ public abstract class EmulatorPlugin : IGamePlugin
             "NES"  => "NES ROM (*.nes)|*.nes|All files (*.*)|*.*",
             "N64"  => "N64 ROM (*.n64;*.z64;*.v64)|*.n64;*.z64;*.v64|All files (*.*)|*.*",
             "GEN"  => "Genesis ROM (*.md;*.bin)|*.md;*.bin|All files (*.*)|*.*",
+            // Both spellings: the game list and the catalogue's manifests say
+            // "DS", older code said "NDS" -- see EmulatorBackends.Systems.
             "NDS"  => "Nintendo DS ROM (*.nds)|*.nds|All files (*.*)|*.*",
+            "DS"   => "Nintendo DS ROM (*.nds)|*.nds|All files (*.*)|*.*",
             "SMS"  => "Master System ROM (*.sms)|*.sms|All files (*.*)|*.*",
             "2600" => "Atari 2600 ROM (*.a26;*.bin)|*.a26;*.bin|All files (*.*)|*.*",
             _      => "ROM files|*.*",

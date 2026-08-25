@@ -126,8 +126,15 @@ public static class EmulatorBackends
             DisplayName   = "BizHawk",
             // BizHawk hosts (nearly) the whole emulated catalog natively,
             // including NDS via its built-in melonDS core (matrix §1, §2).
+            // ⚠ BOTH spellings of the DS. The Archipelago game list writes
+            // "DS", the catalogue's manifests carry that spelling verbatim,
+            // and RomSystem is Manifest.Platform -- so with only "NDS" here,
+            // BackendsForSystem("DS") was empty and Pokémon B/W and Platinum
+            // lost their emulator button while looking like non-emulated
+            // games. Same lesson as the catalogue's own tables on 20 Aug.
             Systems       = new[] { "GBA", "GBC", "GB", "SNES", "NES", "N64",
-                                    "GEN", "SMS", "A26", "2600", "PSX", "NDS" },
+                                    "GEN", "SMS", "A26", "2600", "PSX",
+                                    "NDS", "DS" },
             BridgeReady   = true,                       // proven (Pokémon Emerald)
             HomepageUrl   = "https://tasvideos.org/BizHawk",
             ExeName       = "EmuHawk.exe",
