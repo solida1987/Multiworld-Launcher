@@ -11,8 +11,11 @@
 -- poll() and is_goal_complete() both refuse to answer until a save is loaded:
 -- against uninitialised RAM the goal value fires at boot and releases the seed.
 --
--- receive_item() is a no-op. Own items are patched into the ROM; delivering
--- another world's item needs a write path that has not been measured yet.
+-- receive_item() queues; poll() applies -- only in a loaded game, using the
+-- game's own idioms (ORA #$01 flags, the $755/$70C pending-add buffers). A
+-- counter in unused battery SRAM ($7FC0, no reference in the disassembly)
+-- rides with the save, so the launcher's replay-from-zero on every start
+-- cannot grant a counted item twice.
 
 local M = {}
 M.name = "zelda2"
@@ -110,10 +113,61 @@ local LOCATIONS = {
   { id = 1513227739, addr = 0x6BB, mask = 0x10, variant = false },  -- Palaces 3, 4 and 6 - Area 54 Screen 3
   { id = 1513226918, addr = 0x6D4, mask = 0x02, variant = true },  -- Great Palace - Area 41 Screen 2
 }
+local ITEMS = {
+  [1513230336] = "candle",
+  [1513230337] = "glove",
+  [1513230338] = "raft",
+  [1513230339] = "boots",
+  [1513230340] = "flute",
+  [1513230341] = "cross",
+  [1513230342] = "hammer",
+  [1513230343] = "magic_key",
+  [1513230344] = "key",
+  [1513230345] = "exp_50",
+  [1513230346] = "exp_100",
+  [1513230347] = "exp_200",
+  [1513230348] = "exp_500",
+  [1513230349] = "magic_container",
+  [1513230350] = "heart_container",
+  [1513230351] = "blue_jar",
+  [1513230352] = "red_jar",
+  [1513230353] = "link_doll",
+  [1513230354] = "child",
+  [1513230355] = "trophy",
+  [1513230356] = "medicine",
+}
 -- ── State ─────────────────────────────────────────────────────────────────────
 local reported         = {}
 local previous         = nil     -- the block as of the last poll
 local BURST_LIMIT      = 4       -- more clears at once is a load, not play
+local pending          = {}      -- received items waiting for a loaded game
+local sram             = nil     -- resolved battery-SRAM access, or false
+local warned_no_sram   = false
+
+-- Where an item lands (CC0 disassembly ram-map). $755/$756 and $70C are the
+-- game's own "to be added" buffers, so tallying, level-ups and caps stay its.
+local IT_HAVE   = 0x0785   -- +game code 0-7: the eight key items (ORA #$01)
+local IT_KEYS   = 0x0793   -- capped at 9
+local IT_XP_HI  = 0x0755   -- experience to be added, high byte
+local IT_XP_LO  = 0x0756
+local IT_MC     = 0x0783   -- magic containers, capped at 8
+local IT_HC     = 0x0784   -- heart containers, capped at 8
+local IT_MAGIC  = 0x070C   -- magic to be added to the meter
+local IT_LIVES  = 0x0700   -- capped at 9
+local IT_TROPHY = 0x0798   -- bit $10
+local IT_MEDIC  = 0x079A   -- bit $40
+local IT_CHILD  = 0x079C   -- bit $20
+
+local MAJOR_SLOT = { candle=0, glove=1, raft=2, boots=3, flute=4, cross=5,
+                     hammer=6, magic_key=7 }
+local EXP_VALUE  = { exp_50=50, exp_100=100, exp_200=200, exp_500=500 }
+local JAR_MAGIC  = { blue_jar=0x20, red_jar=0x60 }
+
+-- The counter: 4 magic bytes + u16, at $7FC0 -- the one SRAM corner nothing
+-- in the disassembly ever references. WRAM addresses are relative to $6000.
+local SRAM_SPOTS = { { domain="WRAM", base=0x1FC0 },
+                     { domain="System Bus", base=0x7FC0 } }
+local SRAM_MAGIC = { 0x5A, 0x32, 0x41, 0x50 }   -- "Z2AP"
 local server_locations = nil
 local rom_ok           = nil       -- cached YES only
 local mem              = {}
@@ -164,7 +218,8 @@ end
 
 local function resolve_memory_api()
   if not memory then return false end
-  mem.read_u8 = memory.read_u8 or memory.readbyte
+  mem.read_u8  = memory.read_u8 or memory.readbyte
+  mem.write_u8 = memory.write_u8 or memory.writebyte
   return mem.read_u8 ~= nil
 end
 
@@ -180,6 +235,18 @@ local function read_u8(addr, domain)
     if ok and type(v) == "number" then return v end
   end
   return nil
+end
+
+local function write_u8(addr, value, domain)
+  if not mem.write_u8 then return false end
+  if not ap_domain_ok(domain) then return false end
+  if pcall(mem.write_u8, addr, value, domain) then return true end
+  if _ap_two_arg == false then
+    if domain ~= nil and memory.usememorydomain
+        and not pcall(memory.usememorydomain, domain) then return false end
+    return (pcall(mem.write_u8, addr, value)) and true or false
+  end
+  return false
 end
 
 -- ── ROM identity. Only a YES is cached: a NO measured before the core has
@@ -235,6 +302,106 @@ function M.init(ctx)
   log("ready: " .. #LOCATIONS .. " locations")
 end
 
+-- ── Delivery of received items ────────────────────────────────────────────────
+local function sram_resolve()
+  if sram ~= nil then return sram end
+  for _, c in ipairs(SRAM_SPOTS) do
+    local probe = read_u8(c.base + 7, c.domain)
+    if probe ~= nil and write_u8(c.base + 7, 0xA5, c.domain)
+       and read_u8(c.base + 7, c.domain) == 0xA5 then
+      write_u8(c.base + 7, probe, c.domain)
+      sram = { domain = c.domain, base = c.base }
+      log("delivery counter lives in '" .. c.domain .. "'")
+      return sram
+    end
+  end
+  sram = false
+  return false
+end
+
+local function counter_read()
+  for i = 1, 4 do
+    if read_u8(sram.base + i - 1, sram.domain) ~= SRAM_MAGIC[i] then
+      -- This save has never received an item: stamp the record at zero.
+      for j = 1, 4 do write_u8(sram.base + j - 1, SRAM_MAGIC[j], sram.domain) end
+      write_u8(sram.base + 4, 0, sram.domain)
+      write_u8(sram.base + 5, 0, sram.domain)
+      return 0
+    end
+  end
+  return (read_u8(sram.base + 4, sram.domain) or 0)
+       + (read_u8(sram.base + 5, sram.domain) or 0) * 256
+end
+
+local function counter_write(n)
+  write_u8(sram.base + 4, n % 256, sram.domain)
+  write_u8(sram.base + 5, math.floor(n / 256) % 256, sram.domain)
+end
+
+local function rd(a) return read_u8(a, RAM) or 0 end
+local function wr(a, v) return write_u8(a, v, RAM) end
+
+local function apply_item(kind)
+  local slot = MAJOR_SLOT[kind]
+  if slot ~= nil then
+    wr(IT_HAVE + slot, bit_and(rd(IT_HAVE + slot), 0xFE) + 1)
+    return
+  end
+  local xp = EXP_VALUE[kind]
+  if xp ~= nil then
+    local cur = rd(IT_XP_HI) * 256 + rd(IT_XP_LO) + xp
+    if cur > 9999 then cur = 9999 end
+    wr(IT_XP_HI, math.floor(cur / 256))
+    wr(IT_XP_LO, cur % 256)
+    return
+  end
+  local magic = JAR_MAGIC[kind]
+  if magic ~= nil then
+    local v = rd(IT_MAGIC) + magic
+    wr(IT_MAGIC, v > 0xFF and 0xFF or v)
+    return
+  end
+  if kind == "key" then
+    local v = rd(IT_KEYS); if v < 9 then wr(IT_KEYS, v + 1) end
+  elseif kind == "magic_container" then
+    local v = rd(IT_MC); if v < 8 then wr(IT_MC, v + 1) end
+  elseif kind == "heart_container" then
+    local v = rd(IT_HC); if v < 8 then wr(IT_HC, v + 1) end
+  elseif kind == "link_doll" then
+    local v = rd(IT_LIVES); if v < 9 then wr(IT_LIVES, v + 1) end
+  elseif kind == "trophy" then
+    wr(IT_TROPHY, bit_and(rd(IT_TROPHY), 0xEF) + 0x10)
+  elseif kind == "medicine" then
+    wr(IT_MEDIC, bit_and(rd(IT_MEDIC), 0xBF) + 0x40)
+  elseif kind == "child" then
+    wr(IT_CHILD, bit_and(rd(IT_CHILD), 0xDF) + 0x20)
+  end
+end
+
+local function apply_pending()
+  if #pending == 0 then return end
+  if not sram_resolve() then
+    if not warned_no_sram then
+      warned_no_sram = true
+      log("no writable battery SRAM found -- items are NOT delivered, or a"
+          .. " restart would grant every counted item twice")
+    end
+    return
+  end
+  local count = counter_read()
+  local queue = pending
+  pending = {}
+  for _, e in ipairs(queue) do
+    if e.index == nil or e.index >= count then
+      apply_item(e.kind)
+      log("delivered: " .. e.kind
+          .. (e.index and (" (index " .. e.index .. ")") or ""))
+      if e.index ~= nil and e.index + 1 > count then count = e.index + 1 end
+    end
+  end
+  counter_write(count)
+end
+
 function M.poll()
   if not ADDRESSES_VERIFIED then return {} end
   if not rom_is_zelda2() then return {} end
@@ -255,6 +422,7 @@ function M.poll()
   -- clear now. Never a state.
   if previous == nil then
     previous = presence
+    apply_pending()
     return {}
   end
 
@@ -281,6 +449,7 @@ function M.poll()
   end
 
   for _, id in ipairs(new) do reported[id] = true end
+  apply_pending()
   return new
 end
 
@@ -293,12 +462,11 @@ function M.is_goal_complete()
   return r ~= nil and GOAL_VALUES[r] == true
 end
 
--- Remote items: see the header. The player's own items are in the patched
--- ROM, so a solo seed needs no writes; delivering another world's item needs
--- a write path measured in a running game, and a wrong work-RAM write
--- corrupts the save. No-op rather than shipped unverified.
 function M.receive_item(item_id, meta)
-  -- intentionally empty (documented)
+  local kind = ITEMS[item_id]
+  if kind == nil then return end
+  pending[#pending + 1] = { kind = kind,
+                            index = meta and meta.index or nil }
 end
 
 return M
