@@ -346,6 +346,7 @@ public abstract class EmulatorPlugin : IGamePlugin
     // ── Internal state ────────────────────────────────────────────────────────
 
     private Process?                _emuProcess;
+    private Process?                _worldClientProcess;
     /// Connector → launcher pipe ("<base>_c2s"): CHECK / GOAL / SYNC.
     private NamedPipeServerStream?  _pipeIn;
     /// Launcher → connector pipe ("<base>_s2c"): ITEM / SYNCEND replies.
@@ -585,7 +586,7 @@ public abstract class EmulatorPlugin : IGamePlugin
         // memory or opening pipes that the world's own client owns.
         if (WorldCarriesOwnClient)
         {
-            await LaunchForExternalClientAsync(launchRom, ct);
+            await LaunchForExternalClientAsync(launchRom, session, ct);
             return;
         }
 
@@ -847,7 +848,7 @@ public abstract class EmulatorPlugin : IGamePlugin
     /// client does all of that, and a second reader on the same session is a
     /// bug, not redundancy. London contributes the disc gate (already passed),
     /// the emulator start, and an honest note about the one step that remains.
-    private async Task LaunchForExternalClientAsync(string launchRom, CancellationToken ct)
+    private async Task LaunchForExternalClientAsync(string launchRom, ApSession session, CancellationToken ct)
     {
         string emulatorsRoot = Path.Combine(AppContext.BaseDirectory, "Emulators");
         var bridge = LauncherV2.Core.Extensions.BridgeRegistry.Find(ClientProtocol);
@@ -905,17 +906,81 @@ public abstract class EmulatorPlugin : IGamePlugin
 
         string clientName = WorldClientName ?? $"the {DisplayName} client";
         Trace($"{bridge.DisplayName} started (pid {proc.Id}) — world carries its "
-            + $"own client ({clientName}); London attaches nothing on purpose");
+            + $"own client ({clientName})");
 
-        // The one step London cannot do for them, said plainly instead of
-        // discovered as an hour of silence in a multiworld.
-        SessionRomNote ??=
-            $"[{DisplayName}] The game is running. This world talks to " +
-            $"Archipelago through its own client, not through this launcher: " +
-            $"open the Archipelago Launcher and start \"{clientName}\", then " +
-            $"connect it to your session. Checks appear there, not here.";
+        // The world's client is the transport, so London starts it too — one
+        // button starts everything, exactly as with every bridge. Asking the
+        // player to open Archipelago's launcher by hand was a chain with a
+        // missing link: on 25 Aug 2026 the game ran, the mod said "You got an
+        // Archipelago item!", and nothing reached the server, because the one
+        // process that carries checks was never running.
+        if (WorldClientName != null && StartWorldClient(session))
+        {
+            SessionRomNote ??=
+                $"[{DisplayName}] The game is running, and London started " +
+                $"\"{clientName}\" and pointed it at your session. Checks " +
+                "flow once it finishes loading.";
+        }
+        else
+        {
+            SessionRomNote ??=
+                $"[{DisplayName}] The game is running. This world talks to " +
+                $"Archipelago through its own client ({clientName}), which " +
+                "could not be started automatically — start it from the " +
+                "Archipelago Launcher and connect it to your session.";
+        }
 
         await Task.CompletedTask;
+    }
+
+    /// Start the world's own Archipelago client and point it at the session.
+    ///
+    /// Archipelago's launcher documents this form itself ("[Patch|Game|
+    /// Component] [-- component args here]"), and CommonClient's --connect
+    /// and --name make the client join without a hand on the keyboard. The
+    /// first start is SLOW — the engine loads every installed world before
+    /// the component runs — so "nothing yet" is loading, not failure.
+    private bool StartWorldClient(ApSession session)
+    {
+        try
+        {
+            string engine = LauncherV2.Core.SettingsStore.Load().ApEnginePath;
+            if (string.IsNullOrWhiteSpace(engine)) return false;
+            string exe = Path.Combine(engine,
+                LauncherV2.Core.Archipelago.ApEngine.LauncherExeName);
+            if (!File.Exists(exe)) return false;
+
+            // CommonClient wants host:port; the session may carry a scheme.
+            string server = session.ServerUri
+                .Replace("ws://", "").Replace("wss://", "").TrimEnd('/');
+
+            // The slot rides INSIDE the connect URI: the clients' base parser
+            // has only --connect and --password, and an unknown --name kills
+            // the whole parse (measured 25 Aug 2026 — the client sat mute).
+            // The websockets library refuses a URI username without a
+            // password (measured 25 Aug 2026: "username provided without
+            // password"), so the colon is always there, empty or not.
+            string auth = Uri.EscapeDataString(session.SlotName)
+                        + ":" + Uri.EscapeDataString(session.Password ?? "");
+            string args = $"\"{WorldClientName}\" -- "
+                        + $"--connect \"archipelago://{auth}@{server}\"";
+
+            _worldClientProcess = Process.Start(new ProcessStartInfo
+            {
+                FileName         = exe,
+                Arguments        = args,
+                WorkingDirectory = engine,
+                UseShellExecute  = false,
+            });
+            Trace($"world client started: {WorldClientName} -> {server} "
+                + $"(pid {_worldClientProcess?.Id})");
+            return _worldClientProcess != null;
+        }
+        catch (Exception ex)
+        {
+            Trace($"world client start failed: {ex.Message}");
+            return false;
+        }
     }
 
     private async Task LaunchViaNwaAsync(EmulatorBackend backend, string launchRom,
@@ -1184,6 +1249,8 @@ public abstract class EmulatorPlugin : IGamePlugin
         _pipeCts?.Cancel();
         DisposeNwa();
         try { _emuProcess?.Kill(entireProcessTree: true); } catch { }
+        try { _worldClientProcess?.Kill(entireProcessTree: true); } catch { }
+        _worldClientProcess = null;
         IsRunning = false;
         ScrubApConfigPassword();   // plaintext credentials die with the session (P3-20)
         return Task.CompletedTask;
