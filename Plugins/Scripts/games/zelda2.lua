@@ -112,6 +112,8 @@ local LOCATIONS = {
 }
 -- ── State ─────────────────────────────────────────────────────────────────────
 local reported         = {}
+local previous         = nil     -- the block as of the last poll
+local BURST_LIMIT      = 4       -- more clears at once is a load, not play
 local server_locations = nil
 local rom_ok           = nil       -- cached YES only
 local mem              = {}
@@ -246,17 +248,39 @@ function M.poll()
     presence[off] = b
   end
 
+  -- A CLEAR bit means one of two things -- collected, or never seeded -- and a
+  -- single read cannot tell them apart. The game fills a region's bits when it
+  -- loads that region, so every palace reads as already-collected until the
+  -- player first enters one. A check is therefore a TRANSITION: set last poll,
+  -- clear now. Never a state.
+  if previous == nil then
+    previous = presence
+    return {}
+  end
+
   local new = {}
   for _, loc in ipairs(LOCATIONS) do
     if not reported[loc.id] and wanted(loc.id) then
-      local b = presence[loc.addr - PRESENCE_START]
-      -- INVERTED: the bit starts set and CLEARS on pickup.
-      if b ~= nil and bit_and(b, loc.mask) == 0 then
-        reported[loc.id] = true
+      local off = loc.addr - PRESENCE_START
+      local was, now = previous[off], presence[off]
+      if was ~= nil and now ~= nil
+         and bit_and(was, loc.mask) ~= 0 and bit_and(now, loc.mask) == 0 then
         new[#new + 1] = loc.id
       end
     end
   end
+
+  previous = presence
+
+  -- Loading a save, or the game seeding a whole region, clears many bits in one
+  -- step. A player does not. Take that as a new baseline rather than as checks.
+  if #new > BURST_LIMIT then
+    log("presence block re-seeded (" .. #new .. " bits at once) -- taken as a "
+        .. "load, not as checks")
+    return {}
+  end
+
+  for _, id in ipairs(new) do reported[id] = true end
   return new
 end
 
