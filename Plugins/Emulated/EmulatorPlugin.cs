@@ -980,7 +980,11 @@ public abstract class EmulatorPlugin : IGamePlugin
             // password"), so the colon is always there, empty or not.
             string auth = Uri.EscapeDataString(session.SlotName)
                         + ":" + Uri.EscapeDataString(session.Password ?? "");
-            string args = $"\"{WorldClientName}\" -- "
+            // --nogui: the client is an engine part, not a window. London is
+            // the interface — its Items and Log tabs already mirror the whole
+            // session — so the world's client runs invisibly, exactly as the
+            // Lua connector runs inside BizHawk.
+            string args = $"\"{WorldClientName}\" -- --nogui "
                         + $"--connect \"archipelago://{auth}@{server}\"";
 
             _worldClientProcess = Process.Start(new ProcessStartInfo
@@ -989,6 +993,8 @@ public abstract class EmulatorPlugin : IGamePlugin
                 Arguments        = args,
                 WorkingDirectory = engine,
                 UseShellExecute  = false,
+                CreateNoWindow   = true,
+                WindowStyle      = ProcessWindowStyle.Hidden,
             });
             Trace($"world client started: {WorldClientName} -> {server} "
                 + $"(pid {_worldClientProcess?.Id})");
