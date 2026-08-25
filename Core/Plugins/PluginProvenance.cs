@@ -94,6 +94,18 @@ public static class FirstParty
             GameAuthor: "the OpenTTD contributors",
             GameUrl: "https://www.openttd.org"),
 
+        ["zelda2"] = new(
+            Made.LauncherAuthor, Made.ThirdParty,
+            GameName: "Zelda II: The Adventure of Link",
+            GameAuthor: "Nintendo",
+            GameUrl: "https://www.nintendo.com"),
+
+        ["terratech"] = new(
+            Made.LauncherAuthor, Made.ThirdParty,
+            GameName: "TerraTech",
+            GameAuthor: "Payload Studios",
+            GameUrl: "https://terratechgame.com"),
+
         ["pokemon_fireruby"] = new(
             Made.LauncherAuthor, Made.ThirdParty,
             GameName: "Pokémon FireRed and Ruby",
