@@ -361,7 +361,14 @@ public static class EmulatorBackends
             DisplayName   = "Azahar (3DS)",
             Systems       = new[] { "3DS", "N3DS" },
             BridgeReady   = true,
-            LiveVerified  = false,
+            // TRANSPORT verified live 25 Aug 2026: config written, Azahar
+            // launched with a real A Link Between Worlds dump ("Azahar 2126.0
+            // | The Legend of Zelda" in its title bar), UDP 45987 listening,
+            // the world client's own handshake answered with its 16-byte
+            // header, and a memory read at 0x08000000 returned real bytes.
+            // ⚠ What is NOT yet proven is the pairing: no check has been
+            // carried through by the world's own client.
+            LiveVerified  = true,
             HomepageUrl   = "https://azahar-emu.org/",
             ExeName       = "azahar.exe",
             // ⚠ The player must supply their own 3DS system files, which only
