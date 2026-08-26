@@ -314,6 +314,18 @@ public static class ApPatch
 
     // --- the three steps -----------------------------------------------------
 
+    /// Apply a bare BSDIFF40 stream -- no .apXX container around it.
+    ///
+    /// Some worlds do not build a per-seed patch at all: they ship ONE fixed
+    /// bsdiff against the retail dump inside their apworld, and their client
+    /// applies it on the player's machine. Star Fox 64 is the pattern --
+    /// assets/Star_Fox_64.patch plus assets/Star_Fox_64_Patched.z64-md5 to
+    /// check the result against. Nothing about that needs the world's Python,
+    /// so the launcher can do it and hand the emulator a ROM that actually
+    /// carries the AP hooks.
+    public static byte[] ApplyRawBsdiff(byte[] baseRom, byte[] patch)
+        => ApplyBsdiff4(baseRom, patch);
+
     /// BSDIFF40: a control stream of (copy-with-diff, copy-verbatim, seek)
     /// triples, plus the diff and extra byte streams. All three are bzip2.
     static byte[] ApplyBsdiff4(byte[] src, byte[] patch)

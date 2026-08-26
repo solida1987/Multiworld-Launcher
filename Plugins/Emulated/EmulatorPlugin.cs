@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
 using System.IO.Pipes;
+using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -347,6 +348,18 @@ public abstract class EmulatorPlugin : IGamePlugin
 
     private Process?                _emuProcess;
     private Process?                _worldClientProcess;
+    private bool                    _worldClientStarted;
+
+    /// True when the world's client refused --connect and had to be started
+    /// bare, so it is showing its own window and waiting for the player to
+    /// type the server and slot. London says so rather than claiming the
+    /// one-button start worked.
+    protected bool WorldClientNeedsManualConnect { get; private set; }
+
+    /// Filename of the connector the WORLD ships for itself, if any. Its own
+    /// client writes the file into Archipelago's data/lua/; London's job is
+    /// only to make sure the emulator is running it.
+    protected virtual string? WorldConnectorLuaName => null;
     /// Connector → launcher pipe ("<base>_c2s"): CHECK / GOAL / SYNC.
     private NamedPipeServerStream?  _pipeIn;
     /// Launcher → connector pipe ("<base>_s2c"): ITEM / SYNCEND replies.
@@ -878,10 +891,42 @@ public abstract class EmulatorPlugin : IGamePlugin
                           && !unmet.Contains("no game is loaded"))
             throw new InvalidOperationException(unmet);
 
+        // ⚠⚠ ORDER MATTERS, AND IT USED TO BE WRONG.
+        //
+        // London started the emulator first and the world's client second.
+        // For a world that ships its OWN connector that is backwards: the
+        // client is what writes the script into Archipelago's data/lua/, so
+        // starting the emulator first meant starting it with no script -- and
+        // then nothing was listening for the client. Measured 26 Aug 2026 with
+        // Star Fox 64: the game ran, the client ran, and not one check moved.
+        //
+        // So when the world names a connector, start the client first, give it
+        // a moment to lay the file down, and hand that path to the emulator.
+        string worldLua = "";
+        if (!string.IsNullOrWhiteSpace(WorldConnectorLuaName))
+        {
+            // ⭐⭐ A ported world talks to LONDON, not to its own client.
+            //
+            // The rule ([[all bridges belong in London]]) is that the player
+            // never opens somebody else's window. Where the world's client has
+            // been reimplemented here, London opens the socket the emulator's
+            // connector dials and there is no second program at all -- no
+            // connect bar to fill in, no ROM dialog, nothing to explain.
+            if (WorldRelayName != null)
+                StartWorldRelay(WorldRelayName, ct);
+            else if (WorldClientName != null)
+                StartWorldClient(session);
+            _worldClientStarted = true;
+            worldLua = await EnsureWorldConnectorAsync(WorldConnectorLuaName!, ct);
+            if (worldLua.Length == 0)
+                Trace($"world connector {WorldConnectorLuaName} is in no installed "
+                    + "apworld -- starting the emulator without it");
+        }
+
         var plan = bridge.GetLaunchPlan(
             new LauncherV2.Core.Extensions.BridgeContext(
                 GameId, RomSystem, launchRom, EmulatorDirectory,
-                ScriptPath: "",                        // no Lua on this path
+                ScriptPath: worldLua,                  // the WORLD's script, if it has one
                 ConfigPath: "",
                 Fullscreen: StartFullscreen),
             emulatorsRoot);
@@ -923,12 +968,27 @@ public abstract class EmulatorPlugin : IGamePlugin
         // missing link: on 25 Aug 2026 the game ran, the mod said "You got an
         // Archipelago item!", and nothing reached the server, because the one
         // process that carries checks was never running.
-        if (WorldClientName != null && StartWorldClient(session))
+        if (WorldClientName != null
+            && (_worldClientStarted || StartWorldClient(session)))
         {
-            SessionRomNote ??=
-                $"[{DisplayName}] The game is running, and London started " +
-                $"\"{clientName}\" and pointed it at your session. Checks " +
-                "flow once it finishes loading.";
+            SessionRomNote ??= WorldClientNeedsManualConnect
+                // Honest about the one step London could not take. This world's
+                // client declares its launch function without *args, so
+                // Archipelago's launcher cannot hand it the session -- see
+                // StartWorldClient. Telling the player "pointed it at your
+                // session" here would be a claim that is simply not true, and
+                // they would sit and wait for checks that never come.
+                // Honest, but no longer a chore: the address bar is filled
+                // in from Archipelago's own last-address store, so the one
+                // step left is a click, not typing.
+                ? $"[{DisplayName}] The game is running, and London opened " +
+                  $"\"{clientName}\" with your server and slot already filled " +
+                  "in — this world's client cannot be given them on the " +
+                  "command line, so press Connect in its window. Everything " +
+                  "else is ready."
+                : $"[{DisplayName}] The game is running, and London started " +
+                  $"\"{clientName}\" and pointed it at your session. Checks " +
+                  "flow once it finishes loading.";
         }
         else
         {
@@ -949,6 +1009,293 @@ public abstract class EmulatorPlugin : IGamePlugin
     /// and --name make the client join without a hand on the keyboard. The
     /// first start is SLOW — the engine loads every installed world before
     /// the component runs — so "nothing yet" is loading, not failure.
+
+    /// Wait for the world's own client to write its connector into
+    /// Archipelago's data/lua/, and return the full path.
+    ///
+    /// The client writes the file as it starts, but Archipelago's launcher
+    /// loads every installed world first, so the file can be many seconds
+    /// away. An existing file is accepted at once -- the client rewrites the
+    /// same path every run, so a leftover from last session is the same
+    /// script, not a stale one.
+    ///
+    /// Returns "" when it never appears; the caller then starts the emulator
+    /// without a script rather than not at all.
+    /// The Archipelago installs London knows about, best guess first.
+    protected static List<string> ApRoots()
+    {
+        var roots = new List<string>();
+        try
+        {
+            var st = LauncherV2.Core.SettingsStore.Load();
+            foreach (string r in new[] { st.ApEnginePath, st.ApworldSyncDir,
+                                         @"C:\ProgramData\Archipelago" })
+                if (!string.IsNullOrWhiteSpace(r) && !roots.Contains(r)) roots.Add(r);
+        }
+        catch { roots.Add(@"C:\ProgramData\Archipelago"); }
+        return roots;
+    }
+
+    /// Read one file out of the apworld the player already installed.
+    ///
+    /// The bytes come off the player's own disk and stay there. This is the
+    /// same thing the world's client does for itself; London only stops
+    /// depending on the client having been told to do it.
+    protected byte[]? ReadFromApworld(string entryFileName)
+    {
+        foreach (string root in ApRoots())
+        {
+            string worlds = Path.Combine(root, "custom_worlds");
+            if (!Directory.Exists(worlds)) continue;
+
+            // Our GameId is normally the apworld's filename verbatim
+            // ("star_fox_64" -> star_fox_64.apworld), so try that first.
+            // Several worlds ship a file called connector.lua, and taking the
+            // first zip that happens to hold one hands BizHawk somebody
+            // else's script.
+            string mine = Path.Combine(worlds, GameId + ".apworld");
+            foreach (string zip in Directory.GetFiles(worlds, "*.apworld")
+                         .OrderByDescending(z => string.Equals(z, mine,
+                             StringComparison.OrdinalIgnoreCase)))
+            {
+                try
+                {
+                    using var za = ZipFile.OpenRead(zip);
+                    var entry = za.Entries.FirstOrDefault(e =>
+                        e.FullName.EndsWith(entryFileName, StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(Path.GetFileName(e.FullName), entryFileName,
+                                         StringComparison.OrdinalIgnoreCase));
+                    if (entry is null) continue;
+
+                    using var src = entry.Open();
+                    using var ms = new MemoryStream();
+                    src.CopyTo(ms);
+                    Trace($"read {entryFileName} from {Path.GetFileName(zip)}");
+                    return ms.ToArray();
+                }
+                catch (Exception ex) { Trace($"apworld {Path.GetFileName(zip)}: {ex.Message}"); }
+            }
+        }
+        return null;
+    }
+
+    /// Put the world's own BizHawk connector where the emulator can load it.
+    ///
+    /// ⚠⚠ THE CLIENT DOES NOT RELIABLY WRITE THIS FILE, and assuming it did
+    /// cost a whole evening. Star Fox 64's client.py writes the connector
+    /// into Archipelago's data/lua -- but only INSIDE the branch that starts
+    /// the emulator on the player's behalf:
+    ///
+    ///     program_path = sf64_options.get("program_path", "")
+    ///     if program_path and os.path.isfile(program_path) and ...:
+    ///         lua = Utils.local_path("data", "lua", "connector_sf64_bizhawk.lua")
+    ///
+    /// London starts the emulator itself, so it never configures the world's
+    /// `/autostart`, so `program_path` is empty, so the file is never written.
+    /// The first version of this method polled for it for forty seconds and
+    /// then gave up -- waiting on a file nothing was going to create.
+    ///
+    /// So we do what the client does: take the connector out of the apworld
+    /// the player already installed and write it to the same place. The bytes
+    /// come from the player's own machine and stay on it -- we ship no world
+    /// code, exactly as when the world writes the file for itself.
+    private async Task<string> EnsureWorldConnectorAsync(string fileName,
+                                                         CancellationToken ct)
+    {
+        // 1. Already there? The player may have configured the world's own
+        //    autostart, in which case its copy is the authoritative one.
+        foreach (string root in ApRoots())
+        {
+            string cand = Path.Combine(root, "data", "lua", fileName);
+            if (File.Exists(cand)) { Trace($"world connector already present: {cand}"); return cand; }
+        }
+
+        // 2. Otherwise lift it out of the installed apworld. It must land in
+        //    Archipelago's own data/lua and nowhere else: the connector does
+        //    `require("socket")`, and socket.lua sits in that folder. Drop it
+        //    somewhere else and the script prints its "please place this lua
+        //    in Archipelago/data/lua" line and returns.
+        return await Task.Run(() =>
+        {
+            byte[]? bytes = ReadFromApworld(fileName);
+            if (bytes is null) return "";
+
+            foreach (string root in ApRoots())
+            {
+                string luaDir = Path.Combine(root, "data", "lua");
+                if (!Directory.Exists(luaDir)) continue;
+                try
+                {
+                    string dest = Path.Combine(luaDir, fileName);
+                    File.WriteAllBytes(dest, bytes);
+                    Trace($"world connector written: {dest}");
+                    return dest;
+                }
+                catch (Exception ex) { Trace($"could not write connector to {luaDir}: {ex.Message}"); }
+            }
+            return "";
+        }, ct);
+    }
+
+
+    /// Put this session into Archipelago's own "last address" store, so a
+    /// client that cannot be given one on the command line still opens
+    /// pointing at the right server and slot.
+    ///
+    /// ⚠ The file also holds a large cache (groups_by_checksum) that other
+    /// clients depend on, so this edits the ONE line and never rewrites the
+    /// document -- a round-trip through a YAML serialiser is how you throw
+    /// somebody else's cache away.
+    private void SeedLastServerAddress(string engineDir, ApSession session)
+    {
+        try
+        {
+            string server = session.ServerUri
+                .Replace("ws://", "").Replace("wss://", "").TrimEnd('/');
+            // Archipelago's own format: slot:password@host:port, colon always
+            // present because the websockets library refuses a username with
+            // no password.
+            string value = $"{session.SlotName}:{session.Password ?? ""}@{server}";
+
+            string path = Path.Combine(engineDir, "_persistent_storage.yaml");
+            var lines = File.Exists(path)
+                ? new List<string>(File.ReadAllLines(path))
+                : new List<string>();
+
+            int clientAt = lines.FindIndex(l => l.TrimEnd() == "client:");
+            if (clientAt < 0)
+            {
+                lines.Insert(0, "client:");
+                lines.Insert(1, $"  last_server_address: {value}");
+            }
+            else
+            {
+                // Stay inside the client: block -- the next top-level key ends it.
+                int end = lines.Count;
+                for (int i = clientAt + 1; i < lines.Count; i++)
+                    if (lines[i].Length > 0 && !char.IsWhiteSpace(lines[i][0])) { end = i; break; }
+
+                int keyAt = -1;
+                for (int i = clientAt + 1; i < end; i++)
+                    if (lines[i].TrimStart().StartsWith("last_server_address:",
+                            StringComparison.Ordinal)) { keyAt = i; break; }
+
+                if (keyAt >= 0) lines[keyAt] = $"  last_server_address: {value}";
+                else            lines.Insert(clientAt + 1, $"  last_server_address: {value}");
+            }
+
+            File.WriteAllLines(path, lines);
+            Trace($"seeded Archipelago's last_server_address: {session.SlotName}@{server}");
+        }
+        catch (Exception ex) { Trace($"could not seed last_server_address: {ex.Message}"); }
+    }
+
+
+    /// The world setting that names the player's ROM, as "block.key" (for
+    /// example "sf64_options.rom_path"). Null when the world has none.
+    protected virtual string? WorldRomPathSetting => null;
+
+    /// Write one value into Archipelago's host.yaml.
+    ///
+    /// ⚠⚠ host.yaml is the player's whole Archipelago configuration and it is
+    /// full of comments that explain each option. So this replaces the ONE
+    /// line, inside the ONE block, and never re-serialises the document.
+    private void SeedWorldSetting(string engineDir, string dottedKey, string value)
+    {
+        try
+        {
+            int dot = dottedKey.IndexOf('.');
+            if (dot <= 0) return;
+            string block = dottedKey[..dot], key = dottedKey[(dot + 1)..];
+
+            string path = Path.Combine(engineDir, "host.yaml");
+            if (!File.Exists(path)) return;
+            var lines = new List<string>(File.ReadAllLines(path));
+
+            int blockAt = lines.FindIndex(l => l.TrimEnd() == block + ":");
+            if (blockAt < 0) return;                       // world not installed
+
+            int end = lines.Count;
+            for (int i = blockAt + 1; i < lines.Count; i++)
+                if (lines[i].Length > 0 && !char.IsWhiteSpace(lines[i][0])) { end = i; break; }
+
+            int keyAt = -1;
+            for (int i = blockAt + 1; i < end; i++)
+                if (lines[i].TrimStart().StartsWith(key + ":", StringComparison.Ordinal))
+                    { keyAt = i; break; }
+            if (keyAt < 0) return;                         // unknown key -- leave it alone
+
+            // YAML double-quoted: backslashes in a Windows path must be doubled,
+            // which is how Archipelago writes these paths itself.
+            string quoted = "\"" + value.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
+            if (lines[keyAt].TrimEnd() == $"  {key}: {quoted}") return;   // already right
+            lines[keyAt] = $"  {key}: {quoted}";
+
+            File.WriteAllLines(path, lines);
+            Trace($"seeded host.yaml {dottedKey}");
+        }
+        catch (Exception ex) { Trace($"could not seed {dottedKey}: {ex.Message}"); }
+    }
+
+
+    /// The built-in relay that replaces this world's own Archipelago client,
+    /// by name. Null while a game still needs the world's client started.
+    protected virtual string? WorldRelayName => null;
+
+    private LauncherV2.Core.Worlds.StarFox64Relay? _sf64Relay;
+
+    /// Stand up London's own implementation of the world's client.
+    ///
+    /// ⭐ This is what "the bridge belongs in London" actually means: the
+    /// emulator's connector dials 127.0.0.1, and the thing that answers is
+    /// us. The world's client is never started, so there is no second window,
+    /// no address to type and no ROM dialog to dismiss.
+    private void StartWorldRelay(string relay, CancellationToken ct)
+    {
+        if (!string.Equals(relay, "star_fox_64", StringComparison.Ordinal))
+        {
+            Trace($"no built-in relay called \"{relay}\" -- nothing started");
+            return;
+        }
+
+        try
+        {
+            var r = new LauncherV2.Core.Worlds.StarFox64Relay(Trace)
+            {
+                GetSlot            = () => GetOwnSlot?.Invoke() ?? 0,
+                GetSeedName        = () => GetSeedName?.Invoke(),
+                GetSlotData        = () => GetSlotData?.Invoke(),
+                GetCheckedLocations = () => Array.Empty<long>(),
+                GetReceivedItems   = SnapshotReceivedItemIds,
+            };
+            r.LocationsChecked += ids =>
+            { try { LocationsChecked?.Invoke(ids); } catch (Exception ex) { Trace($"relay checks: {ex.Message}"); } };
+            r.GoalCompleted += () =>
+            { try { GoalCompleted?.Invoke(); } catch (Exception ex) { Trace($"relay goal: {ex.Message}"); } };
+
+            r.Start(ct);
+            _sf64Relay = r;
+            ConnectorAttached = true;
+            SessionRomNote ??= $"[{DisplayName}] London is the client for this game — "
+                             + "nothing else to open. Checks flow as you play.";
+        }
+        catch (Exception ex)
+        {
+            // Almost always "address in use": Archipelago's own Star Fox 64
+            // client is already running and holding the port.
+            Trace($"world relay failed to start: {ex.Message}");
+            SessionRomNote ??= $"[{DisplayName}] London could not open port "
+                + $"{LauncherV2.Core.Worlds.StarFox64Relay.Port} ({ex.Message}). If "
+                + "Archipelago's own Star Fox 64 Client is open, close it and press Play again.";
+        }
+    }
+
+    /// Every item id the server has sent us so far, oldest first.
+    private long[] SnapshotReceivedItemIds()
+    {
+        lock (_itemsLock) return _itemsReceived.Select(i => i.ItemId).ToArray();
+    }
+
     private bool StartWorldClient(ApSession session)
     {
         try
@@ -993,21 +1340,100 @@ public abstract class EmulatorPlugin : IGamePlugin
             // the interface — its Items and Log tabs already mirror the whole
             // session — so the world's client runs invisibly, exactly as the
             // Lua connector runs inside BizHawk.
-            string args = $"\"{WorldClientName}\" -- --nogui "
-                        + $"--connect \"archipelago://{auth}@{server}\"";
-
-            _worldClientProcess = Process.Start(new ProcessStartInfo
+            // ⚠⚠ NOT EVERY WORLD'S COMPONENT ACCEPTS ARGUMENTS.
+            //
+            // Archipelago's Launcher hands whatever follows "--" to the
+            // component's own function. A world that declares
+            //
+            //     def launch_client(*args)          <- A Link Between Worlds
+            //
+            // passes them through and connects itself; one that declares
+            //
+            //     def launch_client()               <- Star Fox 64
+            //
+            // dies instantly on
+            //
+            //     TypeError: launch_client() takes 0 positional arguments
+            //     but 3 were given
+            //
+            // and nothing reaches the server. Measured 26 Aug 2026: of the
+            // kind=world games in this catalogue, 13 take arguments and 15 do
+            // not -- the whole Sly series, several GameCube titles, Star Fox 64.
+            //
+            // So: try the one-button form first, and if the client dies at
+            // once, start it again bare. A bare client shows its own window and
+            // asks for server and slot -- one more step than London promises,
+            // but a working chain instead of a silent nothing. SessionRomNote
+            // says which of the two happened.
+            var withArgs = new ProcessStartInfo
             {
                 FileName         = exe,
-                Arguments        = args,
+                Arguments        = $"\"{WorldClientName}\" -- --nogui "
+                                 + $"--connect \"archipelago://{auth}@{server}\"",
                 WorkingDirectory = engine,
                 UseShellExecute  = false,
                 CreateNoWindow   = true,
                 WindowStyle      = ProcessWindowStyle.Hidden,
-            });
+            };
+            // ⭐ Fill in the client's own address bar before it opens.
+            //
+            // Fifteen worlds declare `def launch_client()` with no parameters,
+            // so Archipelago's launcher cannot hand them a server -- it raises
+            // TypeError and the client dies. The player then has to type the
+            // address and slot by hand, which is a strange thing to ask of a
+            // one-button launcher.
+            //
+            // Archipelago already stores the last address a client connected
+            // to, and CommonClient's connect bar comes up filled in from it.
+            // Writing it is exactly what Archipelago itself does every time
+            // anyone connects anywhere, so this leaves the file in a state it
+            // reaches on its own -- the player just presses Connect.
+            SeedLastServerAddress(engine, session);
+
+            // ⚠ And stop the client asking for a ROM it does not need.
+            // These worlds patch a copy for themselves at startup, and with
+            // an empty rom_path the client opens a file dialog every single
+            // launch -- "Opening file input dialog for Open your Star Fox 64
+            // v1.1 ROM", then "No ROM selected". Harmless, but it reads
+            // exactly like something went wrong. London already knows the
+            // path the player chose.
+            if (WorldRomPathSetting != null && RomPath != null)
+                SeedWorldSetting(engine, WorldRomPathSetting, RomPath);
+
+            _worldClientProcess = Process.Start(withArgs);
+            if (_worldClientProcess is null)
+            {
+                Trace("world client: Process.Start returned null");
+                return false;
+            }
+
+            // Archipelago's launcher loads every installed world before the
+            // component runs, so a healthy start takes many seconds. A crash
+            // on argument parsing, by contrast, is immediate -- which is what
+            // makes this check safe. Anything still alive after the grace
+            // period connected on its own.
+            if (_worldClientProcess.WaitForExit(6000)
+                && _worldClientProcess.ExitCode != 0)
+            {
+                Trace($"world client rejected --connect (exit "
+                    + $"{_worldClientProcess.ExitCode}); retrying without "
+                    + "arguments so its own window can ask for the session");
+                _worldClientProcess = Process.Start(new ProcessStartInfo
+                {
+                    FileName         = exe,
+                    Arguments        = $"\"{WorldClientName}\"",
+                    WorkingDirectory = engine,
+                    UseShellExecute  = false,
+                });
+                WorldClientNeedsManualConnect = _worldClientProcess != null;
+                Trace($"world client started bare: {WorldClientName} "
+                    + $"(pid {_worldClientProcess?.Id})");
+                return _worldClientProcess != null;
+            }
+
             Trace($"world client started: {WorldClientName} -> {server} "
                 + $"(pid {_worldClientProcess?.Id})");
-            return _worldClientProcess != null;
+            return true;
         }
         catch (Exception ex)
         {
@@ -1492,6 +1918,16 @@ public abstract class EmulatorPlugin : IGamePlugin
             // game's own received-count.
             if (_nwaBridge != null)
                 PushItemsToNwaBridgeLocked();
+        }
+
+        // A ported world's relay takes the WHOLE list every time. The ROM
+        // keeps its own received-count and ignores what it already has, which
+        // is also what makes a reconnect safe -- exactly how the world's own
+        // client does it.
+        if (_sf64Relay is { RomAttached: true } relay)
+        {
+            long[] ids = SnapshotReceivedItemIds();
+            _ = relay.SendItemsAsync(ids, ct);
         }
         return Task.CompletedTask;
     }
