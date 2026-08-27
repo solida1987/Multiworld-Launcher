@@ -1368,12 +1368,48 @@ public abstract class EmulatorPlugin : IGamePlugin
             var withArgs = new ProcessStartInfo
             {
                 FileName         = exe,
-                Arguments        = $"\"{WorldClientName}\" -- --nogui "
-                                 + $"--connect \"archipelago://{auth}@{server}\"",
+                // ⚠⚠ NO --nogui. IT SILENTLY THREW THE SESSION AWAY.
+                //
+                // Archipelago's clients, given --nogui with no console
+                // attached (London starts them with CreateNoWindow), re-exec
+                // themselves WITH a gui -- and the second process gets the
+                // bare component name, not our arguments. Caught 27 Aug 2026
+                // by polling command lines during a launch:
+                //
+                //   13:08:06  ...  "BizHawk Client" -- --nogui --connect "archipelago://..."
+                //   13:08:11  ...  "BizHawk Client"
+                //
+                // The client then sat there printing "Please connect to an
+                // Archipelago server" while the address it needed had gone to
+                // a process that no longer existed. Dropping --nogui, the same
+                // command joins the room and attaches to the emulator in ONE
+                // process. A visible client window is a far smaller price than
+                // a client that never connects.
+                Arguments        = $"\"{WorldClientName}\" "
+                                 + $"-- --connect \"archipelago://{auth}@{server}\"",
                 WorkingDirectory = engine,
                 UseShellExecute  = false,
-                CreateNoWindow   = true,
-                WindowStyle      = ProcessWindowStyle.Hidden,
+                // ⚠⚠ THE WINDOW HAS TO BE REAL, and hiding it broke the
+                // session in a way that looked like a network fault.
+                //
+                // Archipelago's clients are kivy applications. Started with no
+                // window, kivy comes up half-initialised -- the client logs
+                // "Could not update address bar as the GUI is not yet
+                // initialized" -- and then dies on the FIRST message the
+                // server sends:
+                //
+                //     File "kvui.py", line 1101, in print_json
+                //     KeyError: 'Archipelago'
+                //     ... automatically reconnecting in 5 seconds
+                //
+                // which is a reconnect loop, once every ten seconds, forever.
+                // Measured on Ufouria 27 Aug 2026. With a real window the same
+                // command joins the room, attaches to the emulator and stays.
+                //
+                // So the client is visible. That is one more window than
+                // London wants, but the alternative is a client that looks
+                // connected and silently drops every packet.
+                CreateNoWindow   = false,
             };
             // ⭐ Fill in the client's own address bar before it opens.
             //
@@ -1412,7 +1448,23 @@ public abstract class EmulatorPlugin : IGamePlugin
             // on argument parsing, by contrast, is immediate -- which is what
             // makes this check safe. Anything still alive after the grace
             // period connected on its own.
-            if (_worldClientProcess.WaitForExit(6000)
+            // ⚠⚠ 20 SECONDS, AND SIX WAS THE BUG.
+            //
+            // The idea is sound -- a client that rejects our arguments dies at
+            // once, a healthy one runs for the whole session -- but six
+            // seconds sits INSIDE the noise. Archipelago's launcher loads some
+            // six hundred worlds before the component runs: Star Fox 64's
+            // TypeError landed five seconds in, and a healthy client is only
+            // just reaching its own main by then. Measured 27 Aug 2026 on
+            // Ufouria: London started the client WITH --connect, gave up at
+            // six seconds, and started a second one bare -- so the game sat
+            // there asking the player to "connect to an Archipelago server"
+            // while the arguments it needed had been handed to a process that
+            // was still starting.
+            //
+            // Twenty seconds is outside both: nothing that parses arguments
+            // takes that long to fail, and nothing healthy has exited by then.
+            if (_worldClientProcess.WaitForExit(20000)
                 && _worldClientProcess.ExitCode != 0)
             {
                 Trace($"world client rejected --connect (exit "
