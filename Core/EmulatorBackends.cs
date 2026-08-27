@@ -198,6 +198,103 @@ public static class EmulatorBackends
                 AssetPattern: "windows-x64-Qt.7z"),
         },
 
+        // RetroArch — reached over its own UDP network-command interface.
+        //
+        // The only bridge here that is not tied to one system: READ_CORE_RAM
+        // goes through whichever core is loaded, so the same wire serves every
+        // console RetroArch emulates. Today only Gauntlet Legends needs it,
+        // whose world says flatly "Retroarch is only emulator this client will
+        // accept" -- but the entry is worth more than the one game.
+        new EmulatorBackend
+        {
+            Id            = "retroarch",
+            DisplayName   = "RetroArch",
+            Systems       = new[] { "N64" },
+            // ⚠ FALSE. The protocol is transcribed from the world's own
+            // client (UDP 55355, READ_CORE_RAM / WRITE_CORE_RAM), but nothing
+            // has been started through it yet -- the same line PCSX2 stood
+            // behind before its live proof.
+            BridgeReady   = false,
+            LiveVerified  = false,
+            HomepageUrl   = "https://www.retroarch.com",
+            ExeName       = "retroarch.exe",
+            Source = new LauncherV2.Core.Emulators.EmulatorSource(
+                Author:       "the RetroArch team (libretro)",
+                Licence:      "GPL-3.0-or-later for RetroArch itself; each core "
+                            + "carries its own licence",
+                LicenceUrl:   "https://github.com/libretro/RetroArch/blob/master/COPYING",
+                DownloadPage: "https://github.com/libretro/RetroArch/releases",
+                Owner:        "libretro",
+                Repo:         "RetroArch",
+                AssetPattern: "RetroArch-Win64.7z"),
+        },
+
+        // PPSSPP — PSP. A LAUNCHER: Monster Hunter Freedom Unite and K-On!
+        // both talk to PPSSPP's debugger WebSocket in their own clients, so
+        // London starts the disc and stands aside.
+        new EmulatorBackend
+        {
+            Id            = "ppsspp",
+            DisplayName   = "PPSSPP",
+            Systems       = new[] { "PSP" },
+            BridgeReady   = false,
+            LiveVerified  = false,
+            HomepageUrl   = "https://www.ppsspp.org",
+            ExeName       = "PPSSPPWindows64.exe",
+            Source = new LauncherV2.Core.Emulators.EmulatorSource(
+                Author:       "Henrik Rydgard and the PPSSPP contributors",
+                Licence:      "GPL-2.0-or-later for PPSSPP itself; parts of the "
+                            + "bundled PSPSDK are BSD-licensed",
+                LicenceUrl:   "https://github.com/hrydgard/ppsspp/blob/master/LICENSE.TXT",
+                DownloadPage: "https://www.ppsspp.org/download/",
+                Owner:        "hrydgard",
+                Repo:         "ppsspp",
+                AssetPattern: "Windows-x64.zip"),
+        },
+
+        // xemu — original Xbox. A LAUNCHER: Sneak King's client reads xemu's
+        // process memory directly, so there is no socket for London to speak.
+        new EmulatorBackend
+        {
+            Id            = "xemu",
+            DisplayName   = "xemu",
+            Systems       = new[] { "XBOX" },
+            BridgeReady   = false,
+            LiveVerified  = false,
+            HomepageUrl   = "https://xemu.app",
+            ExeName       = "xemu.exe",
+            Source = new LauncherV2.Core.Emulators.EmulatorSource(
+                Author:       "the xemu project",
+                Licence:      "GPL-2.0 for xemu and the QEMU it is built on; the "
+                            + "distribution also carries firmware under other terms",
+                LicenceUrl:   "https://github.com/xemu-project/xemu/blob/master/LICENSE",
+                DownloadPage: "https://xemu.app/docs/download/",
+                Owner:        "xemu-project",
+                Repo:         "xemu",
+                AssetPattern: "xemu-win-x86_64-release.zip"),
+        },
+
+        // Cemu — Wii U. A LAUNCHER: Xenoblade X's client installs its own Cemu
+        // graphic pack and listens on 45872 for what that pack posts back.
+        new EmulatorBackend
+        {
+            Id            = "cemu",
+            DisplayName   = "Cemu",
+            Systems       = new[] { "WIIU" },
+            BridgeReady   = false,
+            LiveVerified  = false,
+            HomepageUrl   = "https://cemu.info",
+            ExeName       = "Cemu.exe",
+            Source = new LauncherV2.Core.Emulators.EmulatorSource(
+                Author:       "the Cemu project",
+                Licence:      "MPL-2.0",
+                LicenceUrl:   "https://github.com/cemu-project/Cemu/blob/main/LICENSE.txt",
+                DownloadPage: "https://github.com/cemu-project/Cemu/releases",
+                Owner:        "cemu-project",
+                Repo:         "Cemu",
+                AssetPattern: "windows-x64.zip"),
+        },
+
         // Dolphin — GameCube and Wii. A LAUNCHER, not a memory bridge: every
         // GC/Wii world in the catalogue reads Dolphin itself through
         // dolphin-memory-engine and registers its own Archipelago client, so
