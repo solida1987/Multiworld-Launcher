@@ -1,0 +1,379 @@
+<UserControl x:Class="LauncherV2.UI.Controls.MultiworldPanel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Background="{StaticResource BrushBackground}">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>  <!-- surface strip -->
+            <RowDefinition Height="Auto"/>  <!-- engine banner -->
+            <RowDefinition Height="*"/>     <!-- the surface itself -->
+        </Grid.RowDefinitions>
+
+        <!--  Three surfaces. Generation spans games, so this lives here and
+              not inside any one game's page. -->
+        <Border Grid.Row="0" Background="#0E1118" BorderBrush="#262C3E" BorderThickness="0,0,0,1">
+            <StackPanel Orientation="Horizontal" Margin="12,0">
+                <Button x:Name="TabSeeds"    Content="Seeds"     Style="{StaticResource BtnSecondaryStyle}"
+                        Padding="14,9" Margin="0,6,6,6" Click="TabSeeds_Click"/>
+                <Button x:Name="TabNewSeed"  Content="New seed"  Style="{StaticResource BtnSecondaryStyle}"
+                        Padding="14,9" Margin="0,6,6,6" Click="TabNewSeed_Click"/>
+                <Button x:Name="TabApworlds" Content="Apworlds"  Style="{StaticResource BtnSecondaryStyle}"
+                        Padding="14,9" Margin="0,6,6,6" Click="TabApworlds_Click"/>
+                <!--  Last, and deliberately not first: someone who already knows
+                      what they are doing should not have to walk past it. -->
+                <Button x:Name="TabGuide"    Content="How it works" Style="{StaticResource BtnSecondaryStyle}"
+                        Padding="14,9" Margin="0,6,6,6" Click="TabGuide_Click"/>
+            </StackPanel>
+        </Border>
+
+        <!--  The engine is the one dependency everything here has. When it is
+              missing or unusable, that is the whole story until it is fixed. -->
+        <Border x:Name="EngineBanner" Grid.Row="1"
+                Background="#241E12" BorderBrush="#8A6520" BorderThickness="0,0,0,1"
+                Padding="18,12" Visibility="Collapsed">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0">
+                    <TextBlock x:Name="TxtEngineHeadline" FontWeight="Bold" FontSize="13"
+                               Foreground="{StaticResource BrushText}" TextWrapping="Wrap"/>
+                    <TextBlock x:Name="TxtEngineDetail" FontSize="11.5" Margin="0,4,0,0"
+                               Foreground="{StaticResource BrushMuted}" TextWrapping="Wrap"
+                               MaxWidth="760" HorizontalAlignment="Left"/>
+                </StackPanel>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button x:Name="BtnEngineLocate" Content="Point at an install"
+                            Style="{StaticResource BtnSecondaryStyle}" Padding="12,7"
+                            Margin="10,0,0,0" Click="BtnEngineLocate_Click"/>
+                    <Button x:Name="BtnEngineGet" Content="Get the engine"
+                            Style="{StaticResource BtnSecondaryStyle}" Padding="12,7"
+                            Margin="8,0,0,0" Click="BtnEngineGet_Click"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!--  SEEDS  -->
+        <Grid x:Name="PanelSeeds" Grid.Row="2" Visibility="Collapsed">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+
+            <StackPanel Grid.Row="0" Margin="18,16,18,10">
+                <TextBlock x:Name="TxtSeedsSummary" FontSize="14" FontWeight="Bold"
+                           Foreground="{StaticResource BrushText}" Text="Seeds"/>
+                <TextBlock Margin="0,6,0,0" TextWrapping="Wrap" MaxWidth="820"
+                           HorizontalAlignment="Left" FontSize="11.5"
+                           Foreground="{StaticResource BrushMuted}"
+                           Text="Every seed you generate lands here. Host starts the Archipelago server for it on this computer; players connect to your address with their slot name. Stop shuts it down and saves — you can resume the same session later."/>
+            </StackPanel>
+
+            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="18,0,18,18">
+                <StackPanel>
+                    <StackPanel x:Name="PanelSeedList"/>
+                    <StackPanel x:Name="PanelSeedsEmpty" Margin="0,60,0,0"
+                                HorizontalAlignment="Center" MaxWidth="460">
+                        <TextBlock Text="No seeds yet" FontSize="16" FontWeight="Bold"
+                                   Foreground="{StaticResource BrushText}" HorizontalAlignment="Center"/>
+                        <TextBlock Margin="0,8,0,0" TextWrapping="Wrap" TextAlignment="Center"
+                                   Foreground="{StaticResource BrushMuted}" FontSize="12"
+                                   Text="Build one under New seed — pick the games, set the options, press Generate."/>
+                        <Button Content="New seed" Style="{StaticResource BtnPlayStyle}"
+                                Padding="18,9" Margin="0,16,0,0" HorizontalAlignment="Center"
+                                Click="TabNewSeed_Click"/>
+                    </StackPanel>
+                </StackPanel>
+            </ScrollViewer>
+        </Grid>
+
+        <!--  NEW SEED  -->
+        <Grid x:Name="PanelNewSeed" Grid.Row="2">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="248"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="284"/>
+            </Grid.ColumnDefinitions>
+
+            <!--  slots  -->
+            <Border Grid.Column="0" Background="#141720" BorderBrush="#262C3E" BorderThickness="0,0,1,0">
+                <Grid Margin="14">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <TextBlock Grid.Row="0" x:Name="TxtSlotCount" Text="SLOTS" FontSize="10"
+                               FontWeight="Bold" Foreground="{StaticResource BrushMuted}"
+                               Margin="0,0,0,10"/>
+                    <ListBox Grid.Row="1" x:Name="ListSlots" Background="Transparent"
+                             BorderThickness="0" Foreground="{StaticResource BrushText}"
+                             SelectionChanged="ListSlots_SelectionChanged"/>
+                    <StackPanel Grid.Row="2" Margin="0,10,0,0">
+                        <TextBlock Text="1 · Pick a game" FontSize="10"
+                                   Foreground="{StaticResource BrushMuted}" Margin="2,0,0,4"/>
+                        <!-- NOT IsEditable: the launcher's own ComboBox template
+                             has no PART_EditableTextBox, so an editable combo
+                             renders as an empty box. Typing still jumps to a
+                             game, because text search is on by default. -->
+                        <ComboBox x:Name="CmbAddGame" Margin="0,0,0,6" Padding="8,6"
+                                  ToolTip="Every game with an option template on this machine. Type a name to jump to it."/>
+                        <Button x:Name="BtnAddSlot" Content="2 ·  Add slot"
+                                Style="{StaticResource BtnSecondaryStyle}" Padding="0,8"
+                                ToolTip="Adds a player of the picked game with its default options"
+                                Click="BtnAddSlot_Click"/>
+                        <Button x:Name="BtnRemoveSlot" Content="Remove selected"
+                                Style="{StaticResource BtnSecondaryStyle}" Padding="0,6"
+                                Margin="0,6,0,0" Click="BtnRemoveSlot_Click"/>
+                        <Button x:Name="BtnImportYaml" Content="Import yaml files"
+                                Style="{StaticResource BtnSecondaryStyle}" Padding="0,6"
+                                Margin="0,6,0,0"
+                                ToolTip="Bring player files made elsewhere. They are used exactly as they are."
+                                Click="BtnImportYaml_Click"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <!--  options for the selected slot  -->
+            <Grid Grid.Column="1">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <Border Grid.Row="0" Padding="18,14,18,10">
+                    <StackPanel>
+                        <TextBlock x:Name="TxtSlotHeader" FontSize="15" FontWeight="Bold"
+                                   Foreground="{StaticResource BrushAccent}"
+                                   Text="Add a slot to begin"/>
+                        <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                            <TextBlock Text="Name" VerticalAlignment="Center" FontSize="11"
+                                       Foreground="{StaticResource BrushMuted}" Margin="0,0,8,0"/>
+                            <TextBox x:Name="TxtSlotName" Width="180" Padding="6,4"
+                                     ToolTip="The slot name players log in with — max 16 characters"
+                                     TextChanged="TxtSlotName_TextChanged"/>
+                            <TextBlock x:Name="TxtNameWarn" VerticalAlignment="Center" FontSize="11"
+                                       Margin="10,0,0,0" Foreground="{StaticResource BrushError}"/>
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
+                <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled" Padding="18,0,18,0">
+                    <StackPanel x:Name="PanelOptions"/>
+                </ScrollViewer>
+
+                <!--  The generator's own words, kept visible. This was a
+                      four-line afterthought the first time around, and the
+                      player could not tell whether anything was happening. -->
+                <Border Grid.Row="2" Background="#0B0E15" BorderBrush="#262C3E"
+                        BorderThickness="0,1,0,0" Padding="18,8,18,10">
+                    <StackPanel>
+                        <TextBlock Text="GENERATOR" FontSize="10" FontWeight="Bold"
+                                   Foreground="{StaticResource BrushMuted}" Margin="0,0,0,4"/>
+                        <ScrollViewer x:Name="ScrollGenLog" VerticalScrollBarVisibility="Auto"
+                                      Height="120">
+                            <TextBlock x:Name="TxtGenLog" FontFamily="Cascadia Mono, Consolas"
+                                       FontSize="11" Foreground="{StaticResource BrushMuted}"
+                                       TextWrapping="Wrap"
+                                       Text="Nothing has run yet. Progress and errors will appear here, line by line."/>
+                        </ScrollViewer>
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <!--  readiness + action  -->
+            <Border Grid.Column="2" Background="#141720" BorderBrush="#262C3E" BorderThickness="1,0,0,0">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="16">
+                        <TextBlock Text="READY TO GENERATE?" FontSize="10" FontWeight="Bold"
+                                   Foreground="{StaticResource BrushMuted}" Margin="0,0,0,10"/>
+                        <StackPanel x:Name="PanelReadiness"/>
+
+                        <Border Height="1" Background="#262C3E" Margin="0,14,0,12"/>
+
+                        <TextBlock Text="SEED" FontSize="10" FontWeight="Bold"
+                                   Foreground="{StaticResource BrushMuted}" Margin="0,0,0,6"/>
+                        <TextBox x:Name="TxtSeedNumber" Padding="6,5"
+                                 ToolTip="Leave empty for a random seed. The same number with the same slots gives the same result."/>
+                        <TextBlock Text="Empty = random. Same number, same result."
+                                   FontSize="10" Foreground="{StaticResource BrushMuted}"
+                                   Margin="2,3,0,0"/>
+
+                        <TextBlock Text="SPOILER" FontSize="10" FontWeight="Bold"
+                                   Foreground="{StaticResource BrushMuted}" Margin="0,12,0,6"/>
+                        <ComboBox x:Name="CmbSpoiler" Padding="8,5"
+                                  ToolTip="How much the spoiler file reveals about where everything is"/>
+
+                        <CheckBox x:Name="ChkRace" Content="Race mode" Margin="0,12,0,0"
+                                  Foreground="{StaticResource BrushText}"
+                                  ToolTip="Encrypted patches, no spoiler — for competitions"/>
+
+                        <Border Height="1" Background="#262C3E" Margin="0,14,0,12"/>
+
+                        <Button x:Name="BtnGenerate" Content="3 ·  Generate"
+                                Style="{StaticResource BtnPlayStyle}" Padding="0,10"
+                                Click="BtnGenerate_Click"/>
+                        <TextBlock Text="Checks that the seed is possible first, then builds it and files it under Seeds."
+                                   FontSize="10" TextWrapping="Wrap"
+                                   Foreground="{StaticResource BrushMuted}" Margin="2,4,0,0"/>
+                        <Button x:Name="BtnValidate" Content="Check without generating"
+                                Style="{StaticResource BtnSecondaryStyle}" Padding="0,7"
+                                Margin="0,10,0,0" Click="BtnValidate_Click"/>
+                        <TextBlock Text="Runs the whole placement without writing any files — a fast answer to &quot;can this work?&quot;"
+                                   FontSize="10" TextWrapping="Wrap"
+                                   Foreground="{StaticResource BrushMuted}" Margin="2,4,0,0"/>
+
+                        <Border Height="1" Background="#262C3E" Margin="0,14,0,12"/>
+                        <TextBlock Text="Everything is passed to the engine explicitly, so its own settings file never changes what you asked for."
+                                   FontSize="10" TextWrapping="Wrap"
+                                   Foreground="{StaticResource BrushMuted}"/>
+                    </StackPanel>
+                </ScrollViewer>
+            </Border>
+        </Grid>
+
+        <!--  APWORLDS  -->
+        <Grid x:Name="PanelApworlds" Grid.Row="2" Visibility="Collapsed">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+            <StackPanel Grid.Row="0" Margin="18,16,18,10">
+                <TextBlock x:Name="TxtApworldSummary" FontSize="14" FontWeight="Bold"
+                           Foreground="{StaticResource BrushText}"/>
+                <TextBlock Margin="0,6,0,0" TextWrapping="Wrap" MaxWidth="820"
+                           HorizontalAlignment="Left" FontSize="11.5"
+                           Foreground="{StaticResource BrushMuted}"
+                           Text="Every generation loads all of these, including the ones no player picked. A world with a broken manifest can stop seeds for games that do not use it."/>
+            </StackPanel>
+            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="18,0,18,18">
+                <StackPanel x:Name="PanelApworldList"/>
+            </ScrollViewer>
+        </Grid>
+
+        <!--  ═══ How it works ═══════════════════════════════════════════════
+              Written for someone who has never run a multiworld. It explains
+              the idea before the buttons, because the buttons make no sense
+              without it. -->
+        <Grid x:Name="PanelGuide" Grid.Row="2" Visibility="Collapsed">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="26,20,26,30">
+                <StackPanel MaxWidth="880" HorizontalAlignment="Left">
+
+                    <TextBlock Text="How a multiworld works" FontSize="21" FontWeight="Bold"
+                               Foreground="{StaticResource BrushAccent}"/>
+                    <TextBlock Margin="0,10,0,0" TextWrapping="Wrap" FontSize="13.5" LineHeight="21"
+                               Foreground="{StaticResource BrushText}"
+                               Text="A multiworld takes the items out of one or more games, shuffles them together, and hands them back out across every player in the session. Your Fire Flower might be sitting in somebody else's dungeon; their key might be in your shop. Nobody finishes alone."/>
+                    <TextBlock Margin="0,8,0,0" TextWrapping="Wrap" FontSize="13.5" LineHeight="21"
+                               Foreground="{StaticResource BrushText}"
+                               Text="This tab is where a session is built and hosted. Everything runs on your own machine — the generator, the server, the lot. Nothing is uploaded anywhere and nobody else needs an account."/>
+
+                    <!-- ── What you need ── -->
+                    <Border Margin="0,20,0,0" Background="#141926" BorderBrush="#2A3348"
+                            BorderThickness="1" CornerRadius="4" Padding="18,14">
+                        <StackPanel>
+                            <TextBlock Text="Before you start" FontWeight="Bold" FontSize="14"
+                                       Foreground="{StaticResource BrushText}"/>
+                            <TextBlock Margin="0,8,0,0" TextWrapping="Wrap" FontSize="12.5" LineHeight="19"
+                                       Foreground="{StaticResource BrushMuted}"
+                                       Text="• The Archipelago engine. The bar above says whether it was found; if not, install it and point London at it.&#10;• A plugin for each game you want to play, from the Plugin Library.&#10;• Your own copy of each game. London never supplies one."/>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- ── The three steps ── -->
+                    <TextBlock Margin="0,24,0,0" Text="Building a seed, step by step"
+                               FontSize="16" FontWeight="Bold" Foreground="{StaticResource BrushText}"/>
+
+                    <StackPanel Margin="0,12,0,0">
+                        <TextBlock TextWrapping="Wrap" FontSize="13" LineHeight="20"
+                                   Foreground="{StaticResource BrushText}">
+                            <Run Text="1 · Pick a game" FontWeight="Bold" Foreground="{StaticResource BrushAccent}"/>
+                            <LineBreak/>
+                            <Run Text="Under New seed, the list at the bottom left holds every game this machine can generate. One entry per option template — if a game is missing, its plugin is not installed yet."/>
+                        </TextBlock>
+
+                        <TextBlock Margin="0,14,0,0" TextWrapping="Wrap" FontSize="13" LineHeight="20"
+                                   Foreground="{StaticResource BrushText}">
+                            <Run Text="2 · Add a slot" FontWeight="Bold" Foreground="{StaticResource BrushAccent}"/>
+                            <LineBreak/>
+                            <Run Text="A slot is one player in one game. Add as many as you like and mix games freely — that is the multiworld. Each slot starts on that game's default options; select it to change them. Two slots of the same game are fine, and so is one slot on its own."/>
+                        </TextBlock>
+
+                        <TextBlock Margin="0,14,0,0" TextWrapping="Wrap" FontSize="13" LineHeight="20"
+                                   Foreground="{StaticResource BrushText}">
+                            <Run Text="3 · Generate" FontWeight="Bold" Foreground="{StaticResource BrushAccent}"/>
+                            <LineBreak/>
+                            <Run Text="London checks the seed is actually finishable before it builds anything — every item reachable, every goal possible. Then it writes the seed and files it under Seeds. Check without generating runs the same check and writes nothing, which is the fast answer to “can this work?”"/>
+                        </TextBlock>
+
+                        <TextBlock Margin="0,14,0,0" TextWrapping="Wrap" FontSize="13" LineHeight="20"
+                                   Foreground="{StaticResource BrushText}">
+                            <Run Text="4 · Host it" FontWeight="Bold" Foreground="{StaticResource BrushAccent}"/>
+                            <LineBreak/>
+                            <Run Text="Open Seeds and press Host. That starts the server on your machine. Join then lists every slot in the seed, and each one plays with a single press."/>
+                        </TextBlock>
+                    </StackPanel>
+
+                    <!-- ── What you can do with it ── -->
+                    <TextBlock Margin="0,26,0,0" Text="Four things you can do with this"
+                               FontSize="16" FontWeight="Bold" Foreground="{StaticResource BrushText}"/>
+
+                    <Border Margin="0,12,0,0" Background="#141926" BorderBrush="#2A3348"
+                            BorderThickness="1" CornerRadius="4" Padding="18,14">
+                        <StackPanel>
+                            <TextBlock Text="A randomiser for one game" FontWeight="Bold" FontSize="13"
+                                       Foreground="{StaticResource BrushAccent}"/>
+                            <TextBlock Margin="0,5,0,0" TextWrapping="Wrap" FontSize="12.5" LineHeight="19"
+                                       Foreground="{StaticResource BrushMuted}"
+                                       Text="One slot is a complete seed. Generate it, host it, play it — you have a randomised run of that game, alone, with no server anywhere but here. Most people start here."/>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Margin="0,10,0,0" Background="#141926" BorderBrush="#2A3348"
+                            BorderThickness="1" CornerRadius="4" Padding="18,14">
+                        <StackPanel>
+                            <TextBlock Text="Several of your own games, shuffled together" FontWeight="Bold" FontSize="13"
+                                       Foreground="{StaticResource BrushAccent}"/>
+                            <TextBlock Margin="0,5,0,0" TextWrapping="Wrap" FontSize="12.5" LineHeight="19"
+                                       Foreground="{StaticResource BrushMuted}"
+                                       Text="Add several slots and play all of them yourself. The items are shuffled across the whole set, so progress in one game unlocks another: a key for your Zelda run turns up in your Pokémon game. Join opens each one in its own connection, and they can all be open at once."/>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Margin="0,10,0,0" Background="#141926" BorderBrush="#2A3348"
+                            BorderThickness="1" CornerRadius="4" Padding="18,14">
+                        <StackPanel>
+                            <TextBlock Text="Host for other people" FontWeight="Bold" FontSize="13"
+                                       Foreground="{StaticResource BrushAccent}"/>
+                            <TextBlock Margin="0,5,0,0" TextWrapping="Wrap" FontSize="12.5" LineHeight="19"
+                                       Foreground="{StaticResource BrushMuted}"
+                                       Text="The server Host starts is a real Archipelago server. Others can connect to it with their own client from anywhere they can reach your machine — they do not need London. Give them the address, the port and their slot name."/>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Margin="0,10,0,0" Background="#141926" BorderBrush="#2A3348"
+                            BorderThickness="1" CornerRadius="4" Padding="18,14">
+                        <StackPanel>
+                            <TextBlock Text="Join a seed somebody else made" FontWeight="Bold" FontSize="13"
+                                       Foreground="{StaticResource BrushAccent}"/>
+                            <TextBlock Margin="0,5,0,0" TextWrapping="Wrap" FontSize="12.5" LineHeight="19"
+                                       Foreground="{StaticResource BrushMuted}"
+                                       Text="You do not have to be the one who built it. The Join tab handles a seed hosted elsewhere too — you sign in to their server with your slot name, and London sets your game up the same way it would for your own seed."/>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- ── Practical notes ── -->
+                    <TextBlock Margin="0,26,0,0" Text="Worth knowing"
+                               FontSize="16" FontWeight="Bold" Foreground="{StaticResource BrushText}"/>
+                    <TextBlock Margin="0,10,0,0" TextWrapping="Wrap" FontSize="12.5" LineHeight="20"
+                               Foreground="{StaticResource BrushMuted}"
+                               Text="• The seed number decides the shuffle. Leave it empty for a random one; type the same number again to get exactly the same seed back.&#10;• Race mode hides the spoiler log, for when nobody should be able to look anything up.&#10;• A generated seed keeps working. Host it today, stop, host it again next week — the server picks the session up where it left off.&#10;• Some games need their own copy patched before the first play. London asks once per seed, then never again.&#10;• Nothing here is uploaded. The generator, the server and the seed all stay on this machine."/>
+
+                </StackPanel>
+            </ScrollViewer>
+        </Grid>
+    </Grid>
+</UserControl>
