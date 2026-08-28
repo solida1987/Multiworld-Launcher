@@ -96,6 +96,24 @@ public static class ApGenerator
             WorkingDirectory       = engine.Root,
             RedirectStandardOutput = true,
             RedirectStandardError  = true,
+            // ⚠ Archipelago's generator ends a failed run by calling input(),
+            // to hold its console open so a person can read the error. Left
+            // alone, the child inherits whatever stdin the launcher has, and
+            // a handle that never delivers a line and never closes leaves the
+            // process sitting there for ever -- HasExited stays false and the
+            // wait loop below spins. The player sees a generation that simply
+            // stopped, with the reason unread in a pipe and no console to
+            // press Enter in.
+            //
+            // Redirecting lets us close the handle the moment the process
+            // starts, so input() gets EOF at once.
+            //
+            // ⚠⚠ This is hardening, NOT the guarantee. Measured: from a
+            // console host the inherited case exited on its own anyway, so
+            // stdin is not provably the trigger of the hang somebody reported.
+            // What actually guarantees termination is the silence watchdog
+            // below -- it ends the wait whatever the cause.
+            RedirectStandardInput  = true,
             UseShellExecute        = false,
             CreateNoWindow         = true,
         };
@@ -128,10 +146,15 @@ public static class ApGenerator
 
         using (proc)
         {
+            // The other half of the fix above: give the generator EOF on
+            // stdin straight away, so its end-of-run input() cannot block.
+            try { proc.StandardInput.Close(); } catch (Exception) { /* already gone */ }
+
             // Asynchronous on purpose: the process never closes its streams,
             // so reading them to the end would wait forever.
-            proc.OutputDataReceived += (_, e) => { if (e.Data != null) Note(e.Data); };
-            proc.ErrorDataReceived  += (_, e) => { if (e.Data != null) Note(e.Data); };
+            var lastLine = DateTime.UtcNow;
+            proc.OutputDataReceived += (_, e) => { if (e.Data != null) { lastLine = DateTime.UtcNow; Note(e.Data); } };
+            proc.ErrorDataReceived  += (_, e) => { if (e.Data != null) { lastLine = DateTime.UtcNow; Note(e.Data); } };
             proc.BeginOutputReadLine();
             proc.BeginErrorReadLine();
 
@@ -139,10 +162,32 @@ public static class ApGenerator
                 ? proc.HasExited || log.ToString().Contains("Done.", StringComparison.Ordinal)
                 : Directory.GetFiles(outDir, "*.zip").Length > 0 || proc.HasExited;
 
+            // ⚠ A backstop for a stall that is NOT the input() one. Generation
+            // can legitimately be slow -- a big multiworld fills for many
+            // minutes -- but it is never SILENT for long: the generator prints
+            // as it works. Total silence with no seed written means it is not
+            // coming back, and the player is owed that answer rather than a
+            // progress bar that never moves again.
+            //
+            // Deliberately generous. A cap that ends a healthy run would be a
+            // worse bug than the one it guards against.
+            var silenceLimit = TimeSpan.FromMinutes(15);
+
             try
             {
                 while (!Finished())
+                {
+                    if (DateTime.UtcNow - lastLine > silenceLimit)
+                    {
+                        TryKill(proc);
+                        return new Result(false,
+                            "The generator stopped responding — no output for "
+                          + $"{(int)silenceLimit.TotalMinutes} minutes and no seed written. "
+                          + "The log below is everything it managed to say.",
+                            null, outDir, ReadSlotErrors(log.ToString()), log.ToString());
+                    }
                     await Task.Delay(200, ct).ConfigureAwait(false);
+                }
             }
             catch (OperationCanceledException)
             {

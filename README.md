@@ -177,6 +177,10 @@ launcher a tool rather than a distribution channel.
 - **AP Play** (connect to a multiworld) and **Standalone** play from one screen
 - Live **location** and **item** trackers, and a graphical **map tracker**
 - **Playtime & achievements** tracking
+- **Update AP Worlds** — one button fills your Archipelago generator with the
+  newest version of every world in the catalogue, whether or not you own the
+  game. Hosting for other people is where an out-of-date world bites, and it
+  bites as an error naming an option rather than the version behind it
 - **Launcher self-update** built in
 
 Every one of those works the same for a plugin as it did for the game that

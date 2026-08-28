@@ -7895,6 +7895,12 @@ public partial class MainWindow : Window
     private void BtnModeStreamers_Click(object sender, RoutedEventArgs e)  => SetMode(4);
     private void BtnModeDiscord_Click(object sender, RoutedEventArgs e)    => SetMode(5);
 
+    /// Not a mode: a dialog, because it asks before it does anything. It
+    /// downloads hundreds of files from hundreds of strangers' release pages,
+    /// which is not something a title-bar button should start on one click.
+    private void BtnApworldSync_Click(object sender, RoutedEventArgs e)
+        => UI.Dialogs.ApworldSyncDialog.ShowFor(this);
+
     /// Swaps the whole content area. The sidebar and the community rail stay
     /// hidden in multiworld mode: neither is about the seed being built, and a
     /// visible game list next to a slot list is two lists that mean different

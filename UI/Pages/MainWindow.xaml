@@ -213,6 +213,19 @@
                     <!-- The community lives outside this launcher, and
                          pretending otherwise helps nobody. Both of these lead
                          straight out to it. -->
+                    <!-- Hosting a seed for other people fails when the
+                         generator holds an older copy of somebody's world
+                         than the player who wrote the YAML. The per-game
+                         update button on a store card cannot help there: it
+                         fixes one game, and only one you have installed. This
+                         fills the generator with the whole catalogue. -->
+                    <Button x:Name="BtnApworldSync"
+                            Content="Update AP Worlds"
+                            Style="{StaticResource BtnSecondaryStyle}"
+                            Padding="12,4" Margin="0,0,6,0"
+                            FontSize="11"
+                            ToolTip="Fetch the newest version of every AP world in the catalogue into your generator — asks first"
+                            Click="BtnApworldSync_Click"/>
                     <Button x:Name="BtnModeStreamers"
                             Content="Streamers"
                             Style="{StaticResource BtnSecondaryStyle}"
