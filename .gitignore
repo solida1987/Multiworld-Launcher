@@ -1,0 +1,45 @@
+# Build output
+bin/
+obj/
+publish_out/
+publish/
+
+# IDE
+.vs/
+*.user
+*.suo
+
+# Runtime-generated (created next to the exe, never in source)
+launcher_settings.json
+Data/
+crash.log
+
+# Distributable package — goes to GitHub Releases, not the repo
+launcher_package.zip
+
+# Self-test output (generated next to exe at runtime)
+self_test.log
+
+# AI-generation scripts (not for public repo)
+Tools_AssetGen/
+mk64src/
+
+# Python cache
+__pycache__/
+
+# Publish leftovers from earlier release rounds (200+ MB each)
+publish_*/
+
+# Patch notes are release-note text, not repo content — the old ones were
+# cleaned out deliberately and kept creeping back in via `git add -A`.
+patch_notes_London-*.md
+
+# Packaging output
+dist/
+
+# Our own build machinery: gates, packers and checks. Not the product,
+# and not something a visitor needs in order to read or build the source.
+Tools/
+# ...except the one third parties are told to use: PLUGIN_API.md documents
+# pack_plugin.py as the way to build a plugin, so it belongs to them.
+!Tools/pack_plugin.py

@@ -1,0 +1,112 @@
+<UserControl x:Class="LauncherV2.UI.Controls.JoinPanel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Background="{StaticResource BrushBackground}">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!--  Which seed, and whether its server lives. -->
+        <Border Grid.Row="0" Background="#0E1118" BorderBrush="#262C3E"
+                BorderThickness="0,0,0,1" Padding="18,14">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Grid.Column="0" Orientation="Horizontal">
+                    <TextBlock Text="SEED" FontSize="10" FontWeight="Bold"
+                               Foreground="{StaticResource BrushMuted}"
+                               VerticalAlignment="Center" Margin="0,0,10,0"/>
+                    <ComboBox x:Name="CmbSeed" MinWidth="300" Padding="8,6"
+                              SelectionChanged="CmbSeed_SelectionChanged"
+                              ToolTip="Every seed in your library, newest first"/>
+                </StackPanel>
+
+                <!--  Joining somebody else's session has nothing to do with the
+                      seed picker beside it, so it gets its own button rather
+                      than an entry in a list of your own seeds. -->
+                <Button x:Name="BtnJoinElsewhere" Grid.Column="1" Content="+  Add a server"
+                        Style="{StaticResource BtnSecondaryStyle}" Padding="12,6"
+                        HorizontalAlignment="Left" Margin="16,0,0,0" VerticalAlignment="Center"
+                        Click="BtnJoinElsewhere_Click"
+                        ToolTip="Sign in to a slot on a session somebody else is hosting"/>
+
+                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Ellipse x:Name="DotServer" Width="9" Height="9"
+                             Fill="#4A5170" VerticalAlignment="Center" Margin="0,0,7,0"/>
+                    <TextBlock x:Name="TxtServer" Text="Server starts when you press Play"
+                               FontSize="12" Foreground="{StaticResource BrushMuted}"
+                               VerticalAlignment="Center" Margin="0,0,12,0"/>
+                    <Button x:Name="BtnStopServer" Content="Stop server"
+                            Style="{StaticResource BtnSecondaryStyle}" Padding="12,6"
+                            Visibility="Collapsed" Click="BtnStopServer_Click"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!--  Row 1 is split: the slot cards on the left, and everything this
+              seed adds up to on the right. The right column is where the
+              player looks for "how far am I, across all of it" — the cards
+              answer per slot, and that question needed somewhere to live. -->
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+
+        <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto" Padding="18,16,18,8">
+            <StackPanel>
+                <WrapPanel x:Name="PanelSlots"/>
+
+                <!--  Slots on servers we are not running. Hidden until there is
+                      at least one, so the tab does not grow a header for
+                      something most people never use. -->
+                <StackPanel x:Name="SectionExternal" Visibility="Collapsed" Margin="0,6,0,0">
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                        <TextBlock Text="HOSTED ELSEWHERE" FontSize="10" FontWeight="Bold"
+                                   Foreground="{StaticResource BrushMuted}" VerticalAlignment="Center"/>
+                        <Border Background="#262C3E" CornerRadius="3" Padding="6,1" Margin="9,0,0,0">
+                            <TextBlock x:Name="TxtExternalCount" FontSize="10"
+                                       Foreground="{StaticResource BrushMuted}"/>
+                        </Border>
+                    </StackPanel>
+                    <WrapPanel x:Name="PanelExternal"/>
+                </StackPanel>
+
+                <StackPanel x:Name="PanelJoinEmpty" Margin="0,60,0,0"
+                            HorizontalAlignment="Center" MaxWidth="480">
+                    <TextBlock Text="Nothing to join yet" FontSize="16" FontWeight="Bold"
+                               Foreground="{StaticResource BrushText}" HorizontalAlignment="Center"/>
+                    <TextBlock Margin="0,8,0,0" TextWrapping="Wrap" TextAlignment="Center"
+                               FontSize="12" Foreground="{StaticResource BrushMuted}"
+                               Text="Generate a seed under Multiworld first. Every player slot in it shows up here as a card with one button: press it, and London hosts the server, applies that slot's patch, connects, and starts the game."/>
+                    <TextBlock Margin="0,14,0,0" TextWrapping="Wrap" TextAlignment="Center"
+                               FontSize="12" Foreground="{StaticResource BrushMuted}"
+                               Text="Playing in somebody else's session instead? Use Join a server elsewhere above. You need their address and the slot name they gave you — London asks the server what that slot plays and sets the game up from there."/>
+                </StackPanel>
+            </StackPanel>
+        </ScrollViewer>
+
+        <!--  THIS SEED: the roll-up across every slot in it. Filled in code. -->
+        <Border x:Name="PanelSeedSide" Grid.Column="1" Width="320"
+                Background="#0E1118" BorderBrush="#262C3E" BorderThickness="1,0,0,0"
+                Visibility="Collapsed">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="16,16,16,16">
+                <StackPanel x:Name="PanelSeedSummary"/>
+            </ScrollViewer>
+        </Border>
+        </Grid>
+
+        <Border Grid.Row="2" Background="#0B0E15" BorderBrush="#262C3E"
+                BorderThickness="0,1,0,0" Padding="18,9">
+            <TextBlock FontSize="11" Foreground="{StaticResource BrushMuted}" TextWrapping="Wrap"
+                       Text="You can have several games open at once — each Play opens its own connection with its own slot. London never closes a running game for you; save and close it in the game itself, or use its Stop button here."/>
+        </Border>
+    </Grid>
+</UserControl>
