@@ -1,0 +1,44 @@
+<UserControl x:Class="LauncherV2.UI.Controls.CommunityPanel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Background="{StaticResource BrushBackground}">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!--  One control, two faces. The topbar has a button for each, so the
+              header says which one you are looking at rather than making you
+              find a tab. -->
+        <Border Grid.Row="0" Background="#0E1118" BorderBrush="#262C3E"
+                BorderThickness="0,0,0,1" Padding="22,16">
+            <StackPanel>
+                <TextBlock x:Name="TxtHeading" FontSize="19" FontWeight="Bold"
+                           Foreground="{StaticResource BrushAccent}"/>
+                <TextBlock x:Name="TxtSubheading" Margin="0,5,0,0" TextWrapping="Wrap"
+                           MaxWidth="760" HorizontalAlignment="Left"
+                           FontSize="12.5" Foreground="{StaticResource BrushMuted}"/>
+            </StackPanel>
+        </Border>
+
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="22,18,22,10">
+            <StackPanel>
+                <WrapPanel x:Name="PanelCards"/>
+
+                <!--  Shown while the first fetch is out, and again if it came
+                      back with nothing. Never filler in place of a card. -->
+                <TextBlock x:Name="TxtEmpty" Margin="4,40,0,0" TextWrapping="Wrap"
+                           MaxWidth="620" FontSize="12.5"
+                           Foreground="{StaticResource BrushMuted}"/>
+            </StackPanel>
+        </ScrollViewer>
+
+        <Border Grid.Row="2" Background="#0B0E15" BorderBrush="#262C3E"
+                BorderThickness="0,1,0,0" Padding="22,9">
+            <TextBlock x:Name="TxtFooter" FontSize="11" TextWrapping="Wrap"
+                       Foreground="{StaticResource BrushMuted}"/>
+        </Border>
+    </Grid>
+</UserControl>
