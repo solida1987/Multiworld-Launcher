@@ -219,6 +219,16 @@
                         <TextBlock Text="Checks that the seed is possible first, then builds it and files it under Seeds."
                                    FontSize="10" TextWrapping="Wrap"
                                    Foreground="{StaticResource BrushMuted}" Margin="2,4,0,0"/>
+                        <!-- Only while something is running. A generation can
+                             take many minutes, and without this the player
+                             sits in front of two greyed-out buttons with no
+                             way out but killing the launcher — which is what
+                             "it froze" actually means most of the time. -->
+                        <Button x:Name="BtnStopGenerate" Content="Stop"
+                                Style="{StaticResource BtnSecondaryStyle}" Padding="0,7"
+                                Margin="0,10,0,0" Visibility="Collapsed"
+                                ToolTip="Stop this run and give the buttons back"
+                                Click="BtnStopGenerate_Click"/>
                         <Button x:Name="BtnValidate" Content="Check without generating"
                                 Style="{StaticResource BtnSecondaryStyle}" Padding="0,7"
                                 Margin="0,10,0,0" Click="BtnValidate_Click"/>

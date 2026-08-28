@@ -847,6 +847,25 @@ public partial class MultiworldPanel : System.Windows.Controls.UserControl
 
         BtnGenerate.IsEnabled = ok && _running == null;
         BtnValidate.IsEnabled = ok && _running == null;
+        // Exactly one of "start it" and "stop it" is ever available, so the
+        // panel is never a dead end.
+        BtnStopGenerate.Visibility = _running == null
+            ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    /// Give the buttons back.
+    ///
+    /// ⚠ The point is not tidiness. A run holds BtnGenerate and BtnValidate
+    /// disabled for as long as it lasts, and a generation can legitimately
+    /// take many minutes — so without a way to end one, "it froze" and "it is
+    /// still working" look identical and neither can be acted on. Cancelling
+    /// unwinds through RunAsync's finally, which re-enables everything.
+    private void BtnStopGenerate_Click(object sender, RoutedEventArgs e)
+    {
+        if (_running == null) return;
+        Log("Stopping…");
+        try { _running.Cancel(); }
+        catch (ObjectDisposedException) { /* it finished while we were asked to stop */ }
     }
 
     // ----------------------------------------------------------- generating
@@ -903,7 +922,11 @@ public partial class MultiworldPanel : System.Windows.Controls.UserControl
         }
 
         _running = new CancellationTokenSource();
-        BtnGenerate.IsEnabled = BtnValidate.IsEnabled = false;
+        // Through RefreshReadiness rather than by hand: _running is set, so it
+        // disables both start buttons AND reveals Stop. Setting the two flags
+        // here directly is how the Stop button stayed hidden for the whole run
+        // it exists for.
+        RefreshReadiness();
 
         try
         {

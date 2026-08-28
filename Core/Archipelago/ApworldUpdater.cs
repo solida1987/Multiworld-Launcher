@@ -182,6 +182,55 @@ public static class ApworldUpdater
         catch (Exception) { return null; }
     }
 
+    /// Games the engine already ships a world for.
+    ///
+    /// ⚠⚠ Downloading one of these is not merely wasted: Archipelago loads the
+    /// bundled copy and prints "Did not load X as its game Y is already
+    /// loaded", so the file London put there does nothing at all while looking
+    /// exactly like a world that is installed and current.
+    ///
+    /// Read from the engine rather than listed here, because the bundled set
+    /// grows with every Archipelago release — a list in the catalogue would be
+    /// wrong the week after it was written.
+    ///
+    /// Cached per process: 70-odd small zips, and the answer cannot change
+    /// while the launcher is running.
+    private static HashSet<string>? _bundled;
+
+    public static HashSet<string> BundledGames(string? engineRootOverride = null)
+    {
+        if (_bundled != null && engineRootOverride == null) return _bundled;
+        var found = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            string? root = engineRootOverride;
+            if (root == null)
+            {
+                var s = SettingsStore.Load();
+                root = ApEngine.Discover(
+                    string.IsNullOrWhiteSpace(s.ApEnginePath) ? null : s.ApEnginePath)?.Root;
+            }
+            if (root == null) return _bundled = found;
+
+            string dir = Path.Combine(root, "lib", "worlds");
+            if (!Directory.Exists(dir)) return _bundled = found;
+
+            foreach (string f in Directory.EnumerateFiles(dir, "*.apworld"))
+            {
+                try
+                {
+                    // The world's own word, the same field the engine keys on.
+                    string? g = WorldNameInside(File.ReadAllBytes(f));
+                    if (g is { Length: > 0 }) found.Add(g);
+                }
+                catch (Exception) { /* one unreadable world is not a failure */ }
+            }
+        }
+        catch (Exception) { /* no engine, no bundled list — download as before */ }
+        if (engineRootOverride == null) _bundled = found;
+        return found;
+    }
+
     public static async Task<ApworldStatus> CheckAsync(string gameId,
                                                        CancellationToken ct = default)
     {
@@ -195,6 +244,21 @@ public static class ApworldUpdater
         if (worlds == null)
             return new(ApworldState.Unknown,
                        "no Archipelago engine is set up yet", entry, null);
+
+        // ⚠⚠ Nothing to do when Archipelago already ships this world.
+        //
+        // Putting a second copy in custom_worlds does not override the
+        // bundled one — the engine loads whichever it reaches first and says
+        // so out loud: "Did not load mm3.apworld as its game Mega Man 3 is
+        // already loaded". The download would sit there doing nothing while
+        // presenting as an installed, current world.
+        //
+        // Measured on a real engine: three catalogue rows (Mega Man 3,
+        // Satisfactory, Shapez) name games Archipelago 0.6.7 bundles.
+        if (entry.ApWorldName is { Length: > 0 } name
+            && BundledGames().Contains(name))
+            return new(ApworldState.None,
+                       "Archipelago already ships this world", entry, null);
 
         string path = Path.Combine(worlds, entry.Asset);
         var rec = ApworldRecord.Get(gameId);
@@ -269,27 +333,53 @@ public static class ApworldUpdater
             return $"That file calls itself \"{isReally}\", not \"{entry.ApWorldName}\" "
                  + "— London did not install it.";
 
+        // ⚠⚠ THE FILE IS NAMED AFTER THE MODULE INSIDE IT, not after whatever
+        // the author called the asset on their release page.
+        //
+        // Archipelago imports a world as `worlds.<filename without .apworld>`,
+        // so the stem has to be the module's own name. An author who puts the
+        // version in the filename ships something the engine cannot load at
+        // all — measured, from a real generation log:
+        //
+        //   cyberpunk2077-0.7.1.apworld
+        //     -> ModuleNotFoundError: No module named 'worlds.cyberpunk2077-0'
+        //
+        // The dot truncates the module path. Two of the worlds in that
+        // player's folder were dead for exactly this reason, and four rows in
+        // the catalogue would have delivered more. Dashes and leading digits
+        // are fine; the dot is the one that breaks it.
+        //
+        // The zip's single top-level folder IS the module name, so the file
+        // can always be named correctly without guessing.
+        string fileName = ModuleNameInside(data) is { Length: > 0 } mod
+            ? mod + ".apworld"
+            : entry.Asset;
+
         try
         {
             Directory.CreateDirectory(worlds);
-            string dest = Path.Combine(worlds, entry.Asset);
+            string dest = Path.Combine(worlds, fileName);
             string part = dest + ".part";
             await File.WriteAllBytesAsync(part, data, ct).ConfigureAwait(false);
             File.Move(part, dest, overwrite: true);
 
             // An author who renamed the asset leaves the old file behind, and
             // Archipelago would load BOTH copies of the same world.
+            // ⚠ This now also cleans up the published name when it differed
+            // from the module name — otherwise renaming to the importable form
+            // would leave the broken original sitting beside it.
             var old = ApworldRecord.Get(gameId);
-            if (old is { Asset.Length: > 0 }
-                && !string.Equals(old.Asset, entry.Asset, StringComparison.OrdinalIgnoreCase))
+            foreach (string stale in new[] { old?.Asset, entry.Asset })
             {
-                try { File.Delete(Path.Combine(worlds, old.Asset)); }
+                if (stale is not { Length: > 0 }) continue;
+                if (string.Equals(stale, fileName, StringComparison.OrdinalIgnoreCase)) continue;
+                try { File.Delete(Path.Combine(worlds, stale)); }
                 catch (Exception) { /* leaving it is not worth failing over */ }
             }
 
             ApworldRecord.Set(gameId, new ApworldInstalled
             {
-                Asset = entry.Asset,
+                Asset = fileName,
                 Url = entry.Url,
                 Tag = entry.Tag,
                 Size = data.LongLength,
@@ -383,6 +473,31 @@ public static class ApworldUpdater
             using var s = entry.Open();
             using var doc = JsonDocument.Parse(s);
             return doc.RootElement.TryGetProperty("game", out var g) ? g.GetString() : null;
+        }
+        catch (Exception) { return null; }
+    }
+
+    /// The module folder inside an .apworld — which is the name Archipelago
+    /// will import it under, and therefore the name the FILE has to have.
+    ///
+    /// Null when the archive does not have exactly one top-level folder: that
+    /// is not a shape we can name with confidence, and a wrong rename is worse
+    /// than the author's own name.
+    public static string? ModuleNameInside(byte[] data)
+    {
+        try
+        {
+            using var ms = new MemoryStream(data);
+            using var zip = new ZipArchive(ms, ZipArchiveMode.Read);
+            var tops = zip.Entries
+                .Select(e => e.FullName.Replace('\\', '/'))
+                .Where(n => n.Contains('/'))
+                .Select(n => n[..n.IndexOf('/')])
+                .Where(n => n.Length > 0)
+                .Distinct(StringComparer.Ordinal)
+                .Take(2)
+                .ToList();
+            return tops.Count == 1 ? tops[0] : null;
         }
         catch (Exception) { return null; }
     }
