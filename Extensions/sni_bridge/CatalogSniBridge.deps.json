@@ -1,0 +1,62 @@
+{
+  "runtimeTarget": {
+    "name": ".NETCoreApp,Version=v8.0",
+    "signature": ""
+  },
+  "compilationOptions": {},
+  "targets": {
+    ".NETCoreApp,Version=v8.0": {
+      "CatalogSniBridge/0.1.0": {
+        "dependencies": {
+          "Multiworld Launcher.Reference": "3.7.15.0"
+        },
+        "runtime": {
+          "CatalogSniBridge.dll": {}
+        }
+      },
+      "MoonSharp/2.0.0": {},
+      "Multiworld Launcher/3.7.15": {
+        "dependencies": {
+          "MoonSharp": "2.0.0"
+        },
+        "runtime": {
+          "Multiworld Launcher.dll": {
+            "fileVersion": "0.0.0.0"
+          }
+        }
+      },
+      "Multiworld Launcher.Reference/3.7.15.0": {
+        "runtime": {
+          "Multiworld Launcher.dll": {
+            "assemblyVersion": "3.7.15.0",
+            "fileVersion": "3.7.15.0"
+          }
+        }
+      }
+    }
+  },
+  "libraries": {
+    "CatalogSniBridge/0.1.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "MoonSharp/2.0.0": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-uiAcRh7d+53k3xW9pFDJfAFVw4RnjHVCJG05M3oPAVEVwPtFavhg1H/IpC6So4X1j9kJlzuLlA3OghhPcIvc5A==",
+      "path": "moonsharp/2.0.0",
+      "hashPath": "moonsharp.2.0.0.nupkg.sha512"
+    },
+    "Multiworld Launcher/3.7.15": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "Multiworld Launcher.Reference/3.7.15.0": {
+      "type": "reference",
+      "serviceable": false,
+      "sha512": ""
+    }
+  }
+}
