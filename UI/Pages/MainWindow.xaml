@@ -1,0 +1,2581 @@
+<Window x:Class="LauncherV2.UI.Pages.MainWindow"
+        xmlns:local="clr-namespace:LauncherV2.UI.Controls"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Multiworld Launcher"
+        Width="1420" Height="720"
+        MinWidth="1180" MinHeight="560"
+        Background="{StaticResource BrushBackground}"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        ResizeMode="CanResizeWithGrip"
+        PreviewKeyDown="Window_PreviewKeyDown">
+
+    <Window.Resources>
+
+        <!--  Nav tab border (active state managed from code-behind)  -->
+        <Style x:Key="TabStyle" TargetType="Border">
+            <Setter Property="Padding"          Value="18,0"/>
+            <Setter Property="Background"       Value="Transparent"/>
+            <Setter Property="BorderThickness"  Value="0,0,0,3"/>
+            <Setter Property="BorderBrush"      Value="Transparent"/>
+            <Setter Property="Cursor"           Value="Hand"/>
+        </Style>
+
+        <!--  Primary action button (Play / Update+Play)  -->
+
+        <!--  Secondary button (Install, Back, Browse)  -->
+
+        <!--  Input fields  -->
+        <Style TargetType="PasswordBox">
+            <Setter Property="Background"      Value="#101420"/>
+            <Setter Property="Foreground"      Value="{StaticResource BrushText}"/>
+            <Setter Property="CaretBrush"      Value="{StaticResource BrushAccent}"/>
+            <Setter Property="BorderBrush"     Value="#2A3050"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding"         Value="8,6"/>
+            <Setter Property="FontSize"        Value="13"/>
+        </Style>
+        <!-- Window resources WIN over Application resources, so this style
+             replaced App.xaml's ComboBox style completely — and it sets colours
+             but no Template. WPF therefore fell back to the stock Windows
+             template: a light-grey box with the native arrow and grey text,
+             unreadable on a dark panel, and immune to the Background/Foreground
+             set here because that template paints its own chrome.
+
+             BasedOn pulls in App.xaml's fully-templated style (dark box, custom
+             arrow, themed popup) and keeps the local padding/size tweaks on top.
+             Without BasedOn, any window-level style silently discards the app
+             theme for that control type. -->
+        <Style TargetType="ComboBox" BasedOn="{StaticResource {x:Type ComboBox}}">
+            <Setter Property="Padding"  Value="6,5"/>
+            <Setter Property="FontSize" Value="12"/>
+        </Style>
+
+        <!--  Sidebar game card  -->
+        <Style x:Key="GameCardStyle" TargetType="Border">
+            <Setter Property="Background"      Value="Transparent"/>
+            <Setter Property="BorderBrush"     Value="#1E2233"/>
+            <Setter Property="BorderThickness" Value="0,0,0,1"/>
+            <Setter Property="Padding"         Value="14,11"/>
+            <Setter Property="Cursor"          Value="Hand"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#1C2030"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <!--  Quick switcher (Ctrl+K) result row  -->
+        <Style x:Key="QuickSwitchItemStyle" TargetType="ListBoxItem">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Cursor"     Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <Border x:Name="Bd"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="Transparent"
+                                BorderThickness="2,0,0,0"
+                                Padding="12,8">
+                            <ContentPresenter/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#181C2C"/>
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#1C2438"/>
+                                <Setter TargetName="Bd" Property="BorderBrush"
+                                        Value="{StaticResource BrushAccent}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!--  DataGrid column header  -->
+        <Style TargetType="DataGridColumnHeader">
+            <Setter Property="Background"      Value="#1A1E30"/>
+            <Setter Property="Foreground"      Value="{StaticResource BrushMuted}"/>
+            <Setter Property="FontSize"        Value="11"/>
+            <Setter Property="FontWeight"      Value="SemiBold"/>
+            <Setter Property="Padding"         Value="10,7"/>
+            <Setter Property="BorderBrush"     Value="#1E2233"/>
+            <Setter Property="BorderThickness" Value="0,0,1,1"/>
+            <Setter Property="HorizontalContentAlignment" Value="Left"/>
+        </Style>
+
+        <!--  DataGrid row / cell  -->
+        <Style TargetType="DataGridRow">
+            <Setter Property="Background" Value="Transparent"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#1C2030"/>
+                </Trigger>
+                <Trigger Property="IsSelected" Value="True">
+                    <Setter Property="Background" Value="#2A3050"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+        <Style TargetType="DataGridCell">
+            <Setter Property="Padding"         Value="10,5"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Background"      Value="Transparent"/>
+            <Setter Property="Foreground"      Value="{StaticResource BrushText}"/>
+            <Style.Triggers>
+                <Trigger Property="IsSelected" Value="True">
+                    <Setter Property="Background" Value="Transparent"/>
+                    <Setter Property="Foreground" Value="{StaticResource BrushAccent}"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+    </Window.Resources>
+
+    <Grid AllowDrop="True"
+          PreviewDragOver="Window_PreviewDragOver"
+          PreviewDrop="Window_PreviewDrop">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="32"/>   <!-- title bar -->
+            <RowDefinition Height="Auto"/> <!-- launcher update banner -->
+            <RowDefinition Height="*"/>    <!-- content -->
+            <RowDefinition Height="24"/>   <!-- status bar -->
+        </Grid.RowDefinitions>
+
+        <!--  TITLE BAR  -->
+        <Border Grid.Row="0"
+                Background="#0C1020"
+                MouseLeftButtonDown="TitleBar_MouseLeftButtonDown">
+            <Grid>
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Text="MULTIWORLD LAUNCHER"
+                               FontSize="11"
+                               FontWeight="SemiBold"
+                               Foreground="{StaticResource BrushMuted}"
+                               VerticalAlignment="Center"
+                               Margin="14,0,18,0"/>
+                    <!-- Two places to be, not two tabs on one page: the
+                         library is about one game at a time, Multiworld is
+                         about seeds that span several. -->
+                    <!-- Home. Deselects the game and shows the landing page —
+                         the state the launcher also starts in. Lobby and
+                         Library stood here as two buttons for one job, merged
+                         on request 21/8: the sidebar IS the library, so the
+                         only thing a topbar button adds is the way home. -->
+                    <Button x:Name="BtnModeHome"
+                            Content="Home"
+                            Style="{StaticResource BtnSecondaryStyle}"
+                            Padding="12,4" Margin="0,0,6,0"
+                            FontSize="11"
+                            ToolTip="Back to the landing page"
+                            Click="BtnModeHome_Click"/>
+                    <Button x:Name="BtnModeMultiworld"
+                            Content="Multiworld"
+                            Style="{StaticResource BtnSecondaryStyle}"
+                            Padding="12,4"
+                            FontSize="11"
+                            Click="BtnModeMultiworld_Click"/>
+                    <Button x:Name="BtnModeJoin"
+                            Content="Join"
+                            Style="{StaticResource BtnSecondaryStyle}"
+                            Padding="12,4" Margin="6,0,0,0"
+                            FontSize="11"
+                            ToolTip="Play the seeds you generated — one card per player slot"
+                            Click="BtnModeJoin_Click"/>
+                </StackPanel>
+                <!-- Center: connection info (shown when connected) -->
+                <StackPanel x:Name="TitleBarConnInfo"
+                            Orientation="Horizontal"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Visibility="Collapsed">
+                    <Ellipse Width="6" Height="6"
+                             Fill="{StaticResource BrushSuccess}"
+                             Margin="0,0,6,0"
+                             VerticalAlignment="Center"/>
+                    <TextBlock x:Name="TitleBarConnText"
+                               FontSize="11"
+                               FontWeight="SemiBold"
+                               Foreground="{StaticResource BrushText}"/>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal"
+                            HorizontalAlignment="Right"
+                            VerticalAlignment="Center"
+                            Margin="0,0,2,0">
+                    <!-- Right side on purpose: the three left buttons are
+                         places YOUR things live; the store is where new
+                         things come from. -->
+                    <!-- "Store" read like money. It is a library of plugins,
+                         so that is its name; the internal ids keep the old
+                         word because published addresses do not move. -->
+                    <!-- The community lives outside this launcher, and
+                         pretending otherwise helps nobody. Both of these lead
+                         straight out to it. -->
+                    <Button x:Name="BtnModeStreamers"
+                            Content="Streamers"
+                            Style="{StaticResource BtnSecondaryStyle}"
+                            Padding="12,4" Margin="0,0,6,0"
+                            FontSize="11"
+                            ToolTip="Channels that run Archipelago sessions, in several languages"
+                            Click="BtnModeStreamers_Click"/>
+                    <Button x:Name="BtnModeDiscord"
+                            Content="Discord"
+                            Style="{StaticResource BtnSecondaryStyle}"
+                            Padding="12,4" Margin="0,0,6,0"
+                            FontSize="11"
+                            ToolTip="Archipelago communities on Discord — member counts read live"
+                            Click="BtnModeDiscord_Click"/>
+                    <Button x:Name="BtnModeStore"
+                            Content="Plugin Library"
+                            Style="{StaticResource BtnSecondaryStyle}"
+                            Padding="12,4"
+                            FontSize="11"
+                            ToolTip="Every game plugin the catalogue offers — installing always shows the consent screen"
+                            Click="BtnModeStore_Click"/>
+                    <Button x:Name="BtnModeSettings"
+                            Content="Settings"
+                            Style="{StaticResource BtnSecondaryStyle}"
+                            Padding="12,4" Margin="6,0,10,0"
+                            FontSize="11"
+                            ToolTip="Everything that applies to the launcher itself, not one game"
+                            Click="BtnModeSettings_Click"/>
+                    <Button x:Name="BtnHelp"
+                            Content="?"
+                            ToolTip="Keyboard shortcuts (F1)"
+                            Width="36" Height="32"
+                            Background="Transparent"
+                            Foreground="{StaticResource BrushMuted}"
+                            BorderThickness="0" Cursor="Hand"
+                            Click="BtnHelp_Click"/>
+                    <Button x:Name="BtnMinimize"
+                            Content="─"
+                            Width="36" Height="32"
+                            Background="Transparent"
+                            Foreground="{StaticResource BrushMuted}"
+                            BorderThickness="0" Cursor="Hand"
+                            Click="BtnMinimize_Click"/>
+                    <Button x:Name="BtnMaximize"
+                            Content="□"
+                            ToolTip="Maximize"
+                            Width="36" Height="32"
+                            Background="Transparent"
+                            Foreground="{StaticResource BrushMuted}"
+                            BorderThickness="0" Cursor="Hand"
+                            Click="BtnMaximize_Click"/>
+                    <Button x:Name="BtnClose"
+                            Content="✕"
+                            Width="36" Height="32"
+                            Background="Transparent"
+                            Foreground="{StaticResource BrushMuted}"
+                            BorderThickness="0" Cursor="Hand"
+                            Click="BtnClose_Click"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!--  LAUNCHER UPDATE BANNER  -->
+        <Border x:Name="BannerLauncherUpdate"
+                Grid.Row="1"
+                Visibility="Collapsed"
+                Background="#1A2A14"
+                BorderBrush="#2E5020"
+                BorderThickness="0,0,0,1"
+                Padding="14,5">
+            <DockPanel>
+                <Button x:Name="BtnInstallLauncherUpdate"
+                        DockPanel.Dock="Right"
+                        Content="Install Update"
+                        Padding="10,3"
+                        Margin="8,0,0,0"
+                        Background="#2E5020"
+                        Foreground="#90D070"
+                        BorderBrush="#3E7030"
+                        BorderThickness="1"
+                        Cursor="Hand"
+                        FontSize="11"
+                        Click="BtnInstallLauncherUpdate_Click"/>
+                <Button DockPanel.Dock="Right"
+                        Content="✕"
+                        Width="24"
+                        Padding="0"
+                        Margin="6,0,0,0"
+                        Background="Transparent"
+                        Foreground="#5A6A50"
+                        BorderThickness="0"
+                        Cursor="Hand"
+                        Click="BtnDismissLauncherBanner_Click"/>
+                <TextBlock x:Name="TxtLauncherUpdateVersion"
+                           VerticalAlignment="Center"
+                           FontSize="11"
+                           Foreground="#90D070"/>
+            </DockPanel>
+        </Border>
+
+        <!--  CONTENT  -->
+        <Grid Grid.Row="2">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="240"/>  <!-- sidebar -->
+                <ColumnDefinition Width="*"/>    <!-- main -->
+                <ColumnDefinition Width="308"/>  <!-- community rail -->
+            </Grid.ColumnDefinitions>
+
+            <!--  SIDEBAR  -->
+            <Grid Grid.Column="0" Background="#141720">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>  <!-- connection card -->
+                    <RowDefinition Height="*"/>     <!-- game list -->
+                    <RowDefinition Height="Auto"/>  <!-- action buttons -->
+                </Grid.RowDefinitions>
+
+                <!--  Global AP connection panel  -->
+                <Border Grid.Row="0"
+                        Background="#0E1118"
+                        BorderBrush="#1E2233"
+                        BorderThickness="0,0,0,1">
+                    <StackPanel>
+
+                        <!-- Status row — always visible -->
+                        <DockPanel Margin="12,9,8,9">
+                            <Ellipse x:Name="ConnDot"
+                                     DockPanel.Dock="Left"
+                                     Width="7" Height="7"
+                                     Fill="#3A3F55"
+                                     Margin="0,0,8,0"
+                                     VerticalAlignment="Center"/>
+                            <Button x:Name="BtnConnToggle"
+                                    DockPanel.Dock="Right"
+                                    Content="Connect"
+                                    Background="#181C2C"
+                                    Foreground="#7080B0"
+                                    BorderBrush="#252B40"
+                                    BorderThickness="1"
+                                    Padding="8,3"
+                                    FontSize="10"
+                                    Cursor="Hand"
+                                    Click="BtnConnToggle_Click">
+                                <Button.Template>
+                                    <ControlTemplate TargetType="Button">
+                                        <Border x:Name="Bd"
+                                                Background="{TemplateBinding Background}"
+                                                BorderBrush="{TemplateBinding BorderBrush}"
+                                                BorderThickness="{TemplateBinding BorderThickness}"
+                                                CornerRadius="3"
+                                                Padding="{TemplateBinding Padding}">
+                                            <ContentPresenter HorizontalAlignment="Center"
+                                                              VerticalAlignment="Center"/>
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter TargetName="Bd" Property="Background" Value="#1E2438"/>
+                                                <Setter TargetName="Bd" Property="BorderBrush" Value="#4060A0"/>
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </Button.Template>
+                            </Button>
+                            <!-- Manual re-sync: re-ask the server for items + replay checks
+                                 WITHOUT disconnecting. Shown only while connected. -->
+                            <Button x:Name="BtnReSync"
+                                    DockPanel.Dock="Right"
+                                    Content="Re-sync"
+                                    Visibility="Collapsed"
+                                    Background="#181C2C"
+                                    Foreground="#7080B0"
+                                    BorderBrush="#252B40"
+                                    BorderThickness="1"
+                                    Padding="8,3"
+                                    FontSize="10"
+                                    Margin="0,0,6,0"
+                                    Cursor="Hand"
+                                    ToolTip="Re-sync with the server: re-request your items and re-confirm your checks — without disconnecting. Use this if something didn't arrive."
+                                    Click="BtnReSync_Click">
+                                <Button.Template>
+                                    <ControlTemplate TargetType="Button">
+                                        <Border x:Name="Bd"
+                                                Background="{TemplateBinding Background}"
+                                                BorderBrush="{TemplateBinding BorderBrush}"
+                                                BorderThickness="{TemplateBinding BorderThickness}"
+                                                CornerRadius="3"
+                                                Padding="{TemplateBinding Padding}">
+                                            <ContentPresenter HorizontalAlignment="Center"
+                                                              VerticalAlignment="Center"/>
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter TargetName="Bd" Property="Background" Value="#1E2438"/>
+                                                <Setter TargetName="Bd" Property="BorderBrush" Value="#4060A0"/>
+                                            </Trigger>
+                                            <Trigger Property="IsEnabled" Value="False">
+                                                <Setter Property="Opacity" Value="0.5"/>
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </Button.Template>
+                            </Button>
+                            <StackPanel VerticalAlignment="Center" Margin="0,0,6,0">
+                                <TextBlock x:Name="ConnServerText"
+                                           Text="Not connected"
+                                           FontSize="11"
+                                           FontWeight="SemiBold"
+                                           Foreground="{StaticResource BrushText}"/>
+                                <TextBlock x:Name="ConnSlotText"
+                                           FontSize="10"
+                                           Foreground="{StaticResource BrushMuted}"
+                                           Margin="0,1,0,0"/>
+                            </StackPanel>
+                        </DockPanel>
+
+                        <!-- Expandable input panel (collapsed by default) -->
+                        <Border x:Name="PanelConnInputs"
+                                Visibility="Collapsed"
+                                BorderBrush="#1E2233"
+                                BorderThickness="0,1,0,0"
+                                Padding="12,8,12,10">
+                            <StackPanel>
+                                <DockPanel Margin="0,0,0,4">
+                                    <!-- Recent connections dropdown (hidden until history exists) -->
+                                    <TextBlock x:Name="BtnRecentConn"
+                                               DockPanel.Dock="Right"
+                                               Text="⏷ Recent"
+                                               FontSize="10"
+                                               Foreground="#5068A8"
+                                               Cursor="Hand"
+                                               Visibility="Collapsed"
+                                               ToolTip="Fill in a recent connection"
+                                               MouseLeftButtonDown="BtnRecentConn_Click"/>
+                                    <TextBlock Text="Server"
+                                               FontSize="10"
+                                               Foreground="{StaticResource BrushMuted}"/>
+                                </DockPanel>
+                                <TextBox x:Name="TxtServer"
+                                         ToolTip="e.g. archipelago.gg:38281"
+                                         FontSize="12" Padding="7,5"/>
+
+                                <Grid Margin="0,6,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition/>
+                                        <ColumnDefinition Width="6"/>
+                                        <ColumnDefinition Width="86"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0">
+                                        <TextBlock Text="Slot name"
+                                                   FontSize="10"
+                                                   Foreground="{StaticResource BrushMuted}"
+                                                   ToolTip="The player name you entered when the multiworld was generated"
+                                                   Margin="0,0,0,4"/>
+                                        <TextBox x:Name="TxtSlotName"
+                                                 ToolTip="The player name you entered when the multiworld was generated"
+                                                 FontSize="12" Padding="7,5"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2">
+                                        <TextBlock Text="Password"
+                                                   FontSize="10"
+                                                   Foreground="{StaticResource BrushMuted}"
+                                                   ToolTip="The room password, if the host set one — leave empty otherwise"
+                                                   Margin="0,0,0,4"/>
+                                        <PasswordBox x:Name="TxtPassword"
+                                                     ToolTip="The room password, if the host set one — leave empty otherwise"
+                                                     FontSize="12" Padding="7,5"/>
+                                    </StackPanel>
+                                </Grid>
+
+                                <Button x:Name="BtnConnect"
+                                        Content="Connect"
+                                        Margin="0,8,0,0"
+                                        Style="{StaticResource BtnPlayStyle}"
+                                        HorizontalAlignment="Stretch"
+                                        Click="BtnConnect_Click"/>
+
+                                <!-- Where-do-these-values-come-from helper (UX-2) -->
+                                <TextBlock FontSize="10"
+                                           Foreground="{StaticResource BrushMuted}"
+                                           TextWrapping="Wrap"
+                                           Margin="0,7,0,0"
+                                           Opacity="0.85"><Run Text="Find these on your room page at "/><Hyperlink Click="RoomPageLink_Click"
+                                               Foreground="#5068A8"
+                                               TextDecorations="Underline"
+                                               ToolTip="Open archipelago.gg in your browser"><Run Text="archipelago.gg"/></Hyperlink></TextBlock>
+
+                                <!-- Paste a room link to fetch the patch automatically -->
+                                <TextBlock FontSize="10"
+                                           Margin="0,5,0,0"
+                                           Opacity="0.85"><Hyperlink Click="RoomLinkToggle_Click"
+                                               Foreground="#5068A8"
+                                               TextDecorations="Underline"
+                                               ToolTip="Paste your archipelago.gg/room/... link to download your patch automatically"><Run Text="Paste room link to fetch patch..."/></Hyperlink></TextBlock>
+                                <Grid x:Name="PanelRoomLink" Visibility="Collapsed" Margin="0,5,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition/>
+                                        <ColumnDefinition Width="6"/>
+                                        <ColumnDefinition Width="62"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox x:Name="TxtRoomLink"
+                                             Grid.Column="0"
+                                             FontSize="11" Padding="7,5"
+                                             ToolTip="e.g. https://archipelago.gg/room/AbCdEf12"/>
+                                    <Button x:Name="BtnRoomLinkFetch"
+                                            Grid.Column="2"
+                                            Content="Fetch"
+                                            Style="{StaticResource BtnPlayStyle}"
+                                            Click="BtnRoomLinkFetch_Click"/>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Slot→game suggestion banner (shown after connect) -->
+                        <Border x:Name="PanelGameSuggest"
+                                Visibility="Collapsed"
+                                Background="#0B1622"
+                                BorderBrush="#1E3050"
+                                BorderThickness="0,1,0,0"
+                                Padding="12,8">
+                            <StackPanel>
+                                <TextBlock x:Name="TxtGameSuggest"
+                                           FontSize="10"
+                                           Foreground="#7AACDA"
+                                           TextWrapping="Wrap"
+                                           Margin="0,0,0,7"/>
+                                <StackPanel Orientation="Horizontal">
+                                    <Button x:Name="BtnSuggestSwitch"
+                                            Content="Switch"
+                                            Background="#152030"
+                                            Foreground="#7AACDA"
+                                            BorderBrush="#2A4060"
+                                            BorderThickness="1"
+                                            Padding="10,3"
+                                            FontSize="10"
+                                            Cursor="Hand"
+                                            Margin="0,0,6,0"
+                                            Click="BtnSuggestSwitch_Click">
+                                        <Button.Template>
+                                            <ControlTemplate TargetType="Button">
+                                                <Border x:Name="Bd"
+                                                        Background="{TemplateBinding Background}"
+                                                        BorderBrush="{TemplateBinding BorderBrush}"
+                                                        BorderThickness="{TemplateBinding BorderThickness}"
+                                                        CornerRadius="3"
+                                                        Padding="{TemplateBinding Padding}">
+                                                    <ContentPresenter HorizontalAlignment="Center"
+                                                                      VerticalAlignment="Center"/>
+                                                </Border>
+                                                <ControlTemplate.Triggers>
+                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                        <Setter TargetName="Bd" Property="Background" Value="#1E3040"/>
+                                                    </Trigger>
+                                                </ControlTemplate.Triggers>
+                                            </ControlTemplate>
+                                        </Button.Template>
+                                    </Button>
+                                    <Button x:Name="BtnSuggestInstall"
+                                            Content="Install"
+                                            Background="#152030"
+                                            Foreground="#F59E0B"
+                                            BorderBrush="#3A3010"
+                                            BorderThickness="1"
+                                            Padding="10,3"
+                                            FontSize="10"
+                                            Cursor="Hand"
+                                            Visibility="Collapsed"
+                                            Click="BtnSuggestInstall_Click">
+                                        <Button.Template>
+                                            <ControlTemplate TargetType="Button">
+                                                <Border x:Name="Bd"
+                                                        Background="{TemplateBinding Background}"
+                                                        BorderBrush="{TemplateBinding BorderBrush}"
+                                                        BorderThickness="{TemplateBinding BorderThickness}"
+                                                        CornerRadius="3"
+                                                        Padding="{TemplateBinding Padding}">
+                                                    <ContentPresenter HorizontalAlignment="Center"
+                                                                      VerticalAlignment="Center"/>
+                                                </Border>
+                                                <ControlTemplate.Triggers>
+                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                        <Setter TargetName="Bd" Property="Background" Value="#1E2010"/>
+                                                    </Trigger>
+                                                </ControlTemplate.Triggers>
+                                            </ControlTemplate>
+                                        </Button.Template>
+                                    </Button>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+
+                    </StackPanel>
+                </Border>
+
+                <!--  Game list  -->
+                <Grid Grid.Row="1">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- Search box (placeholder overlay hides once text is typed) -->
+                    <Border Grid.Row="0"
+                            Padding="8,6"
+                            BorderBrush="#1E2233"
+                            BorderThickness="0,0,0,1">
+                        <Grid>
+                            <TextBox x:Name="TxtSidebarSearch"
+                                     FontSize="11"
+                                     Background="#0C1020"
+                                     Foreground="{StaticResource BrushText}"
+                                     BorderBrush="#2A3050"
+                                     BorderThickness="1"
+                                     Padding="6,4"
+                                     ToolTip="Filter your library (Ctrl+F)"
+                                     TextChanged="TxtSidebarSearch_TextChanged"/>
+                            <TextBlock x:Name="TxtSidebarSearchHint"
+                                       Text="⌕ Search library..."
+                                       FontSize="11"
+                                       Foreground="#4A5170"
+                                       Margin="8,0,0,0"
+                                       VerticalAlignment="Center"
+                                       IsHitTestVisible="False"/>
+                        </Grid>
+                    </Border>
+
+                    <ScrollViewer Grid.Row="1"
+                                  VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled">
+                        <StackPanel>
+                            <!-- Library header with the view controls. With
+                                 thirty games installed, one long scroll becomes the
+                                 sidebar experience, so how the list is shown
+                                 is the player's call: order, grouping, and how
+                                 much room each game takes. -->
+                            <Border Padding="12,8,12,6"
+                                    BorderBrush="#1E2233"
+                                    BorderThickness="0,0,0,1">
+                                <StackPanel>
+                                    <TextBlock Text="MY LIBRARY"
+                                               FontSize="10"
+                                               FontWeight="Bold"
+                                               Foreground="{StaticResource BrushMuted}"/>
+                                    <!-- The view controls get their own row.
+                                         Docked beside the label they overlapped
+                                         it the moment the sidebar was narrow;
+                                         fixed widths in a fluid column lie. The
+                                         star columns split whatever exists. -->
+                                    <Grid Margin="0,6,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="6"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="6"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <ComboBox x:Name="CmbSidebarSort"
+                                                  Grid.Column="0"
+                                                  Height="22"
+                                                  FontSize="10"
+                                                  ToolTip="How the list is ordered"
+                                                  SelectionChanged="SidebarView_Changed"/>
+                                        <ComboBox x:Name="CmbSidebarGroup"
+                                                  Grid.Column="2"
+                                                  Height="22"
+                                                  FontSize="10"
+                                                  ToolTip="How the list is grouped"
+                                                  SelectionChanged="SidebarView_Changed"/>
+                                        <Button x:Name="BtnSidebarDensity"
+                                                Grid.Column="4"
+                                                Width="26" Height="22"
+                                                Padding="0"
+                                                FontSize="11"
+                                                Background="#0C1020"
+                                                Foreground="{StaticResource BrushMuted}"
+                                                BorderBrush="#2A3050"
+                                                Cursor="Hand"
+                                                ToolTip="Switch between full cards and compact rows"
+                                                Click="BtnSidebarDensity_Click"/>
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+                            <StackPanel x:Name="GameListPanel"/>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Grid>
+
+                <!--  Session + Browse + Achievements buttons  -->
+                <Border Grid.Row="2"
+                        BorderBrush="#1E2233"
+                        BorderThickness="0,1,0,0"
+                        Padding="8,8">
+                    <StackPanel>
+                        <!-- Two buttons, because two is what this corner is for:
+                             bring a plugin in, and see what you have earned.
+                             Session moved into the window's own controls, and
+                             the three Archipelago link icons moved to the
+                             community rail on the right, where each of them can
+                             say what it actually links to. -->
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition/>
+                                <ColumnDefinition Width="8"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <!-- Loads a .londonplugin the player found and
+                                 downloaded themselves. The launcher hosts no
+                                 plugins and lists none; this button is the
+                                 whole distribution story. -->
+                            <Button x:Name="BtnAddPlugin"
+                                    Grid.Column="0"
+                                    Content="Add plugin"
+                                    Style="{StaticResource BtnSecondaryStyle}"
+                                    Padding="0,7"
+                                    HorizontalAlignment="Stretch"
+                                    ToolTip="Load a game plugin file you downloaded (.londonplugin)"
+                                    Click="BtnAddPlugin_Click"/>
+                            <Button x:Name="BtnAchievements"
+                                    Grid.Column="2"
+                                    Content="🏆"
+                                    Style="{StaticResource BtnSecondaryStyle}"
+                                    Padding="9,7"
+                                    ToolTip="Achievements — your trophies across every game"
+                                    Click="BtnAchievements_Click"/>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <!--  MAIN PANEL  -->
+            <Grid Grid.Column="1">
+
+                <!-- Empty state — first-run getting-started checklist -->
+                <!-- Home page / first-run (shown when no game is selected) -->
+                <ScrollViewer x:Name="PanelEmpty"
+                              VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled">
+                  <Grid MinHeight="{Binding ActualHeight,
+                                    RelativeSource={RelativeSource AncestorType=ScrollViewer}}">
+                    <StackPanel Margin="28,20,28,32" VerticalAlignment="Center">
+
+                        <!--  Featured game hero  -->
+                        <Grid x:Name="HomeHeroContainer"
+                              Visibility="Collapsed"
+                              Margin="0,0,0,24"
+                              Cursor="Hand"
+                              MouseLeftButtonDown="HomeHero_Click">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="165"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <Border x:Name="HomeHeroBanner"
+                                    Grid.Row="0"
+                                    Background="#1A1E2C"
+                                    CornerRadius="8,8,0,0"/>
+                            <Border Grid.Row="1"
+                                    Background="#141720"
+                                    BorderBrush="#1E2233"
+                                    BorderThickness="1"
+                                    CornerRadius="0,0,8,8"
+                                    Padding="16,10">
+                                <DockPanel>
+                                    <Button x:Name="BtnHomeHeroPlay"
+                                            DockPanel.Dock="Right"
+                                            Content="▶  PLAY"
+                                            Style="{StaticResource BtnPlayStyle}"
+                                            VerticalAlignment="Center"
+                                            Padding="18,6"
+                                            FontSize="12"
+                                            Click="BtnHomeHeroPlay_Click"/>
+                                    <StackPanel VerticalAlignment="Center"
+                                                Margin="0,0,12,0">
+                                        <TextBlock x:Name="TxtHomeHeroName"
+                                                   FontSize="14" FontWeight="Bold"
+                                                   Foreground="{StaticResource BrushText}"/>
+                                        <TextBlock x:Name="TxtHomeHeroMeta"
+                                                   FontSize="10"
+                                                   Foreground="{StaticResource BrushMuted}"
+                                                   Margin="0,2,0,0" Opacity="0.8"/>
+                                        <TextBlock x:Name="TxtHomeHeroDesc"
+                                                   FontSize="11"
+                                                   Foreground="{StaticResource BrushMuted}"
+                                                   TextWrapping="Wrap"
+                                                   Margin="0,4,0,0" Opacity="0.65"
+                                                   MaxHeight="40"/>
+                                    </StackPanel>
+                                </DockPanel>
+                            </Border>
+                        </Grid>
+
+                        <!--  Recently played row  -->
+                        <StackPanel x:Name="HomeRecentSection"
+                                    Visibility="Collapsed"
+                                    Margin="0,0,0,24">
+                            <TextBlock Text="RECENTLY PLAYED"
+                                       FontSize="10" FontWeight="Bold"
+                                       Foreground="{StaticResource BrushMuted}"
+                                       Opacity="0.8" Margin="0,0,0,10"/>
+                            <WrapPanel x:Name="HomeRecentCards" Orientation="Horizontal"/>
+                        </StackPanel>
+
+                        <!--  Live now — which of the Streamers-page people are
+                              on air at this moment, read from Twitch's public
+                              preview endpoint when the page opens. Hidden when
+                              nobody is: an empty "live" section is a lie with
+                              a heading. -->
+                        <StackPanel x:Name="HomeLiveSection" Visibility="Collapsed"
+                                    Margin="0,0,0,24">
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                                <Ellipse Width="8" Height="8" Fill="#E91916"
+                                         VerticalAlignment="Center" Margin="0,0,7,0"/>
+                                <TextBlock Text="STREAMING ARCHIPELAGO-STYLE RIGHT NOW"
+                                           FontSize="10" FontWeight="Bold"
+                                           Foreground="{StaticResource BrushMuted}"
+                                           Opacity="0.8"/>
+                            </StackPanel>
+                            <WrapPanel x:Name="HomeLiveCards"/>
+                        </StackPanel>
+
+                        <!--  Quick actions — the three places the topbar leads,
+                              one sentence each, for the player who has games
+                              and wonders what the launcher can DO. -->
+                        <StackPanel x:Name="HomeQuickRow" Visibility="Collapsed"
+                                    Margin="0,0,0,24">
+                            <TextBlock Text="WHAT THIS LAUNCHER DOES"
+                                       FontSize="10" FontWeight="Bold"
+                                       Foreground="{StaticResource BrushMuted}"
+                                       Opacity="0.8" Margin="0,0,0,10"/>
+                            <UniformGrid Columns="3">
+                                <Border Background="#141720" BorderBrush="#1E2233" BorderThickness="1"
+                                        CornerRadius="6" Padding="14,11" Margin="0,0,8,0"
+                                        Cursor="Hand" MouseLeftButtonDown="HomeQuickMultiworld_Click">
+                                    <StackPanel>
+                                        <TextBlock Text="Build a multiworld" FontSize="12" FontWeight="SemiBold"
+                                                   Foreground="{StaticResource BrushText}"/>
+                                        <TextBlock Text="Shuffle one or many games into a seed and host it — all on this machine."
+                                                   FontSize="10" TextWrapping="Wrap" Margin="0,3,0,0"
+                                                   Foreground="{StaticResource BrushMuted}"/>
+                                    </StackPanel>
+                                </Border>
+                                <Border Background="#141720" BorderBrush="#1E2233" BorderThickness="1"
+                                        CornerRadius="6" Padding="14,11" Margin="0,0,8,0"
+                                        Cursor="Hand" MouseLeftButtonDown="HomeQuickJoin_Click">
+                                    <StackPanel>
+                                        <TextBlock Text="Join a session" FontSize="12" FontWeight="SemiBold"
+                                                   Foreground="{StaticResource BrushText}"/>
+                                        <TextBlock Text="Play a slot in your own seed, or sign in to a server somebody else hosts."
+                                                   FontSize="10" TextWrapping="Wrap" Margin="0,3,0,0"
+                                                   Foreground="{StaticResource BrushMuted}"/>
+                                    </StackPanel>
+                                </Border>
+                                <Border Background="#141720" BorderBrush="#1E2233" BorderThickness="1"
+                                        CornerRadius="6" Padding="14,11"
+                                        Cursor="Hand" MouseLeftButtonDown="HomeQuickStore_Click">
+                                    <StackPanel>
+                                        <TextBlock Text="Get more games" FontSize="12" FontWeight="SemiBold"
+                                                   Foreground="{StaticResource BrushText}"/>
+                                        <TextBlock Text="The Plugin Library holds hundreds of games, each installed with one click."
+                                                   FontSize="10" TextWrapping="Wrap" Margin="0,3,0,0"
+                                                   Foreground="{StaticResource BrushMuted}"/>
+                                    </StackPanel>
+                                </Border>
+                            </UniformGrid>
+                        </StackPanel>
+
+                        <!--  News. Fed from the catalogue so it can say something
+                              new without a release; hidden entirely when there is
+                              nothing to say, because inventing news is worse than
+                              having none. -->
+                        <StackPanel x:Name="HomeNewsSection" Visibility="Collapsed"
+                                    Margin="0,0,0,24">
+                            <TextBlock Text="NEWS"
+                                       FontSize="10" FontWeight="Bold"
+                                       Foreground="{StaticResource BrushMuted}"
+                                       Opacity="0.8" Margin="0,0,0,10"/>
+                            <StackPanel x:Name="HomeNewsItems"/>
+                        </StackPanel>
+
+                        <!--  Getting started (first-run / no history)  -->
+                        <StackPanel x:Name="HomeGetStartedSection"
+                                    HorizontalAlignment="Center"
+                                    MaxWidth="420">
+                            <Image x:Name="ImgHomeLogo"
+                                   Width="120" Height="120"
+                                   Margin="0,0,0,10"
+                                   HorizontalAlignment="Center"
+                                   RenderOptions.BitmapScalingMode="HighQuality"/>
+                            <TextBlock Text="GETTING STARTED"
+                                       FontSize="10"
+                                       FontWeight="Bold"
+                                       Foreground="{StaticResource BrushMuted}"
+                                       HorizontalAlignment="Center"
+                                       Margin="0,0,0,6" Opacity="0.8"/>
+                            <TextBlock Text="Welcome to Multiworld Launcher"
+                                       FontSize="18"
+                                       FontWeight="Bold"
+                                       Foreground="{StaticResource BrushAccent}"
+                                       HorizontalAlignment="Center"/>
+                            <TextBlock Text="Three steps to your first multiworld:"
+                                       FontSize="12"
+                                       Foreground="{StaticResource BrushMuted}"
+                                       HorizontalAlignment="Center"
+                                       Margin="0,6,0,16" Opacity="0.8"/>
+                            <Border Background="#141720"
+                                    BorderBrush="#1E2233"
+                                    BorderThickness="1"
+                                    CornerRadius="6"
+                                    Padding="18,14"
+                                    Width="420">
+                                <StackPanel>
+                                    <!-- Step 1: add a plugin -->
+                                    <DockPanel x:Name="StepPickGame"
+                                               Background="Transparent"
+                                               Cursor="Hand"
+                                               MouseLeftButtonDown="StepPickGame_Click"
+                                               ToolTip="Add a game to the launcher from a plugin file">
+                                        <TextBlock x:Name="StepPickGameIcon"
+                                                   Text="①" FontSize="14" Width="26"
+                                                   VerticalAlignment="Center"
+                                                   Foreground="{StaticResource BrushMuted}"/>
+                                        <StackPanel>
+                                            <TextBlock Text="Add a game as a plugin"
+                                                       FontSize="12" FontWeight="SemiBold"
+                                                       Foreground="{StaticResource BrushText}"/>
+                                            <TextBlock Text="The launcher ships with no games. Add one and it appears in the sidebar."
+                                                       FontSize="10"
+                                                       TextWrapping="Wrap"
+                                                       Foreground="{StaticResource BrushMuted}"
+                                                       Margin="0,1,0,0"/>
+                                        </StackPanel>
+                                    </DockPanel>
+                                    <Rectangle Height="1" Fill="#1E2233" Margin="26,9,0,9"/>
+
+                                    <!-- Step 2: install -->
+                                    <DockPanel x:Name="StepInstall"
+                                               Background="Transparent"
+                                               Cursor="Hand"
+                                               MouseLeftButtonDown="StepInstall_Click"
+                                               ToolTip="Open the Play tab — it hosts the install flow">
+                                        <TextBlock x:Name="StepInstallIcon"
+                                                   Text="②" FontSize="14" Width="26"
+                                                   VerticalAlignment="Center"
+                                                   Foreground="{StaticResource BrushMuted}"/>
+                                        <StackPanel>
+                                            <TextBlock Text="Install it from the Play tab"
+                                                       FontSize="12" FontWeight="SemiBold"
+                                                       Foreground="{StaticResource BrushText}"/>
+                                            <TextBlock Text="One click downloads everything the game needs."
+                                                       FontSize="10"
+                                                       Foreground="{StaticResource BrushMuted}"
+                                                       Margin="0,1,0,0"/>
+                                        </StackPanel>
+                                    </DockPanel>
+                                    <Rectangle Height="1" Fill="#1E2233" Margin="26,9,0,9"/>
+
+                                    <!-- Step 3: connect -->
+                                    <DockPanel x:Name="StepConnect"
+                                               Background="Transparent"
+                                               Cursor="Hand"
+                                               MouseLeftButtonDown="StepConnect_Click"
+                                               ToolTip="Open the connect panel in the sidebar">
+                                        <TextBlock x:Name="StepConnectIcon"
+                                                   Text="③" FontSize="14" Width="26"
+                                                   VerticalAlignment="Center"
+                                                   Foreground="{StaticResource BrushMuted}"/>
+                                        <StackPanel>
+                                            <TextBlock Text="Connect to your multiworld"
+                                                       FontSize="12" FontWeight="SemiBold"
+                                                       Foreground="{StaticResource BrushText}"/>
+                                            <TextBlock Text="Enter the server address and your slot name in the sidebar."
+                                                       FontSize="10"
+                                                       Foreground="{StaticResource BrushMuted}"
+                                                       Margin="0,1,0,0"/>
+                                        </StackPanel>
+                                    </DockPanel>
+                                </StackPanel>
+                            </Border>
+                            <Button x:Name="BtnHomeAddPlugin"
+                                    Content="Add plugin…"
+                                    Style="{StaticResource BtnSecondaryStyle}"
+                                    HorizontalAlignment="Center"
+                                    Margin="0,16,0,0"
+                                    Padding="18,6"
+                                    Click="BtnAddPlugin_Click"/>
+                            <TextBlock Text="Tip: press Ctrl+K to jump to any game or action"
+                                       FontSize="10"
+                                       Foreground="{StaticResource BrushMuted}"
+                                       HorizontalAlignment="Center"
+                                       Margin="0,12,0,0" Opacity="0.6"/>
+                        </StackPanel>
+
+                        <!--  There is nothing to browse. The library holds the
+                              plugins the user added, and the launcher knows of
+                              no games beyond them.  -->
+
+                        <!--  Logo attribution. CC BY-NC 4.0 asks that the credit
+                              travel with the work, and a launcher showing the logo
+                              on its front page should say where it came from on the
+                              same page.  -->
+                        <TextBlock HorizontalAlignment="Center"
+                                   TextAlignment="Center"
+                                   TextWrapping="Wrap"
+                                   MaxWidth="460"
+                                   FontSize="10"
+                                   Foreground="{StaticResource BrushMuted}"
+                                   Opacity="0.55"
+                                   Margin="0,26,0,4">
+                            <Run Text="Logo adapted from the Archipelago logo, © 2022 Krista Corkos and Christopher Wilson, licensed CC BY-NC 4.0. Modified. Not endorsed by or affiliated with Archipelago."/>
+                        </TextBlock>
+
+                    </StackPanel>
+                  </Grid>
+                </ScrollViewer>
+
+                <!-- Game detail panel (visible once a game is selected) -->
+                <Grid x:Name="PanelGame" Visibility="Collapsed">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="68"/>   <!-- game identity header -->
+                        <RowDefinition Height="36"/>   <!-- tab navigation bar -->
+                        <RowDefinition Height="*"/>    <!-- page content -->
+                    </Grid.RowDefinitions>
+
+                    <!--  Game identity header  -->
+                    <Border x:Name="GameHeader"
+                            Grid.Row="0"
+                            Background="#141720"
+                            BorderBrush="#1E2233"
+                            BorderThickness="0,0,0,1"
+                            Padding="20,0">
+                        <Grid VerticalAlignment="Stretch">
+                            <!-- Left: icon + name + version badges -->
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <Image x:Name="ImgGameIcon"
+                                       Width="44" Height="44"
+                                       Margin="0,0,14,0"
+                                       RenderOptions.BitmapScalingMode="HighQuality"/>
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock x:Name="TxtGameName"
+                                               FontSize="17"
+                                               FontWeight="Bold"
+                                               Foreground="{StaticResource BrushAccent}"/>
+                                    <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                                        <TextBlock x:Name="TxtGameSubtitle"
+                                                   FontSize="11"
+                                                   Foreground="{StaticResource BrushMuted}"/>
+                                        <Rectangle Width="1" Height="10"
+                                                   Margin="10,0" Fill="#2A3050"
+                                                   VerticalAlignment="Center"/>
+                                        <Border x:Name="BadgeInstalled"
+                                                Background="#1A1E38" CornerRadius="2"
+                                                Padding="7,2" VerticalAlignment="Center">
+                                            <TextBlock x:Name="TxtInstalledVer"
+                                                       FontSize="10"
+                                                       Foreground="{StaticResource BrushText}"/>
+                                        </Border>
+                                        <Border x:Name="BadgeUpdate"
+                                                Background="#1C2848" CornerRadius="2"
+                                                Padding="7,2" Margin="6,0,0,0"
+                                                VerticalAlignment="Center"
+                                                Visibility="Collapsed">
+                                            <TextBlock x:Name="TxtAvailableVer"
+                                                       FontSize="10"
+                                                       Foreground="{StaticResource BrushAccent}"/>
+                                        </Border>
+                                        <!-- Per-game requirement badges (e.g. "Requires D2") -->
+                                        <StackPanel x:Name="PanelGameBadges"
+                                                    Orientation="Horizontal"
+                                                    Margin="6,0,0,0"
+                                                    VerticalAlignment="Center"/>
+                                        <!-- AP-connected badge. NOT "In Session" — that label is
+                                             reserved for a RUNNING GAME (sidebar pill says
+                                             "Running"); this one only reflects the AP link (P3-10). -->
+                                        <Border x:Name="BadgeSession"
+                                                Background="#152015" CornerRadius="2"
+                                                Padding="7,2" Margin="6,0,0,0"
+                                                VerticalAlignment="Center"
+                                                Visibility="Collapsed"
+                                                ToolTip="The launcher is connected to an Archipelago server">
+                                            <TextBlock Text="● AP Connected"
+                                                       FontSize="10"
+                                                       Foreground="{StaticResource BrushSuccess}"/>
+                                        </Border>
+                                        <!-- Playtime + last-played badge (hidden when never played) -->
+                                        <Border x:Name="BadgePlaytime"
+                                                Background="#1A1E38" CornerRadius="2"
+                                                Padding="7,2" Margin="6,0,0,0"
+                                                VerticalAlignment="Center"
+                                                Visibility="Collapsed">
+                                            <TextBlock x:Name="TxtPlaytime"
+                                                       FontSize="10"
+                                                       Foreground="{StaticResource BrushMuted}"/>
+                                        </Border>
+                                    </StackPanel>
+                                </StackPanel>
+                            </StackPanel>
+
+                            <!-- Permanently hidden action buttons (§9 one install
+                                 surface): the header shows identity + badges only —
+                                 the Overview action bar is the single install/play
+                                 surface. BtnPlay/BtnStandalone stay in the tree as
+                                 the button-state machine (RefreshButtons writes
+                                 label/enabled/tooltip here; SyncOverviewPlayButton
+                                 mirrors them; the Overview buttons re-raise their
+                                 Click). Nothing may set these Visible again. -->
+                            <StackPanel Orientation="Horizontal"
+                                        HorizontalAlignment="Right"
+                                        VerticalAlignment="Center"
+                                        Visibility="Collapsed">
+                                <Button x:Name="BtnStandalone"
+                                        Content="Launch Standalone"
+                                        Style="{StaticResource BtnSecondaryStyle}"
+                                        Margin="0,0,8,0"
+                                        Visibility="Collapsed"
+                                        ToolTip="Launch the game without an Archipelago connection"
+                                        Click="BtnStandalone_Click"/>
+                                <Button x:Name="BtnInstall"
+                                        Content="Install Game"
+                                        Style="{StaticResource BtnSecondaryStyle}"
+                                        Margin="0,0,8,0"
+                                        Visibility="Collapsed"
+                                        Click="BtnInstall_Click"/>
+                                <Button x:Name="BtnPlay"
+                                        Content="Play"
+                                        Style="{StaticResource BtnPlayStyle}"
+                                        MinWidth="110"
+                                        Visibility="Collapsed"
+                                        Click="BtnPlay_Click"/>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+
+                    <!--  Tab navigation bar  -->
+                    <Border Grid.Row="1"
+                            Background="#141720"
+                            BorderBrush="#1E2233"
+                            BorderThickness="0,0,0,1">
+                        <StackPanel Orientation="Horizontal"
+                                    VerticalAlignment="Stretch">
+                            <Border x:Name="TabOverview"
+                                    Style="{StaticResource TabStyle}"
+                                    MouseLeftButtonDown="TabOverview_Click">
+                                <TextBlock x:Name="TabOverviewText"
+                                           Text="▶  Play"
+                                           FontSize="12"
+                                           FontWeight="SemiBold"
+                                           VerticalAlignment="Center"
+                                           Foreground="{StaticResource BrushMuted}"/>
+                            </Border>
+                            <Border x:Name="TabPlay"
+                                    Style="{StaticResource TabStyle}"
+                                    MouseLeftButtonDown="TabPlay_Click">
+                                <TextBlock x:Name="TabPlayText"
+                                           Text="Log"
+                                           FontSize="12"
+                                           FontWeight="SemiBold"
+                                           VerticalAlignment="Center"
+                                           Foreground="{StaticResource BrushMuted}"/>
+                            </Border>
+                            <Border x:Name="TabProgression"
+                                    Style="{StaticResource TabStyle}"
+                                    MouseLeftButtonDown="TabProgression_Click">
+                                <TextBlock x:Name="TabProgressionText"
+                                           Text="Progression"
+                                           FontSize="12"
+                                           FontWeight="SemiBold"
+                                           VerticalAlignment="Center"
+                                           Foreground="{StaticResource BrushMuted}"/>
+                            </Border>
+                            <Border x:Name="TabTracker"
+                                    Style="{StaticResource TabStyle}"
+                                    MouseLeftButtonDown="TabTracker_Click">
+                                <TextBlock x:Name="TabTrackerText"
+                                           Text="Items"
+                                           FontSize="12"
+                                           FontWeight="SemiBold"
+                                           VerticalAlignment="Center"
+                                           Foreground="{StaticResource BrushMuted}"/>
+                            </Border>
+                            <Border x:Name="TabMap"
+                                    Style="{StaticResource TabStyle}"
+                                    MouseLeftButtonDown="TabMap_Click">
+                                <TextBlock x:Name="TabMapText"
+                                           Text="Map"
+                                           FontSize="12"
+                                           FontWeight="SemiBold"
+                                           VerticalAlignment="Center"
+                                           ToolTip="Graphical map tracker — areas, checks and where you are"
+                                           Foreground="{StaticResource BrushMuted}"/>
+                            </Border>
+                            <Border x:Name="TabNews"
+                                    Style="{StaticResource TabStyle}"
+                                    MouseLeftButtonDown="TabNews_Click">
+                                <TextBlock x:Name="TabNewsText"
+                                           Text="News"
+                                           FontSize="12"
+                                           FontWeight="SemiBold"
+                                           VerticalAlignment="Center"
+                                           Foreground="{StaticResource BrushMuted}"/>
+                            </Border>
+                            <Border x:Name="TabRoms"
+                                    Style="{StaticResource TabStyle}"
+                                    Visibility="Collapsed"
+                                    MouseLeftButtonDown="TabRoms_Click">
+                                <TextBlock x:Name="TabRomsText"
+                                           Text="ROMs"
+                                           FontSize="12"
+                                           FontWeight="SemiBold"
+                                           VerticalAlignment="Center"
+                                           ToolTip="Patched ROM library — one per multiworld seed"
+                                           Foreground="{StaticResource BrushMuted}"/>
+                            </Border>
+                            <Border x:Name="TabSettings"
+                                    Style="{StaticResource TabStyle}"
+                                    MouseLeftButtonDown="TabSettings_Click">
+                                <TextBlock x:Name="TabSettingsText"
+                                           Text="⚙"
+                                           FontSize="14"
+                                           VerticalAlignment="Center"
+                                           ToolTip="Settings"
+                                           Foreground="{StaticResource BrushMuted}"/>
+                            </Border>
+                        </StackPanel>
+                    </Border>
+
+                    <!--  Page content area  -->
+                    <Grid Grid.Row="2">
+
+                        <!-- PAGE: Overview (default landing tab — §6) -->
+                        <Grid x:Name="PageOverview">
+                            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                <StackPanel Margin="0,0,0,32">
+
+                                    <!--  Hero banner: per-game art + dark gradient + title  -->
+                                    <Grid Height="200" ClipToBounds="True">
+                                        <Border x:Name="OverviewHeroArt"
+                                                Background="#141720"/>
+                                        <!-- Bottom-heavy dark overlay so title/badges stay readable
+                                             over any art -->
+                                        <Border>
+                                            <Border.Background>
+                                                <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                                    <GradientStop Color="#280B0D14" Offset="0"/>
+                                                    <GradientStop Color="#7A0B0D14" Offset="0.55"/>
+                                                    <GradientStop Color="#F00B0D14" Offset="1"/>
+                                                </LinearGradientBrush>
+                                            </Border.Background>
+                                        </Border>
+                                        <StackPanel VerticalAlignment="Bottom"
+                                                    Margin="28,0,28,40">
+                                            <TextBlock x:Name="TxtOverviewTitle"
+                                                       FontSize="30"
+                                                       FontWeight="Bold"
+                                                       Foreground="{StaticResource BrushText}"
+                                                       TextTrimming="CharacterEllipsis">
+                                                <TextBlock.Effect>
+                                                    <DropShadowEffect Color="#000000"
+                                                                      BlurRadius="14"
+                                                                      ShadowDepth="1"
+                                                                      Opacity="0.85"/>
+                                                </TextBlock.Effect>
+                                            </TextBlock>
+                                            <TextBlock x:Name="TxtOverviewSubtitle"
+                                                       FontSize="13"
+                                                       Foreground="#C8CCDC"
+                                                       Margin="2,2,0,9">
+                                                <TextBlock.Effect>
+                                                    <DropShadowEffect Color="#000000"
+                                                                      BlurRadius="10"
+                                                                      ShadowDepth="1"
+                                                                      Opacity="0.85"/>
+                                                </TextBlock.Effect>
+                                            </TextBlock>
+                                            <!-- Capability / installed / requirement badges -->
+                                            <WrapPanel x:Name="OverviewBadgesPanel"/>
+                                        </StackPanel>
+                                    </Grid>
+
+                                    <!-- Action bar floating over the hero's bottom edge -->
+                                    <Border Margin="24,-26,24,0"
+                                            Background="#F2161A26"
+                                            BorderBrush="#2A3050"
+                                            BorderThickness="1"
+                                            CornerRadius="4"
+                                            Padding="14,12">
+                                        <!--  Wraps rather than runs off the edge.
+                                              A DockPanel put every button on one
+                                              row, so on a small screen the ones at
+                                              the end were simply unreachable — and
+                                              every button added made it worse.
+                                              A WrapPanel spends height instead,
+                                              which a window has more of. -->
+                                        <WrapPanel Orientation="Horizontal">
+                                            <Button x:Name="BtnOverviewPlay"
+                                                    Content="▶  AP Play"
+                                                    Style="{StaticResource BtnPlayStyle}"
+                                                    MinWidth="150"
+                                                    Click="BtnOverviewPlay_Click"/>
+                                            <!-- Which emulator this game launches on. Shown only
+                                                 when the game actually has a choice to make;
+                                                 a one-emulator game gets no decoy control.
+                                                 The label always names the CURRENT choice, so
+                                                 the answer is on screen without opening it. -->
+                                            <Button x:Name="BtnOverviewEmulator"
+                                                    Style="{StaticResource BtnSecondaryStyle}"
+                                                    Margin="0,0,10,8"
+                                                    Visibility="Collapsed"
+                                                    Click="BtnOverviewEmulator_Click"/>
+                                            <!-- Appears only while the chosen emulator is
+                                                 missing. Play is blocked in that state, so
+                                                 this is the one thing left to do — it must
+                                                 be present and obvious, not a dialog you
+                                                 reach by pressing the wrong button first. -->
+                                            <Button x:Name="BtnOverviewGetEmulator"
+                                                    Style="{StaticResource BtnPlayStyle}"
+                                                    Margin="0,0,10,8"
+                                                    Visibility="Collapsed"
+                                                    Click="BtnOverviewGetEmulator_Click"/>
+                                            <!-- Mirrors the hidden header BtnStandalone (§9):
+                                                 visible for installed standalone-capable games,
+                                                 re-raises the header button's Click. -->
+                                            <Button x:Name="BtnOverviewStandalone"
+                                                    Content="▶  Standalone"
+                                                    Style="{StaticResource BtnSecondaryStyle}"
+                                                    Margin="0,0,10,8"
+                                                    Visibility="Collapsed"
+                                                    ToolTip="Launch the game solo, without an Archipelago server"
+                                                    Click="BtnOverviewStandalone_Click"/>
+                                            <!-- Optional, opt-in update for an already-installed game.
+                                                 Lights up only when a NEWER version is published;
+                                                 re-raises the hidden header BtnInstall (update only,
+                                                 no launch). The launcher itself is the only thing
+                                                 that updates as a requirement. -->
+                                            <Button x:Name="BtnOverviewUpdate"
+                                                    Content="↑  Update available"
+                                                    Style="{StaticResource BtnPlayStyle}"
+                                                    Margin="0,0,10,8"
+                                                    Visibility="Collapsed"
+                                                    ToolTip="Download and install the newest published version"
+                                                    Click="BtnOverviewUpdate_Click"/>
+                                            <Button x:Name="BtnOverviewGetGame"
+                                                    Content="Get the game ↗"
+                                                    Style="{StaticResource BtnSecondaryStyle}"
+                                                    Margin="0,0,10,8"
+                                                    Visibility="Collapsed"
+                                                    Click="BtnOverviewGetGame_Click"/>
+                                            <Button x:Name="BtnOverviewWebsite"
+                                                    Content="Website ↗"
+                                                    Style="{StaticResource BtnSecondaryStyle}"
+                                                    Margin="0,0,10,8"
+                                                    Visibility="Collapsed"
+                                                    Click="BtnOverviewWebsite_Click"/>
+                                            <!-- One button that gathers every log the
+                                                 developer ever asks for (this game's and
+                                                 the launcher's own) into a single zip the
+                                                 player saves wherever they like and sends
+                                                 on. Beats talking someone through folder
+                                                 paths over Discord. -->
+                                            <Button x:Name="BtnOverviewCollectLogs"
+                                                    Content="&#x1F4CB;  Collect logs"
+                                                    Style="{StaticResource BtnSecondaryStyle}"
+                                                    Margin="0,0,10,8"
+                                                    ToolTip="Gather every log file into one zip you can send to the developer"
+                                                    Click="BtnOverviewCollectLogs_Click"/>
+                                            <!-- Commands the selected game offers.
+                                                 The launcher draws one button per
+                                                 entry the plugin reports and knows
+                                                 nothing about what any of them do;
+                                                 a game that offers none leaves this
+                                                 row empty. -->
+                                            <!--  Also a WrapPanel, and capped to the
+                                                  row's own width: nested inside one,
+                                                  it would otherwise ask for its full
+                                                  content width and push its last
+                                                  buttons off a narrow screen — the
+                                                  exact problem the outer wrap fixes. -->
+                                            <WrapPanel x:Name="OverviewCommandBar"
+                                                       Orientation="Horizontal"
+                                                       MaxWidth="{Binding ActualWidth,
+                                                           RelativeSource={RelativeSource AncestorType=WrapPanel}}"/>
+                                        </WrapPanel>
+                                    </Border>
+
+                                    <!--  Stats strip (playtime / last played / sessions /
+                                         achievements) — tiles built in code -->
+                                    <UniformGrid x:Name="OverviewStatsPanel"
+                                                 Columns="4"
+                                                 Margin="20,18,20,0"/>
+
+                                    <!--  About card  -->
+                                    <Border Margin="24,18,24,0"
+                                            Background="#141720"
+                                            BorderBrush="#1E2233"
+                                            BorderThickness="1"
+                                            CornerRadius="4"
+                                            Padding="20,16">
+                                        <StackPanel>
+                                            <TextBlock Text="ABOUT"
+                                                       FontSize="10"
+                                                       FontWeight="SemiBold"
+                                                       Foreground="{StaticResource BrushMuted}"
+                                                       Margin="0,0,0,8"/>
+                                            <TextBlock x:Name="TxtOverviewAbout"
+                                                       FontSize="12"
+                                                       Foreground="{StaticResource BrushText}"
+                                                       TextWrapping="Wrap"
+                                                       Opacity="0.9"
+                                                       LineHeight="18"
+                                                       LineStackingStrategy="BlockLineHeight"/>
+                                            <TextBlock x:Name="TxtOverviewApWorld"
+                                                       FontSize="11"
+                                                       Foreground="{StaticResource BrushMuted}"
+                                                       Margin="0,10,0,0"/>
+                                            <!-- One line per credit the game
+                                                 reports. Empty when it reports
+                                                 none. -->
+                                            <StackPanel x:Name="PanelOverviewCredits"
+                                                        Margin="0,4,0,0"/>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <!--  Known issues card — only shown when the selected game has notes  -->
+                                    <Border x:Name="BorderOverviewKnownIssues"
+                                            Margin="24,18,24,0"
+                                            Background="#241B10"
+                                            BorderBrush="#8A6A22"
+                                            BorderThickness="1"
+                                            CornerRadius="4"
+                                            Padding="20,16"
+                                            Visibility="Collapsed">
+                                        <StackPanel>
+                                            <TextBlock Text="⚠  KNOWN ISSUE"
+                                                       FontSize="10"
+                                                       FontWeight="Bold"
+                                                       Foreground="#F0C24E"
+                                                       Margin="0,0,0,10"/>
+                                            <StackPanel x:Name="PanelOverviewKnownIssues"/>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <!--  News teaser + achievements teaser, side by side  -->
+                                    <Grid Margin="24,18,24,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="18"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+
+                                        <Border Grid.Column="0"
+                                                Background="#141720"
+                                                BorderBrush="#1E2233"
+                                                BorderThickness="1"
+                                                CornerRadius="4"
+                                                Padding="20,16"
+                                                VerticalAlignment="Stretch">
+                                            <StackPanel>
+                                                <DockPanel Margin="0,0,0,8">
+                                                    <TextBlock Text="LATEST NEWS"
+                                                               FontSize="10"
+                                                               FontWeight="SemiBold"
+                                                               Foreground="{StaticResource BrushMuted}"
+                                                               VerticalAlignment="Center"/>
+                                                    <TextBlock Text="Read more →"
+                                                               DockPanel.Dock="Right"
+                                                               HorizontalAlignment="Right"
+                                                               FontSize="11"
+                                                               Foreground="{StaticResource BrushAccent}"
+                                                               Cursor="Hand"
+                                                               VerticalAlignment="Center"
+                                                               MouseLeftButtonDown="OverviewReadMoreNews_Click"/>
+                                                </DockPanel>
+                                                <StackPanel x:Name="OverviewNewsHost"/>
+                                            </StackPanel>
+                                        </Border>
+
+                                        <Border Grid.Column="2"
+                                                Background="#141720"
+                                                BorderBrush="#1E2233"
+                                                BorderThickness="1"
+                                                CornerRadius="4"
+                                                Padding="20,16"
+                                                VerticalAlignment="Stretch">
+                                            <StackPanel>
+                                                <DockPanel Margin="0,0,0,8">
+                                                    <TextBlock Text="ACHIEVEMENTS"
+                                                               FontSize="10"
+                                                               FontWeight="SemiBold"
+                                                               Foreground="{StaticResource BrushMuted}"
+                                                               VerticalAlignment="Center"/>
+                                                    <TextBlock Text="All achievements →"
+                                                               DockPanel.Dock="Right"
+                                                               HorizontalAlignment="Right"
+                                                               FontSize="11"
+                                                               Foreground="{StaticResource BrushAccent}"
+                                                               Cursor="Hand"
+                                                               VerticalAlignment="Center"
+                                                               MouseLeftButtonDown="OverviewAllAchievements_Click"/>
+                                                </DockPanel>
+                                                <StackPanel x:Name="OverviewAchHost"/>
+                                            </StackPanel>
+                                        </Border>
+                                    </Grid>
+
+                                </StackPanel>
+                            </ScrollViewer>
+                        </Grid>
+
+                        <!-- PAGE: Play -->
+                        <Grid x:Name="PagePlay" Visibility="Collapsed">
+                            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                <StackPanel Margin="24,20">
+
+                                    <!-- Per-game notice (UX-6/UX-7): persistent banner for games
+                                         that connect to AP themselves or whose
+                                         check detection is still in development (emulated games).
+                                         Populated by SelectGame; collapsed for everything else. -->
+                                    <Border x:Name="PanelGameNotice"
+                                            Visibility="Collapsed"
+                                            Background="#0B1622"
+                                            BorderBrush="#1E3050"
+                                            BorderThickness="1"
+                                            CornerRadius="3"
+                                            Padding="14,10"
+                                            Margin="0,0,0,18">
+                                        <DockPanel>
+                                            <TextBlock x:Name="TxtGameNoticeIcon"
+                                                       DockPanel.Dock="Left"
+                                                       Text="ⓘ"
+                                                       FontSize="13"
+                                                       Foreground="#7AACDA"
+                                                       VerticalAlignment="Center"
+                                                       Margin="0,0,9,0"/>
+                                            <TextBlock x:Name="TxtGameNotice"
+                                                       FontSize="12"
+                                                       Foreground="{StaticResource BrushText}"
+                                                       TextWrapping="Wrap"
+                                                       VerticalAlignment="Center"/>
+                                        </DockPanel>
+                                    </Border>
+
+                                    <!-- AP connection status hint (connect via the sidebar panel) -->
+                                    <Border x:Name="PanelNotConnectedHint"
+                                            Background="#0C1018"
+                                            BorderBrush="#1E2233"
+                                            BorderThickness="1"
+                                            CornerRadius="3"
+                                            Padding="14,10"
+                                            Margin="0,0,0,18">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="●"
+                                                       FontSize="10"
+                                                       Foreground="#3A3F55"
+                                                       VerticalAlignment="Center"
+                                                       Margin="0,0,8,0"/>
+                                            <TextBlock Text="Not connected to Archipelago — use the "
+                                                       FontSize="12"
+                                                       Foreground="{StaticResource BrushMuted}"
+                                                       VerticalAlignment="Center"/>
+                                            <TextBlock Text="Connect"
+                                                       FontSize="12"
+                                                       FontWeight="SemiBold"
+                                                       Foreground="{StaticResource BrushAccent}"
+                                                       VerticalAlignment="Center"
+                                                       Cursor="Hand"
+                                                       MouseLeftButtonDown="ConnectHint_Click"/>
+                                            <TextBlock Text=" panel in the sidebar."
+                                                       FontSize="12"
+                                                       Foreground="{StaticResource BrushMuted}"
+                                                       VerticalAlignment="Center"/>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <!-- Ready-up row (connected, no game session running) -->
+                                    <Border x:Name="PanelReadyRow"
+                                            Visibility="Collapsed"
+                                            Background="#0C1018"
+                                            BorderBrush="#1E2233"
+                                            BorderThickness="1"
+                                            CornerRadius="3"
+                                            Padding="14,10"
+                                            Margin="0,0,0,18">
+                                        <DockPanel>
+                                            <Button x:Name="BtnReady"
+                                                    DockPanel.Dock="Right"
+                                                    Content="Ready up"
+                                                    Style="{StaticResource BtnSecondaryStyle}"
+                                                    Padding="12,5"
+                                                    ToolTip="Tell the multiworld you are ready to start (StatusUpdate: Ready)"
+                                                    Click="BtnReady_Click"/>
+                                            <TextBlock Text="Waiting to start — let other players see you are ready."
+                                                       FontSize="12"
+                                                       Foreground="{StaticResource BrushMuted}"
+                                                       VerticalAlignment="Center"/>
+                                        </DockPanel>
+                                    </Border>
+
+                                    <!-- Progress area (hidden when idle) -->
+                                    <Grid x:Name="ProgressArea"
+                                          Visibility="Collapsed"
+                                          Margin="0,18,0,0">
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="4"/>
+                                            <RowDefinition Height="Auto"/>
+                                        </Grid.RowDefinitions>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <ProgressBar x:Name="ProgressBar"
+                                                     Grid.Row="0"
+                                                     Grid.ColumnSpan="2"
+                                                     Minimum="0" Maximum="100"
+                                                     Foreground="{StaticResource BrushAccent}"
+                                                     Background="#1A1E38"
+                                                     BorderThickness="0"/>
+                                        <TextBlock x:Name="TxtProgress"
+                                                   Grid.Row="1"
+                                                   Grid.Column="0"
+                                                   FontSize="11"
+                                                   Foreground="{StaticResource BrushMuted}"
+                                                   VerticalAlignment="Center"
+                                                   Margin="0,5,0,0"/>
+                                        <Button x:Name="BtnCancelInstall"
+                                                Grid.Row="1"
+                                                Grid.Column="1"
+                                                Content="Cancel"
+                                                Style="{StaticResource BtnSecondaryStyle}"
+                                                Padding="12,3"
+                                                Margin="10,5,0,0"
+                                                ToolTip="Stop this download/install — nothing is marked installed until it finishes"
+                                                Click="BtnCancelInstall_Click"/>
+                                    </Grid>
+
+                                    <!-- AP console log -->
+                                    <TextBlock Text="AP LOG"
+                                               FontSize="10"
+                                               FontWeight="SemiBold"
+                                               Foreground="{StaticResource BrushMuted}"
+                                               Margin="0,22,0,8"/>
+                                    <!-- Read-only RichTextBox, not a TextBlock (UX-12): the log is
+                                         the only place many errors appear, so its text must be
+                                         selectable/copyable — and colored runs (red DeathLink,
+                                         gold progression) survive, which a plain TextBox can't do.
+                                         The FlowDocument is initialized in the constructor. -->
+                                    <Border Background="#0C1020"
+                                            BorderBrush="#1E2233"
+                                            BorderThickness="1"
+                                            CornerRadius="2"
+                                            Height="170">
+                                        <RichTextBox x:Name="TxtLog"
+                                                     FontFamily="Consolas"
+                                                     FontSize="11"
+                                                     Foreground="#3DC86E"
+                                                     Background="Transparent"
+                                                     BorderThickness="0"
+                                                     IsReadOnly="True"
+                                                     IsUndoEnabled="False"
+                                                     SelectionBrush="{StaticResource BrushAccent}"
+                                                     VerticalScrollBarVisibility="Auto"
+                                                     HorizontalScrollBarVisibility="Disabled"/>
+                                    </Border>
+
+                                    <!-- AP Chat -->
+                                    <TextBlock Text="AP CHAT"
+                                               FontSize="10"
+                                               FontWeight="SemiBold"
+                                               Foreground="{StaticResource BrushMuted}"
+                                               Margin="0,18,0,8"/>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="70"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBox x:Name="TxtChat"
+                                                 Grid.Column="0"
+                                                 VerticalAlignment="Center"
+                                                 IsEnabled="False"
+                                                 ToolTip="Connect to Archipelago to enable chat"
+                                                 MaxLength="512"
+                                                 KeyDown="TxtChat_KeyDown"
+                                                 Margin="0,0,6,0"/>
+                                        <Button x:Name="BtnCountdown"
+                                                Grid.Column="1"
+                                                Content="⏱ Countdown"
+                                                Style="{StaticResource BtnSecondaryStyle}"
+                                                Visibility="Collapsed"
+                                                ToolTip="Start a synchronized 10-second countdown for all players (!countdown 10)"
+                                                Click="BtnCountdown_Click"
+                                                Padding="10,6"
+                                                Margin="0,0,6,0"/>
+                                        <Button x:Name="BtnSendChat"
+                                                Grid.Column="2"
+                                                Content="Send"
+                                                Style="{StaticResource BtnSecondaryStyle}"
+                                                IsEnabled="False"
+                                                Click="BtnSendChat_Click"
+                                                Padding="0,6"/>
+                                    </Grid>
+
+                                    <!--  AP End-of-game commands  -->
+                                    <Border x:Name="PanelApCommands"
+                                            Visibility="Collapsed"
+                                            BorderBrush="#1E2233"
+                                            BorderThickness="1"
+                                            CornerRadius="4"
+                                            Padding="10,8"
+                                            Margin="0,8,0,0">
+                                        <DockPanel>
+                                            <TextBlock DockPanel.Dock="Left"
+                                                       Text="AP commands:"
+                                                       Foreground="{StaticResource BrushMuted}"
+                                                       FontSize="11"
+                                                       VerticalAlignment="Center"
+                                                       Margin="0,0,10,0"/>
+                                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Left">
+                                                <Button x:Name="BtnRelease"
+                                                        Content="Release"
+                                                        Style="{StaticResource BtnSecondaryStyle}"
+                                                        Padding="10,5"
+                                                        Margin="0,0,6,0"
+                                                        ToolTip="!release — send remaining items to other players"
+                                                        Click="BtnRelease_Click"/>
+                                                <Button x:Name="BtnCollect"
+                                                        Content="Collect"
+                                                        Style="{StaticResource BtnSecondaryStyle}"
+                                                        Padding="10,5"
+                                                        Margin="0,0,6,0"
+                                                        ToolTip="!collect — collect items owed to you from other worlds"
+                                                        Click="BtnCollect_Click"/>
+                                                <!-- "Forfeit" was removed (P2-20): AP servers renamed
+                                                     !forfeit to !release, so the button duplicated
+                                                     Release under a tooltip describing a command
+                                                     that no longer exists. -->
+                                                <Button x:Name="BtnDeathLink"
+                                                        Content="💀 DeathLink"
+                                                        Style="{StaticResource BtnSecondaryStyle}"
+                                                        Padding="10,5"
+                                                        ToolTip="DeathLink is OFF — click to share deaths with other DeathLink players"
+                                                        Click="BtnDeathLink_Click"/>
+                                            </StackPanel>
+                                        </DockPanel>
+                                    </Border>
+
+                                </StackPanel>
+                            </ScrollViewer>
+                        </Grid>
+
+                        <!-- PAGE: Progression -->
+                        <Grid x:Name="PageProgression" Visibility="Collapsed">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="220"/>  <!-- category sidebar -->
+                                <ColumnDefinition Width="*"/>    <!-- main content -->
+                            </Grid.ColumnDefinitions>
+
+                            <!-- Category sidebar -->
+                            <Border Grid.Column="0"
+                                    BorderBrush="#1E2233"
+                                    BorderThickness="0,0,1,0">
+                                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                    <StackPanel Margin="0,0,0,16">
+                                        <TextBlock Text="CATEGORIES"
+                                                   FontSize="10" FontWeight="Bold"
+                                                   Foreground="{StaticResource BrushMuted}"
+                                                   Margin="16,16,16,8"/>
+                                        <StackPanel x:Name="ProgressionCategoryPanel"/>
+
+                                        <TextBlock Text="OTHER PLAYERS"
+                                                   FontSize="10" FontWeight="Bold"
+                                                   Foreground="{StaticResource BrushMuted}"
+                                                   Margin="16,20,16,8"/>
+                                        <StackPanel x:Name="ProgressionPlayersPanel"/>
+                                    </StackPanel>
+                                </ScrollViewer>
+                            </Border>
+
+                            <!-- Main progression content -->
+                            <ScrollViewer Grid.Column="1"
+                                          VerticalScrollBarVisibility="Auto">
+                                <StackPanel x:Name="ProgressionContentPanel"
+                                            Margin="24,20,24,20">
+                                    <TextBlock Text="Connect to an Archipelago server and start a session to see progression data."
+                                               FontSize="13"
+                                               Foreground="{StaticResource BrushMuted}"
+                                               TextWrapping="Wrap"
+                                               Opacity="0.7"/>
+                                </StackPanel>
+                            </ScrollViewer>
+                        </Grid>
+
+                        <!-- PAGE: Item Tracker -->
+                        <Grid x:Name="PageTracker" Visibility="Collapsed">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="50"/>   <!-- filter toolbar -->
+                                <RowDefinition Height="*"/>    <!-- data grid -->
+                            </Grid.RowDefinitions>
+
+                            <!-- Filter toolbar -->
+                            <Border Grid.Row="0"
+                                    Background="#141720"
+                                    BorderBrush="#1E2233"
+                                    BorderThickness="0,0,0,1"
+                                    Padding="16,0">
+                                <StackPanel Orientation="Horizontal"
+                                            VerticalAlignment="Center">
+                                    <TextBlock Text="Show:"
+                                               FontSize="11"
+                                               Foreground="{StaticResource BrushMuted}"
+                                               VerticalAlignment="Center"
+                                               Margin="0,0,8,0"/>
+                                    <ComboBox x:Name="CboFilter"
+                                              Width="155"
+                                              SelectedIndex="0"
+                                              SelectionChanged="CboFilter_Changed">
+                                        <ComboBoxItem Content="All Items"/>
+                                        <ComboBoxItem Content="Received by Me"/>
+                                        <ComboBoxItem Content="Sent by Me"/>
+                                        <ComboBoxItem Content="All — By Player"/>
+                                        <ComboBoxItem Content="Received by Player"/>
+                                        <ComboBoxItem Content="Sent by Player"/>
+                                    </ComboBox>
+                                    <ComboBox x:Name="CboPlayer"
+                                              Width="130"
+                                              Margin="8,0,0,0"
+                                              Visibility="Collapsed"
+                                              SelectionChanged="CboFilter_Changed">
+                                        <ComboBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding Alias}"/>
+                                            </DataTemplate>
+                                        </ComboBox.ItemTemplate>
+                                    </ComboBox>
+                                    <Rectangle Width="1" Height="20"
+                                               Fill="#2A3050" Margin="12,0"/>
+                                    <TextBox x:Name="TxtTrackerSearch"
+                                             Width="210"
+                                             ToolTip="Search items, players, locations..."
+                                             TextChanged="TxtTrackerSearch_Changed"/>
+                                    <Rectangle Width="1" Height="20"
+                                               Fill="#2A3050" Margin="12,0"/>
+                                    <TextBlock x:Name="TxtTrackerCount"
+                                               FontSize="11"
+                                               Foreground="{StaticResource BrushMuted}"
+                                               VerticalAlignment="Center"/>
+                                    <Rectangle Width="1" Height="20"
+                                               Fill="#2A3050" Margin="12,0"/>
+                                    <!-- Hint / cheat a specific item. Server
+                                         commands, so it needs a live AP session;
+                                         the handler says so rather than the
+                                         button sitting greyed with no reason. -->
+                                    <Button x:Name="BtnItemActions"
+                                            Content="💡 Hint / cheat item..."
+                                            FontSize="11"
+                                            Padding="9,4"
+                                            VerticalAlignment="Center"
+                                            ToolTip="Ask where an item is, or give yourself one"
+                                            Click="BtnItemActions_Click"/>
+                                    <Rectangle Width="1" Height="20"
+                                               Fill="#2A3050" Margin="12,0"/>
+                                    <!-- List / Grid view toggle (segmented) -->
+
+                                    <Border BorderBrush="#2A3050"
+                                            BorderThickness="1"
+                                            CornerRadius="3"
+                                            Background="#101420"
+                                            VerticalAlignment="Center">
+                                        <StackPanel Orientation="Horizontal">
+                                            <Border x:Name="BtnTrackerViewList"
+                                                    Padding="9,4" CornerRadius="2"
+                                                    Cursor="Hand" Background="Transparent"
+                                                    ToolTip="List view"
+                                                    MouseLeftButtonDown="BtnTrackerViewList_Click">
+                                                <TextBlock x:Name="TxtTrackerViewList"
+                                                           Text="☰ List"
+                                                           FontSize="10" FontWeight="SemiBold"
+                                                           Foreground="{StaticResource BrushMuted}"/>
+                                            </Border>
+                                            <Border x:Name="BtnTrackerViewGrid"
+                                                    Padding="9,4" CornerRadius="2"
+                                                    Cursor="Hand" Background="Transparent"
+                                                    ToolTip="Icon grid view — aggregated tiles per item"
+                                                    MouseLeftButtonDown="BtnTrackerViewGrid_Click">
+                                                <TextBlock x:Name="TxtTrackerViewGrid"
+                                                           Text="▦ Grid"
+                                                           FontSize="10" FontWeight="SemiBold"
+                                                           Foreground="{StaticResource BrushMuted}"/>
+                                            </Border>
+                                        </StackPanel>
+                                    </Border>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- Item DataGrid -->
+                            <DataGrid x:Name="TrackerGrid"
+                                      Grid.Row="1"
+                                      Background="#0D1018"
+                                      RowBackground="#0D1018"
+                                      AlternatingRowBackground="#141720"
+                                      Foreground="{StaticResource BrushText}"
+                                      GridLinesVisibility="Horizontal"
+                                      HorizontalGridLinesBrush="#1E2233"
+                                      BorderThickness="0"
+                                      AutoGenerateColumns="False"
+                                      IsReadOnly="True"
+                                      SelectionMode="Single"
+                                      CanUserReorderColumns="False"
+                                      CanUserResizeRows="False"
+                                      CanUserSortColumns="True"
+                                      HeadersVisibility="Column"
+                                      VirtualizingPanel.IsVirtualizing="True"
+                                      VirtualizingPanel.VirtualizationMode="Recycling"
+                                      VerticalScrollBarVisibility="Auto"
+                                      HorizontalScrollBarVisibility="Disabled">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="#"
+                                                        Binding="{Binding Index}"
+                                                        Width="44"
+                                                        IsReadOnly="True"
+                                                        CanUserSort="True"/>
+                                    <DataGridTextColumn Header="Item"
+                                                        Binding="{Binding ItemName}"
+                                                        Width="*"
+                                                        IsReadOnly="True"
+                                                        CanUserSort="True"/>
+                                    <DataGridTextColumn Header="Type"
+                                                        Binding="{Binding TypeLabel}"
+                                                        Width="72"
+                                                        IsReadOnly="True"
+                                                        CanUserSort="True"/>
+                                    <DataGridTextColumn Header="Sender"
+                                                        Binding="{Binding SenderName}"
+                                                        Width="115"
+                                                        IsReadOnly="True"
+                                                        CanUserSort="True"/>
+                                    <DataGridTextColumn Header="Receiver"
+                                                        Binding="{Binding ReceiverName}"
+                                                        Width="115"
+                                                        IsReadOnly="True"
+                                                        CanUserSort="True"/>
+                                    <DataGridTextColumn Header="Location"
+                                                        Binding="{Binding LocationName}"
+                                                        Width="200"
+                                                        IsReadOnly="True"
+                                                        CanUserSort="True"/>
+                                    <DataGridTextColumn Header="Time"
+                                                        Binding="{Binding Timestamp, StringFormat=HH:mm:ss}"
+                                                        Width="65"
+                                                        IsReadOnly="True"
+                                                        CanUserSort="True"/>
+                                </DataGrid.Columns>
+                            </DataGrid>
+
+                            <!-- Icon grid view (PopTracker-style aggregated tiles) -->
+                            <ScrollViewer x:Name="TrackerTileScroll"
+                                          Grid.Row="1"
+                                          Visibility="Collapsed"
+                                          VerticalScrollBarVisibility="Auto"
+                                          HorizontalScrollBarVisibility="Disabled">
+                                <WrapPanel x:Name="TrackerTilePanel"
+                                           Orientation="Horizontal"
+                                           Margin="16"/>
+                            </ScrollViewer>
+                        </Grid>
+
+                        <!-- PAGE: Map (graphical map tracker) -->
+                        <Grid x:Name="PageMap" Visibility="Collapsed">
+                            <ContentControl x:Name="MapHost"/>
+                        </Grid>
+
+                        <!-- PAGE: News -->
+                        <Grid x:Name="PageNews" Visibility="Collapsed">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="50"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+
+                            <Border Grid.Row="0"
+                                    Background="#141720"
+                                    BorderBrush="#1E2233"
+                                    BorderThickness="0,0,0,1"
+                                    Padding="20,0">
+                                <StackPanel Orientation="Horizontal"
+                                            VerticalAlignment="Center">
+                                    <TextBlock Text="PATCH NOTES &amp; ANNOUNCEMENTS"
+                                               FontSize="11"
+                                               FontWeight="SemiBold"
+                                               Foreground="{StaticResource BrushMuted}"/>
+                                    <Border x:Name="NewsLoadingBadge"
+                                            Background="#141720" CornerRadius="2"
+                                            Padding="8,2" Margin="16,0,0,0"
+                                            Visibility="Collapsed">
+                                        <TextBlock Text="Loading..."
+                                                   FontSize="10"
+                                                   Foreground="{StaticResource BrushMuted}"/>
+                                    </Border>
+                                </StackPanel>
+                            </Border>
+
+                            <ScrollViewer Grid.Row="1"
+                                          VerticalScrollBarVisibility="Auto"
+                                          Padding="24,16,24,16">
+                                <StackPanel x:Name="NewsPanel"/>
+                            </ScrollViewer>
+                        </Grid>
+
+                        <!-- PAGE: Settings -->
+                        <Grid x:Name="PageSettings" Visibility="Collapsed">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="50"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+
+                            <Border Grid.Row="0"
+                                    Background="#141720"
+                                    BorderBrush="#1E2233"
+                                    BorderThickness="0,0,0,1"
+                                    Padding="20,0">
+                                <TextBlock Text="SETTINGS"
+                                           FontSize="11"
+                                           FontWeight="SemiBold"
+                                           Foreground="{StaticResource BrushMuted}"
+                                           VerticalAlignment="Center"/>
+                            </Border>
+
+                            <ScrollViewer Grid.Row="1"
+                                          VerticalScrollBarVisibility="Auto"
+                                          Padding="24,20,24,20">
+                                <StackPanel x:Name="SettingsPanel"/>
+                            </ScrollViewer>
+                        </Grid>
+
+                        <!-- PAGE: ROMs (emulated games only) — the per-seed patched-ROM library -->
+                        <Grid x:Name="PageRoms" Visibility="Collapsed">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="50"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+
+                            <Border Grid.Row="0"
+                                    Background="#141720"
+                                    BorderBrush="#1E2233"
+                                    BorderThickness="0,0,0,1"
+                                    Padding="20,0">
+                                <TextBlock Text="PATCHED ROM LIBRARY"
+                                           FontSize="11"
+                                           FontWeight="SemiBold"
+                                           Foreground="{StaticResource BrushMuted}"
+                                           VerticalAlignment="Center"/>
+                            </Border>
+
+                            <ScrollViewer Grid.Row="1"
+                                          VerticalScrollBarVisibility="Auto"
+                                          Padding="24,16,24,16">
+                                <StackPanel x:Name="RomsPanel"/>
+                            </ScrollViewer>
+                        </Grid>
+
+                    </Grid>  <!-- end page content area -->
+                </Grid>  <!-- end PanelGame -->
+
+                <!--  Global Achievements panel (owner spec §4)  -->
+                <Grid x:Name="PanelAchievements" Visibility="Collapsed">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="56"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- Header: back, title, filter chips -->
+                    <Border Grid.Row="0"
+                            Background="#141720"
+                            BorderBrush="#1E2233"
+                            BorderThickness="0,0,0,1"
+                            Padding="16,0">
+                        <DockPanel>
+                            <Button DockPanel.Dock="Left"
+                                    Style="{StaticResource BtnSecondaryStyle}"
+                                    Content="← Back"
+                                    Padding="14,6"
+                                    VerticalAlignment="Center"
+                                    Click="BtnAchievementsBack_Click"/>
+                            <TextBlock Text="🏆 ACHIEVEMENTS"
+                                       FontSize="13"
+                                       FontWeight="SemiBold"
+                                       Foreground="{StaticResource BrushText}"
+                                       VerticalAlignment="Center"
+                                       Margin="20,0"/>
+                            <StackPanel DockPanel.Dock="Right"
+                                        Orientation="Horizontal"
+                                        HorizontalAlignment="Right"
+                                        VerticalAlignment="Center">
+                                <Button x:Name="BtnAchFilterAll"
+                                        Style="{StaticResource BtnSecondaryStyle}"
+                                        Content="All"
+                                        Tag="all"
+                                        Padding="12,5"
+                                        Margin="0,0,6,0"
+                                        Click="BtnAchFilter_Click"/>
+                                <Button x:Name="BtnAchFilterEarned"
+                                        Style="{StaticResource BtnSecondaryStyle}"
+                                        Content="Earned"
+                                        Tag="earned"
+                                        Padding="12,5"
+                                        Margin="0,0,6,0"
+                                        Click="BtnAchFilter_Click"/>
+                                <Button x:Name="BtnAchFilterLocked"
+                                        Style="{StaticResource BtnSecondaryStyle}"
+                                        Content="Locked"
+                                        Tag="locked"
+                                        Padding="12,5"
+                                        Click="BtnAchFilter_Click"/>
+                            </StackPanel>
+                        </DockPanel>
+                    </Border>
+
+                    <!-- Body: summary strip on top, then a WoW-style two-pane
+                         layout — category list on the left, achievement rows
+                         for the selected category on the right. -->
+                    <Grid Grid.Row="1" Margin="28,20,28,24">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+
+                        <Border x:Name="AchSummaryHost"
+                                Grid.Row="0"
+                                Background="#141720"
+                                BorderBrush="#1E2233"
+                                BorderThickness="1"
+                                CornerRadius="4"
+                                Padding="20,16"
+                                Margin="0,0,0,18"/>
+
+                        <Grid Grid.Row="1">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="220"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+
+                            <!-- Left: category list (General, then every game) -->
+                            <Border Grid.Column="0"
+                                    Background="#10131E"
+                                    BorderBrush="#1E2233"
+                                    BorderThickness="1"
+                                    CornerRadius="4"
+                                    Margin="0,0,16,0">
+                                <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                              Padding="0,6">
+                                    <StackPanel x:Name="AchCategoryPanel"/>
+                                </ScrollViewer>
+                            </Border>
+
+                            <!-- Right: achievement rows for selected category -->
+                            <ScrollViewer x:Name="AchScrollViewer"
+                                          Grid.Column="1"
+                                          VerticalScrollBarVisibility="Auto">
+                                <StackPanel x:Name="AchGroupsPanel"
+                                            MaxWidth="760"
+                                            HorizontalAlignment="Left"/>
+                            </ScrollViewer>
+                        </Grid>
+                    </Grid>
+                </Grid>
+
+            </Grid>  <!-- end main panel -->
+
+            <!--  COMMUNITY RAIL  -->
+            <!-- Where the launcher points outward. Ordered by who is actually
+                 going to answer you: our own server first, because that is
+                 where the work happens and where a bug report reaches someone.
+                 The Archipelago links sit at the bottom, present and plainly
+                 labelled, so nobody mistakes this for an official launcher. -->
+            <Border x:Name="RailCommunity"
+                    Grid.Column="2"
+                    Background="#141720"
+                    BorderBrush="#1E2233"
+                    BorderThickness="1,0,0,0">
+                <ScrollViewer VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel Margin="18,18,18,22">
+
+                        <TextBlock Text="COMMUNITY"
+                                   FontSize="10"
+                                   FontWeight="Bold"
+                                   Foreground="{StaticResource BrushMuted}"
+                                   Margin="0,0,0,10"/>
+
+                        <!-- The server card is drawn from Discord's public
+                             invite data, so the member counts are real rather
+                             than a screenshot that goes stale. Offline it just
+                             shows the name and the button. -->
+                        <Border Background="#1A1E2C"
+                                CornerRadius="10"
+                                BorderBrush="#252A3D"
+                                BorderThickness="1">
+                            <StackPanel>
+                                <Border Height="56"
+                                        CornerRadius="9,9,0,0"
+                                        Background="#3E8BD8"/>
+                                <StackPanel Margin="14,0,14,14">
+                                    <Border Width="58" Height="58"
+                                            CornerRadius="16"
+                                            Margin="0,-29,0,0"
+                                            HorizontalAlignment="Left"
+                                            Background="#0F1219">
+                                        <Image x:Name="ImgCommunityIcon"
+                                               Width="52" Height="52"
+                                               RenderOptions.BitmapScalingMode="HighQuality"/>
+                                    </Border>
+                                    <TextBlock x:Name="TxtCommunityName"
+                                               Text="Maegis&apos; Casual Cloud Gaming"
+                                               FontSize="14"
+                                               FontWeight="Bold"
+                                               TextWrapping="Wrap"
+                                               Foreground="{StaticResource BrushText}"
+                                               Margin="0,10,0,0"/>
+                                    <StackPanel x:Name="PanelCommunityCounts"
+                                                Orientation="Horizontal"
+                                                Visibility="Collapsed"
+                                                Margin="0,6,0,0">
+                                        <Ellipse Width="7" Height="7"
+                                                 Fill="{StaticResource BrushSuccess}"
+                                                 VerticalAlignment="Center"/>
+                                        <TextBlock x:Name="TxtCommunityOnline"
+                                                   FontSize="11"
+                                                   Margin="5,0,12,0"
+                                                   Foreground="{StaticResource BrushMuted}"/>
+                                        <Ellipse Width="7" Height="7"
+                                                 Fill="#4A5170"
+                                                 VerticalAlignment="Center"/>
+                                        <TextBlock x:Name="TxtCommunityMembers"
+                                                   FontSize="11"
+                                                   Margin="5,0,0,0"
+                                                   Foreground="{StaticResource BrushMuted}"/>
+                                    </StackPanel>
+                                    <Button x:Name="BtnCommunityJoin"
+                                            Content="Go to the server"
+                                            Margin="0,12,0,0"
+                                            Padding="0,9"
+                                            FontWeight="Bold"
+                                            Foreground="White"
+                                            Background="#2E8B57"
+                                            BorderThickness="0"
+                                            Cursor="Hand"
+                                            Click="BtnCommunityJoin_Click"/>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <TextBlock Margin="2,12,2,0"
+                                   FontSize="11.5"
+                                   LineHeight="17"
+                                   TextWrapping="Wrap"
+                                   Foreground="{StaticResource BrushMuted}"
+                                   Text="This is where the launcher and its game plugins are built. Join to follow what is being worked on, ask for a game or a feature, or report something that broke — a bug report here reaches the person who can fix it."/>
+
+                        <Border Height="1" Background="#1E2233" Margin="0,18,0,16"/>
+
+                        <TextBlock Text="THE CODE"
+                                   FontSize="10"
+                                   FontWeight="Bold"
+                                   Foreground="{StaticResource BrushMuted}"
+                                   Margin="0,0,0,8"/>
+                        <Button x:Name="BtnLinkRepos"
+                                Style="{StaticResource BtnSecondaryStyle}"
+                                Padding="10,8"
+                                HorizontalContentAlignment="Left"
+                                Content="Source code and releases"
+                                ToolTip="Every repository: the launcher, the plugin catalogue and the game mods"
+                                Click="BtnLinkRepos_Click"/>
+                        <TextBlock Margin="2,6,2,0"
+                                   FontSize="11"
+                                   TextWrapping="Wrap"
+                                   Foreground="{StaticResource BrushMuted}"
+                                   Text="All of it is open: the launcher, the plugin catalogue and the game mods, with the source published alongside every release."/>
+
+                        <!-- The ARCHIPELAGO link section that stood here moved
+                             into the Discord page in the topbar. In its place:
+                             the launcher's own notification sounds, which are
+                             global — burying a global volume slider inside one
+                             game's Settings tab made it look per-game. Filled
+                             by PopulateSoundRail(). -->
+                        <Border Height="1" Background="#1E2233" Margin="0,18,0,16"/>
+                        <TextBlock Text="SOUNDS"
+                                   FontSize="10"
+                                   FontWeight="Bold"
+                                   Foreground="{StaticResource BrushMuted}"
+                                   Margin="0,0,0,4"/>
+                        <TextBlock Margin="2,0,2,10"
+                                   FontSize="11"
+                                   TextWrapping="Wrap"
+                                   Foreground="{StaticResource BrushMuted}"
+                                   Text="What London plays when a check lands: progression items, traps, DeathLink and the goal. Off unless you turn it on."/>
+                        <StackPanel x:Name="RailSoundPanel"/>
+
+                    </StackPanel>
+                </ScrollViewer>
+            </Border>
+
+            <!--  MULTIWORLD  -->
+            <!-- Directly after the community rail, i.e. the LAST child of the
+                 content grid. Anchoring matters: two shipped builds put this
+                 panel in the wrong parent — first under the rail's paint, then
+                 inside a collapsed overlay where it never rendered at all. The
+                 rail is the anchor because the rail is a proven sibling. -->
+            <local:MultiworldPanel x:Name="PanelMultiworld"
+                                   Grid.Column="0" Grid.ColumnSpan="3"
+                                   Visibility="Collapsed"/>
+
+            <!--  JOIN  -->
+            <!-- Same rules as the Multiworld panel, same hard-won reasons:
+                 anchored on a proven sibling, last child, full-surface. -->
+            <local:JoinPanel x:Name="PanelJoin"
+                             Grid.Column="0" Grid.ColumnSpan="3"
+                             Visibility="Collapsed"/>
+
+            <!--  STORE  -->
+            <local:StorePanel x:Name="PanelStore"
+                              Grid.Column="0" Grid.ColumnSpan="3"
+                              Visibility="Collapsed"/>
+
+            <!--  COMMUNITY  (streamers + discord, one control, two faces)
+                  WPF paints later children on top, so every full-surface panel
+                  has to sit after the community rail or the rail covers it.
+                  The gate counts this. -->
+            <local:CommunityPanel x:Name="PanelCommunity"
+                                  Grid.Column="0" Grid.ColumnSpan="3"
+                                  Visibility="Collapsed"/>
+
+            <!--  SETTINGS — everything that applies to the launcher itself.
+                  These rows lived inside every game's Settings tab, where a
+                  global server address looked like a per-game one. Filled by
+                  PopulateGlobalSettingsPanel(). -->
+            <Border x:Name="PanelSettings"
+                    Grid.Column="0" Grid.ColumnSpan="3"
+                    Visibility="Collapsed"
+                    Background="{StaticResource BrushBackground}">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="26,20,26,30">
+                    <StackPanel MaxWidth="760" HorizontalAlignment="Left">
+                        <TextBlock Text="Settings"
+                                   FontSize="21" FontWeight="Bold"
+                                   Foreground="{StaticResource BrushAccent}"/>
+                        <TextBlock Margin="0,6,0,18" TextWrapping="Wrap"
+                                   FontSize="12.5"
+                                   Foreground="{StaticResource BrushMuted}"
+                                   Text="Everything here applies to the launcher as a whole. Settings for one game live on that game's own page — and the notification sounds sit in the right rail on Home."/>
+                        <StackPanel x:Name="GlobalSettingsPanel"/>
+                    </StackPanel>
+                </ScrollViewer>
+            </Border>
+
+        </Grid>  <!-- end content Grid -->
+
+        <!--  STATUS BAR  -->
+        <Border Grid.Row="3"
+                Background="#0C1020"
+                BorderBrush="#1E2233"
+                BorderThickness="0,1,0,0">
+            <DockPanel Margin="12,0,0,0">
+                <!-- Resize grip — bottom-right corner (declared first = rightmost in DockPanel) -->
+                <Border DockPanel.Dock="Right"
+                        Width="16" Height="24"
+                        Cursor="SizeNWSE"
+                        Background="Transparent"
+                        VerticalAlignment="Bottom"
+                        ToolTip="Drag to resize"
+                        PreviewMouseLeftButtonDown="ResizeGrip_MouseDown">
+                    <Canvas Width="10" Height="10"
+                            VerticalAlignment="Bottom"
+                            HorizontalAlignment="Right"
+                            Margin="0,0,2,3">
+                        <!-- 6 grip dots in a 2×3 diagonal pattern -->
+                        <Ellipse Canvas.Left="5" Canvas.Top="7" Width="2.5" Height="2.5" Fill="#2A3050"/>
+                        <Ellipse Canvas.Left="1" Canvas.Top="7" Width="2.5" Height="2.5" Fill="#2A3050"/>
+                        <Ellipse Canvas.Left="5" Canvas.Top="3" Width="2.5" Height="2.5" Fill="#2A3050"/>
+                        <Ellipse Canvas.Left="1" Canvas.Top="3" Width="2.5" Height="2.5" Fill="#2A3050"/>
+                        <Ellipse Canvas.Left="5" Canvas.Top="11" Width="2.5" Height="2.5" Fill="#2A3050"/>
+                        <Ellipse Canvas.Left="1" Canvas.Top="11" Width="2.5" Height="2.5" Fill="#2A3050"/>
+                    </Canvas>
+                </Border>
+                <!-- AP connection state — rightmost -->
+                <TextBlock DockPanel.Dock="Right"
+                           x:Name="TxtApState"
+                           Text="AP: Disconnected"
+                           FontSize="11"
+                           Foreground="{StaticResource BrushMuted}"
+                           VerticalAlignment="Center"/>
+                <TextBlock DockPanel.Dock="Right"
+                           x:Name="TxtHintCount"
+                           Visibility="Collapsed"
+                           FontSize="11"
+                           Foreground="{StaticResource BrushMuted}"
+                           VerticalAlignment="Center"
+                           Margin="0,0,16,0"/>
+                <!-- Website/Discord links moved to the sidebar bottom row (§13)
+                     — the status bar keeps status text, AP state, hint counter
+                     and the resize grip only. -->
+                <TextBlock x:Name="TxtStatus"
+                           FontSize="11"
+                           Foreground="{StaticResource BrushMuted}"
+                           VerticalAlignment="Center"/>
+            </DockPanel>
+        </Border>
+
+        <!--  TOAST HOST  -->
+        <!-- Generic transient notifications (ToastService) — bottom-right,
+             stacked above the status bar. Empty panel never blocks clicks. -->
+        <StackPanel x:Name="ToastHost"
+                    Grid.Row="0" Grid.RowSpan="4"
+                    Width="340"
+                    HorizontalAlignment="Right"
+                    VerticalAlignment="Bottom"
+                    Margin="0,0,18,38"
+                    Panel.ZIndex="900"/>
+
+        <!--  COUNTDOWN OVERLAY  -->
+        <!-- Big transient number for server countdowns (PrintJSON "Countdown").
+             Hit-test disabled so it never blocks the UI; one shared TextBlock is
+             re-faded per tick from ShowCountdownTick. -->
+        <Grid x:Name="CountdownOverlay"
+              Grid.Row="0" Grid.RowSpan="4"
+              Visibility="Collapsed"
+              IsHitTestVisible="False"
+              Panel.ZIndex="940">
+            <TextBlock x:Name="TxtCountdownOverlay"
+                       FontSize="64"
+                       FontWeight="Bold"
+                       Foreground="{StaticResource BrushAccent}"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center">
+                <TextBlock.Effect>
+                    <DropShadowEffect Color="Black" BlurRadius="18" Opacity="0.85" ShadowDepth="2"/>
+                </TextBlock.Effect>
+            </TextBlock>
+        </Grid>
+
+        <!--  QUICK SWITCHER (Ctrl+K)  -->
+        <!--  Shortcuts cheat sheet (? button / F1)  -->
+        <Grid x:Name="ShortcutsOverlay"
+              Grid.Row="0" Grid.RowSpan="4"
+              Visibility="Collapsed"
+              Background="#B00B0D14"
+              Panel.ZIndex="940"
+              MouseLeftButtonDown="ShortcutsOverlay_MouseDown">
+            <Border Width="380"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Background="#141720"
+                    BorderBrush="#1E2233"
+                    BorderThickness="1"
+                    CornerRadius="6">
+                <Border.Effect>
+                    <DropShadowEffect Color="Black" BlurRadius="26" Opacity="0.6" ShadowDepth="4"/>
+                </Border.Effect>
+                <StackPanel Margin="20,16,20,20">
+                    <DockPanel Margin="0,0,0,14">
+                        <TextBlock Text="Keyboard Shortcuts"
+                                   FontSize="14" FontWeight="SemiBold"
+                                   Foreground="{StaticResource BrushText}"
+                                   DockPanel.Dock="Left"/>
+                        <Button Content="✕" Width="24" Height="24"
+                                HorizontalAlignment="Right"
+                                Background="Transparent" BorderThickness="0"
+                                Foreground="{StaticResource BrushMuted}"
+                                Cursor="Hand"
+                                Click="BtnShortcutsClose_Click"/>
+                    </DockPanel>
+                    <!-- Navigation -->
+                    <TextBlock Text="NAVIGATION"
+                               FontSize="9" FontWeight="Bold"
+                               Foreground="{StaticResource BrushMuted}"
+                               Margin="0,0,0,6"/>
+                    <Grid Margin="0,0,0,4"><Grid.ColumnDefinitions><ColumnDefinition Width="120"/><ColumnDefinition/></Grid.ColumnDefinitions>
+                        <Border Grid.Column="0" Background="#1A1D2A" CornerRadius="3" Padding="6,3" HorizontalAlignment="Left"><TextBlock Text="Ctrl+K" FontFamily="Consolas" FontSize="11" Foreground="{StaticResource BrushAccent}"/></Border>
+                        <TextBlock Grid.Column="1" Text="Quick game switcher" FontSize="11" Foreground="{StaticResource BrushText}" VerticalAlignment="Center" Margin="10,0"/>
+                    </Grid>
+                    <Grid Margin="0,0,0,4"><Grid.ColumnDefinitions><ColumnDefinition Width="120"/><ColumnDefinition/></Grid.ColumnDefinitions>
+                        <Border Grid.Column="0" Background="#1A1D2A" CornerRadius="3" Padding="6,3" HorizontalAlignment="Left"><TextBlock Text="Ctrl+F" FontFamily="Consolas" FontSize="11" Foreground="{StaticResource BrushAccent}"/></Border>
+                        <TextBlock Grid.Column="1" Text="Focus library search" FontSize="11" Foreground="{StaticResource BrushText}" VerticalAlignment="Center" Margin="10,0"/>
+                    </Grid>
+                    <Grid Margin="0,0,0,4"><Grid.ColumnDefinitions><ColumnDefinition Width="120"/><ColumnDefinition/></Grid.ColumnDefinitions>
+                        <Border Grid.Column="0" Background="#1A1D2A" CornerRadius="3" Padding="6,3" HorizontalAlignment="Left"><TextBlock Text="Ctrl+1 – 5" FontFamily="Consolas" FontSize="11" Foreground="{StaticResource BrushAccent}"/></Border>
+                        <TextBlock Grid.Column="1" Text="Switch game tab (Play / Prog / Tracker / News / Settings)" FontSize="11" Foreground="{StaticResource BrushText}" VerticalAlignment="Center" Margin="10,0" TextWrapping="Wrap"/>
+                    </Grid>
+                    <Grid Margin="0,0,0,12"><Grid.ColumnDefinitions><ColumnDefinition Width="120"/><ColumnDefinition/></Grid.ColumnDefinitions>
+                        <Border Grid.Column="0" Background="#1A1D2A" CornerRadius="3" Padding="6,3" HorizontalAlignment="Left"><TextBlock Text="Esc" FontFamily="Consolas" FontSize="11" Foreground="{StaticResource BrushAccent}"/></Border>
+                        <TextBlock Grid.Column="1" Text="Close overlay / detail panel" FontSize="11" Foreground="{StaticResource BrushText}" VerticalAlignment="Center" Margin="10,0"/>
+                    </Grid>
+                    <!-- Help -->
+                    <TextBlock Text="HELP"
+                               FontSize="9" FontWeight="Bold"
+                               Foreground="{StaticResource BrushMuted}"
+                               Margin="0,0,0,6"/>
+                    <Grid Margin="0,0,0,4"><Grid.ColumnDefinitions><ColumnDefinition Width="120"/><ColumnDefinition/></Grid.ColumnDefinitions>
+                        <Border Grid.Column="0" Background="#1A1D2A" CornerRadius="3" Padding="6,3" HorizontalAlignment="Left"><TextBlock Text="F1 / ?" FontFamily="Consolas" FontSize="11" Foreground="{StaticResource BrushAccent}"/></Border>
+                        <TextBlock Grid.Column="1" Text="Show this shortcuts panel" FontSize="11" Foreground="{StaticResource BrushText}" VerticalAlignment="Center" Margin="10,0"/>
+                    </Grid>
+                    <TextBlock Text="Click outside to close"
+                               FontSize="10"
+                               Foreground="{StaticResource BrushMuted}"
+                               HorizontalAlignment="Center"
+                               Margin="0,16,0,0"
+                               Opacity="0.6"/>
+                </StackPanel>
+            </Border>
+        </Grid>
+
+        <Grid x:Name="QuickSwitchOverlay"
+              Grid.Row="0" Grid.RowSpan="4"
+              Visibility="Collapsed"
+              Background="#B00B0D14"
+              Panel.ZIndex="950"
+              MouseLeftButtonDown="QuickSwitchBackdrop_MouseDown">
+            <Border Width="520"
+                    MaxHeight="430"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Background="#141720"
+                    BorderBrush="#1E2233"
+                    BorderThickness="1"
+                    CornerRadius="6">
+                <Border.Effect>
+                    <DropShadowEffect Color="Black" BlurRadius="26" Opacity="0.6" ShadowDepth="4"/>
+                </Border.Effect>
+                <DockPanel>
+                    <!-- Search input -->
+                    <Border DockPanel.Dock="Top"
+                            BorderBrush="#1E2233"
+                            BorderThickness="0,0,0,1"
+                            Padding="12,9">
+                        <DockPanel>
+                            <TextBlock DockPanel.Dock="Left"
+                                       Text="⌕"
+                                       FontSize="15"
+                                       Foreground="{StaticResource BrushMuted}"
+                                       VerticalAlignment="Center"
+                                       Margin="0,0,8,0"/>
+                            <TextBox x:Name="TxtQuickSwitch"
+                                     Background="Transparent"
+                                     BorderThickness="0"
+                                     FontSize="14"
+                                     Padding="0,2"
+                                     ToolTip="Type to filter games and actions"
+                                     TextChanged="TxtQuickSwitch_TextChanged"
+                                     PreviewKeyDown="TxtQuickSwitch_PreviewKeyDown"/>
+                        </DockPanel>
+                    </Border>
+                    <!-- Keyboard hint footer -->
+                    <Border DockPanel.Dock="Bottom"
+                            BorderBrush="#1E2233"
+                            BorderThickness="0,1,0,0"
+                            Padding="12,6">
+                        <TextBlock Text="↑↓ navigate  ·  Enter open  ·  Esc close"
+                                   FontSize="10"
+                                   Foreground="{StaticResource BrushMuted}"
+                                   Opacity="0.8"/>
+                    </Border>
+                    <!-- Results -->
+                    <ListBox x:Name="LstQuickSwitch"
+                             Background="Transparent"
+                             BorderThickness="0"
+                             MaxHeight="330"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                             ScrollViewer.VerticalScrollBarVisibility="Auto"/>
+                </DockPanel>
+            </Border>
+        </Grid>
+
+    </Grid>
+</Window>
