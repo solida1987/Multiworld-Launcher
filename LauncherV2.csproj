@@ -1,0 +1,116 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+
+    <!-- ==== Identity / AV metadata ======================================= -->
+    <!-- Proper PE metadata reduces AV heuristic score significantly.        -->
+    <!-- Code signing (EV certificate) is the only reliable long-term fix.   -->
+    <!--                                                                     -->
+    <!-- ASCII only in this file, on purpose. The section rules used to be    -->
+    <!-- drawn with U+2500, and something re-encoded the file UTF-8 as        -->
+    <!-- cp1252 several times over. Each pass multiplied every non-ASCII      -->
+    <!-- character, until four comments had grown to 105 KB and the project   -->
+    <!-- file was 249 KB of mojibake around 10 KB of XML. Plain dashes cannot -->
+    <!-- do that.                                                            -->
+    <AssemblyName>Multiworld Launcher</AssemblyName>
+    <RootNamespace>LauncherV2</RootNamespace>
+    <Version>3.16.0</Version>
+    <FileVersion>3.16.0.0</FileVersion>
+    <AssemblyVersion>3.16.0.0</AssemblyVersion>
+    <Company>Solida Games</Company>
+    <Product>Multiworld Launcher</Product>
+    <Copyright>Copyright (c) 2026 Solida Games</Copyright>
+    <Description>Archipelago launcher with a plugin system and an integrated AP bridge</Description>
+    <NeutralLanguage>en-US</NeutralLanguage>
+
+    <!-- Taskbar, Explorer and the Alt-Tab card. Assets\app.ico carries
+         16..256 px; the frames below 48 px crop in on the skull and orbs
+         because the outer flames stop reading at that size. -->
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
+
+    <!-- ==== Publish: single-file self-contained win-x64 ================== -->
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+
+    <!-- AV-critical: disabling compression means no encrypted/packed exe    -->
+    <!-- blob that scanners can't inspect. Slightly larger on disk, but      -->
+    <!-- dramatically fewer false-positive flags.                            -->
+    <EnableCompressionInSingleFile>false</EnableCompressionInSingleFile>
+    <PublishTrimmed>false</PublishTrimmed>
+
+    <!-- ReadyToRun = native pre-JIT for faster startup, not packed          -->
+    <PublishReadyToRun>true</PublishReadyToRun>
+  </PropertyGroup>
+
+  <!-- ==== NuGet: one managed dependency, the rest BCL ==================== -->
+  <!-- AP + injection code is all .NET 8 BCL (WebSockets, Text.Json,        -->
+  <!-- P/Invoke). The single exception is MoonSharp (below): a PURE-MANAGED  -->
+  <!-- Lua interpreter - no native/packed blob, so it does not add the kind  -->
+  <!-- of AV-heuristic surface the packed-exe notes above warn about. It runs-->
+  <!-- the SNES AP logic modules (alttp/super_metroid) launcher-side for the -->
+  <!-- snes9x NWA backend, which has no in-emulator script. One logic source -->
+  <!-- shared with the BizHawk bridge instead of a duplicated C# port.       -->
+
+  <!-- ==== What is NOT part of the launcher assembly ===================== -->
+  <!-- Tools\ holds the packaging and gate scripts, including PluginCheck,  -->
+  <!-- which is its own project and references this one. Compiling it in    -->
+  <!-- would be circular.                                                   -->
+  <!--                                                                      -->
+  <!-- Game plugins live outside this tree entirely. That is not tidiness:  -->
+  <!-- a plugin project inside Plugins\ gets picked up by the SDK's default -->
+  <!-- globbing and quietly compiles into the launcher, which makes it not  -->
+  <!-- a plugin at all. See PLUGIN_API.md.                                  -->
+  <ItemGroup>
+    <Compile Remove="Tools\**" />
+    <None Remove="Tools\**" />
+  </ItemGroup>
+
+  <!-- ==== Static assets copied to output directory ====================== -->
+  <ItemGroup>
+    <!-- Bundled catalog fallback - used when the hosted catalog.json is     -->
+    <!-- unreachable (no internet, GitHub down, catalog repo not yet         -->
+    <!-- created). LoadCatalogAsync falls back to this file automatically.   -->
+
+    <!-- AP Discord community games list (401-line games.txt format).        -->
+    <!-- Merged into the catalog at runtime as the "Community" source.       -->
+
+    <!-- Official game list (archipelago.gg's own site list). DEFINES which   -->
+    <!-- catalog entries are flagged "Official" in Browse. Read at runtime by -->
+    <!-- GameCatalog.ApplyOfficialList.                                       -->
+
+    <!-- Game icon PNGs. Missing icons are handled gracefully (no crash).    -->
+    <!-- Place 256x256 PNGs here: Assets/diablo2_archipelago.png, etc.       -->
+    <Content Include="Assets\**\*" Condition="Exists('Assets')" CopyToOutputDirectory="PreserveNewest" />
+
+    <!-- AP Lua scripts for emulator games (BizHawk bridge scripts).         -->
+    <Content Include="Plugins\Scripts\**\*" Condition="Exists('Plugins\Scripts')" CopyToOutputDirectory="PreserveNewest" />
+
+    <!-- Licences travel with the build. Several components this launcher    -->
+    <!-- ships alongside are GPL, AGPL or LGPL, which require their licence  -->
+    <!-- text and notices to accompany the binaries wherever they go - not   -->
+    <!-- only in the repository. THIRD-PARTY-NOTICES.md names each one.      -->
+    <Content Include="LICENSE" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="NOTICE" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="THIRD-PARTY-NOTICES.md" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="licenses\**\*" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!-- Warn on Release builds if required asset directories are missing.     -->
+  <Target Name="ValidateAssetDirectories" BeforeTargets="Build" Condition="'$(Configuration)' == 'Release'">
+    <Warning Text="Assets directory is missing - launcher will ship without icons or thumbnails." Condition="!Exists('Assets')" />
+    <Warning Text="Plugins\Scripts directory is missing - emulator Lua scripts will not be included." Condition="!Exists('Plugins\Scripts')" />
+  </Target>
+
+  <ItemGroup>
+    <PackageReference Include="MoonSharp" Version="2.0.0" />
+  </ItemGroup>
+
+</Project>
