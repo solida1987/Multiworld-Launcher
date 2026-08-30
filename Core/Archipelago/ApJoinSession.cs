@@ -78,6 +78,31 @@ public sealed class ApJoinSession
 
     private ApClient? _client;
 
+    /// Takes this session's handlers back off the plugin. Set once the
+    /// handlers are attached; run exactly once, by TearDownAsync.
+    private Action? _detachPlugin;
+
+    ///
+    /// A check on its way to the server, without waiting for it.
+    ///
+    /// ⚠ This is called on the PLUGIN's own thread -- for a game that owns a
+    /// process, its pipe reader. Blocking there on the round trip stops every
+    /// later line the game sends until the server answers.
+    ///
+    private static void SendChecks(ApClient client, long[] ids)
+    {
+        _ = Task.Run(async () =>
+        {
+            try { await client.SendLocationsCheckedAsync(ids).ConfigureAwait(false); }
+            catch (Exception e)
+            {
+                // The reconnect story lives in the client; this is only so a
+                // lost check is not lost silently as well.
+                System.Diagnostics.Debug.WriteLine("[join] check send failed: " + e.Message);
+            }
+        });
+    }
+
     /// host:port this session is connected to. Kept because the map tracker
     /// needs it: PopTracker takes --ap-host and joins the same room, and
     /// nothing else on the session carried the address.
@@ -257,22 +282,36 @@ public sealed class ApJoinSession
             // request. Fire-and-forget: a failure degrades to id labels.
             _ = client.GetDataPackageAsync(new[] { worldName });
 
-            plugin.LocationsChecked += ids =>
+            // ⚠ THE PLUGIN OUTLIVES THIS SESSION -- it is a singleton. Kept in
+            // locals so TearDownAsync can take them off again; left attached,
+            // the next join reported every check twice and wrote its progress
+            // under the previous seed's id.
+            Action<long[]> onChecked = ids =>
             {
                 session.ChecksSent += ids.Length;
-                try { client.SendLocationsCheckedAsync(ids).GetAwaiter().GetResult(); }
-                catch { /* the reconnect story lives in the client */ }
+                SendChecks(client, ids);
                 session.Persist();
                 session.Changed?.Invoke();
             };
+            Action onGoal = () => session.Set(Stage.Playing, "Goal complete!");
+            Action<int> onExited = _ => session.End("Game closed");
+
+            plugin.LocationsChecked += onChecked;
+            plugin.GoalCompleted    += onGoal;
+            plugin.GameExited       += onExited;
+            session._detachPlugin = () =>
+            {
+                plugin.LocationsChecked -= onChecked;
+                plugin.GoalCompleted    -= onGoal;
+                plugin.GameExited       -= onExited;
+            };
+
             client.ItemsReceived += (items, _, _) =>
             {
                 session.ItemsReceived += items.Length;
                 session.Persist();
                 session.Changed?.Invoke();
             };
-            plugin.GoalCompleted += () => session.Set(Stage.Playing, "Goal complete!");
-            plugin.GameExited += _ => session.End("Game closed");
 
             // 4½. The patch, on the external path only. The seed name exists
             // now that we are connected, and this is the first moment the
@@ -392,6 +431,12 @@ public sealed class ApJoinSession
         // Both End() (event-driven) and StopAsync (awaited) reach here; the
         // second arrival must be a no-op, not a double-dispose.
         if (System.Threading.Interlocked.Exchange(ref _tornDown, 1) == 1) return;
+
+        // Off the plugin first: it is a singleton and would otherwise carry
+        // this session's handlers into the next one.
+        var detach = _detachPlugin;
+        _detachPlugin = null;
+        if (detach != null) try { detach(); } catch { }
 
         // Last word before the figures go. The card the player sees next is
         // written here.
