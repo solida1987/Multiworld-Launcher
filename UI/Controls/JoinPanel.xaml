@@ -75,6 +75,13 @@
                             <TextBlock x:Name="TxtExternalCount" FontSize="10"
                                        Foreground="{StaticResource BrushMuted}"/>
                         </Border>
+                        <!--  The store's Remove has existed all along; this is
+                              its first caller. Without it a mistyped or dead
+                              server sat in the dropdown forever.  -->
+                        <Button x:Name="BtnForgetServer" Content="Forget this server"
+                                FontSize="10" Padding="8,2" Margin="9,0,0,0"
+                                Style="{StaticResource BtnSecondaryStyle}"
+                                Click="BtnForgetServer_Click"/>
                     </StackPanel>
                     <WrapPanel x:Name="PanelExternal"/>
                 </StackPanel>

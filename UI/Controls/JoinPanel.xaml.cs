@@ -50,8 +50,22 @@ public partial class JoinPanel : System.Windows.Controls.UserControl
         // Live counters and running-state changes arrive from pool threads and
         // from game processes; a 2 s sweep keeps every card honest without any
         // card having to know why something changed.
+        //
+        // ⚠ The sweep rebuilds every card from scratch — including the
+        // add-a-slot card and its TextBox. While the player is typing a slot
+        // name, a rebuild replaces the box mid-word and the text is simply
+        // gone; nobody can type a name in under two seconds. So the sweep
+        // holds off while the keyboard is in any of our text boxes, and while
+        // an add is in flight (its status line lives on a card the sweep
+        // would orphan).
         _tick = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
-        _tick.Tick += (_, _) => RefreshCards();
+        _tick.Tick += (_, _) =>
+        {
+            if (_addSlotBusy) return;
+            if (System.Windows.Input.Keyboard.FocusedElement is TextBox tb
+                && this.IsAncestorOf(tb)) return;
+            RefreshCards();
+        };
 
         Loaded   += (_, _) => { Refresh(); _tick.Start(); };
         Unloaded += (_, _) => _tick.Stop();

@@ -47,6 +47,32 @@ public partial class JoinPanel
         Refresh();
     }
 
+    /// Remove the selected server from the dropdown, and its slots with it.
+    ///
+    /// The store's Remove (with the slot cascade) was written when servers got
+    /// names -- and never called from anywhere. A dead or mistyped server sat
+    /// in the dropdown forever.
+    private void BtnForgetServer_Click(object sender, RoutedEventArgs e)
+    {
+        if (_server == null) return;
+
+        var slots = ExternalSlotStore.ForServer(_server.Id);
+        string what = slots.Count == 0
+            ? $"Forget \"{_server.Name}\" ({_server.DisplayAddress})?"
+            : $"Forget \"{_server.Name}\" ({_server.DisplayAddress}) and its "
+              + (slots.Count == 1 ? "1 saved slot" : $"{slots.Count} saved slots") + "?";
+
+        var ask = MessageBox.Show(Window.GetWindow(this),
+            what + "\n\nNothing happens on the server itself — this only removes "
+                 + "the entry from this list.",
+            "Forget server?", MessageBoxButton.YesNo, MessageBoxImage.Question);
+        if (ask != MessageBoxResult.Yes) return;
+
+        ExternalServerStore.Remove(_server.Id);
+        _server = null;
+        Refresh();
+    }
+
     /// The cards for one named server: every slot you have added to it, then
     /// one empty card to add the next.
     private void RefreshServerCards(ExternalServer server)
@@ -154,34 +180,44 @@ public partial class JoinPanel
     /// the game. When it cannot get in we save the slot anyway with no game —
     /// a slot you cannot probe is still a slot you were given, and refusing to
     /// save it would leave the player retyping it later.
+    /// True while AddSlotAsync is out asking the server. The 2 s sweep reads
+    /// this and holds off: a rebuild mid-probe would orphan the card whose
+    /// status line the probe is about to write to.
+    private bool _addSlotBusy;
+
     private async Task AddSlotAsync(ExternalServer server, string slotName,
                                     Button button, TextBlock status)
     {
         if (slotName.Length == 0) return;
 
-        button.IsEnabled = false;
-        status.Visibility = Visibility.Visible;
-        status.Text = "Asking the server what this slot plays…";
-
-        string? game = null;
+        _addSlotBusy = true;
         try
         {
-            var probe = await ApSlotProbe.ResolveGameAsync(
-                server.Address, slotName, server.Password);
-            game = probe.Game;
-            status.Text = game != null
-                ? $"{slotName} plays {game}."
-                : "The server did not say what this slot plays — saved anyway.";
-        }
-        catch (Exception ex)
-        {
-            status.Text = "Could not reach the server (" + ex.Message
-                        + ") — the slot is saved and can be joined later.";
-        }
+            button.IsEnabled = false;
+            status.Visibility = Visibility.Visible;
+            status.Text = "Asking the server what this slot plays…";
 
-        ExternalSlotStore.Add(new ExternalSlot(
-            Guid.NewGuid().ToString("N")[..8], server.Address, slotName,
-            server.Password, game, DateTime.Now, server.Id));
+            string? game = null;
+            try
+            {
+                var probe = await ApSlotProbe.ResolveGameAsync(
+                    server.Address, slotName, server.Password);
+                game = probe.Game;
+                status.Text = game != null
+                    ? $"{slotName} plays {game}."
+                    : "The server did not say what this slot plays — saved anyway.";
+            }
+            catch (Exception ex)
+            {
+                status.Text = "Could not reach the server (" + ex.Message
+                            + ") — the slot is saved and can be joined later.";
+            }
+
+            ExternalSlotStore.Add(new ExternalSlot(
+                Guid.NewGuid().ToString("N")[..8], server.Address, slotName,
+                server.Password, game, DateTime.Now, server.Id));
+        }
+        finally { _addSlotBusy = false; }
 
         // Redraw: the filled card becomes a real one and a fresh empty card
         // takes its place at the end.
