@@ -515,6 +515,15 @@ public interface IGamePlugin
     // Only called when SupportsMapTracker is true.
     UIElement? CreateMapTrackerPanel() => null;
 
+    // A game whose session has its OWN window — a mission board, a control
+    // room — beyond the launcher's cards. StarCraft 2's Mission Control is
+    // the first. True only while the plugin holds a live session to draw.
+    bool SupportsSessionWindow => false;
+
+    // Open (or focus) that window. Only called when SupportsSessionWindow
+    // is true. The plugin owns the window's lifetime.
+    void OpenSessionWindow() { }
+
     // --- Presentation ---
 
     // One-paragraph description on the Overview.

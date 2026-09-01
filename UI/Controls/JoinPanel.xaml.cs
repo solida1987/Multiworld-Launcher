@@ -354,6 +354,14 @@ public partial class JoinPanel : System.Windows.Controls.UserControl
             if (TrackerButton(plugin, host, slot.Name) is { } tb) stack.Children.Add(tb);
         }
 
+        // A game whose session has its own window — SC2's Mission Control.
+        // Only while a session is live; the window draws from it.
+        if (plugin is { SupportsSessionWindow: true })
+        {
+            var mc = Btn("🛰  Mission Control", primary: false);
+            mc.Click += (_, _) => plugin.OpenSessionWindow();
+        }
+
         card.Child = stack;
         return card;
     }

@@ -192,6 +192,8 @@ public sealed class SafePluginProxy : IGamePlugin
     public UIElement? CreateSettingsPanel()   => Get<UIElement?>(() => _inner.CreateSettingsPanel(), null);
     public bool       SupportsMapTracker      => Get(() => _inner.SupportsMapTracker, false);
     public UIElement? CreateMapTrackerPanel() => Get<UIElement?>(() => _inner.CreateMapTrackerPanel(), null);
+    public bool       SupportsSessionWindow   => Get(() => _inner.SupportsSessionWindow, false);
+    public void       OpenSessionWindow()     => Guard(() => _inner.OpenSessionWindow());
 
     // --- catalog / presentation ---
 
