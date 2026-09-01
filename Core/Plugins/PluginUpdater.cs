@@ -95,47 +95,76 @@ public static class PluginUpdater
         Directory.CreateDirectory(dir);
         string path = Path.Combine(dir, update.GameId + PluginPackage.Extension);
 
-        using (var http = new HttpClient { Timeout = TimeSpan.FromMinutes(10) })
+        // The VERSIONED asset first, the bare name second.
+        //
+        // ⚠ The bare name is replaced in place on every release, and the feed
+        // rides a CDN with its own cache. For about five minutes around a
+        // release the two describe DIFFERENT versions, and a checksum check
+        // done in that window correctly discards a perfectly good file —
+        // measured live on StarCraft II 1.4.1→1.4.2. The versioned name is
+        // immutable: whatever version the feed names, that asset can never
+        // disagree with it. Releases carry both names for exactly this.
+        var candidates = new List<string>();
+        string bare = update.Source.PackageUrl;
+        if (bare.EndsWith(PluginPackage.Extension, StringComparison.OrdinalIgnoreCase))
+            candidates.Add(bare[..^PluginPackage.Extension.Length]
+                         + "-" + update.NewVersion + PluginPackage.Extension);
+        candidates.Add(bare);
+
+        string? failure = null;
+        foreach (string url in candidates)
         {
-            http.DefaultRequestHeaders.UserAgent.ParseAdd(UserAgent);
-            using var resp = await http.GetAsync(
-                update.Source.PackageUrl, HttpCompletionOption.ResponseHeadersRead, ct)
-                .ConfigureAwait(false);
-
-            if (!resp.IsSuccessStatusCode)
-                throw new InvalidOperationException(
-                    $"The download returned {(int)resp.StatusCode}. The release page may "
-                  + "have moved — try downloading the plugin by hand instead.");
-
-            long total = resp.Content.Headers.ContentLength ?? -1;
-            await using var src = await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
-            await using var dst = File.Create(path);
-
-            var buf = new byte[81920];
-            long done = 0;
-            int read;
-            while ((read = await src.ReadAsync(buf, ct).ConfigureAwait(false)) > 0)
+            try
             {
-                await dst.WriteAsync(buf.AsMemory(0, read), ct).ConfigureAwait(false);
-                done += read;
-                progress?.Report(new Progress(done, total));
+                using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
+                http.DefaultRequestHeaders.UserAgent.ParseAdd(UserAgent);
+                using var resp = await http.GetAsync(
+                    url, HttpCompletionOption.ResponseHeadersRead, ct)
+                    .ConfigureAwait(false);
+
+                if (!resp.IsSuccessStatusCode)
+                {
+                    failure ??= $"The download returned {(int)resp.StatusCode}. The release "
+                              + "page may have moved — try downloading the plugin by hand instead.";
+                    continue;
+                }
+
+                long total = resp.Content.Headers.ContentLength ?? -1;
+                await using (var src = await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false))
+                await using (var dst = File.Create(path))
+                {
+                    var buf = new byte[81920];
+                    long done = 0;
+                    int read;
+                    while ((read = await src.ReadAsync(buf, ct).ConfigureAwait(false)) > 0)
+                    {
+                        await dst.WriteAsync(buf.AsMemory(0, read), ct).ConfigureAwait(false);
+                        done += read;
+                        progress?.Report(new Progress(done, total));
+                    }
+                }
+
+                // The feed said which bytes it meant. Anything else is not the
+                // update that was described, whatever the reason.
+                string actual = Sha256Of(path);
+                if (actual.Equals(update.Sha256, StringComparison.OrdinalIgnoreCase))
+                    return path;
+
+                try { File.Delete(path); } catch { }
+                failure = "The downloaded file does not match the checksum its project "
+                        + "published, so it was discarded. If the release is only minutes "
+                        + "old this is its mirrors catching up — try again shortly. If it "
+                        + "keeps happening, get the plugin from the project's own releases "
+                        + "page instead.";
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (HttpRequestException e)
+            {
+                failure ??= "The download failed: " + e.Message;
             }
         }
 
-        // The feed said which bytes it meant. Anything else is not the update
-        // that was described, whatever the reason.
-        string actual = Sha256Of(path);
-        if (!actual.Equals(update.Sha256, StringComparison.OrdinalIgnoreCase))
-        {
-            try { File.Delete(path); } catch { }
-            throw new InvalidOperationException(
-                "The downloaded file does not match the checksum its project "
-              + "published, so it was discarded. This usually means an interrupted "
-              + "download; if it keeps happening, get the plugin from the project's "
-              + "own releases page instead.");
-        }
-
-        return path;
+        throw new InvalidOperationException(failure ?? "The download failed.");
     }
 
     private static string Sha256Of(string path)
