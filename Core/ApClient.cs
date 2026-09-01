@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
@@ -108,6 +109,19 @@ public sealed class ApClient : IAsyncDisposable
     // Points are earned per check (location_check_points in RoomInfo).
     public int HintPoints { get; private set; }
 
+    // Locations in our world nobody has checked yet, as of right now:
+    // the connect-time missing set minus everything since sent by us or
+    // reported checked by the server. Zero means the world is fully swept —
+    // there is nothing left for a release to release.
+    public int UncheckedCount
+    {
+        get
+        {
+            lock (_checkedLock)
+                return ConnectedMissing.Count(id => !_localChecked.Contains(id));
+        }
+    }
+
     // True while the "DeathLink" tag is active for this connection.
     public bool DeathLinkEnabled { get; private set; }
 
@@ -148,6 +162,13 @@ public sealed class ApClient : IAsyncDisposable
 
     // Plain-text chat / notification decoded from PrintJSON.
     public event Action<string>? PrintMessage;
+
+    // The same decoded text, carrying the PrintJSON "type" ("" when absent).
+    // PrintMessage fires for EVERY line in the room — in a large multiworld
+    // that is mostly other players' item chatter. A consumer that shows lines
+    // to the player needs the type to keep the reply to their own command and
+    // drop the firehose; the type only existed inside the decoder before.
+    public event Action<string, string>? TypedMessage;
 
     // Fires when a Hint PrintJSON is received (type == "Hint").
     // Payload = the plain-text hint string.
@@ -904,9 +925,12 @@ public sealed class ApClient : IAsyncDisposable
                     sb.Append(textEl.GetString());
 
         string text = sb.ToString().Trim();
-        if (text.Length > 0) PrintMessage?.Invoke(text);
-
         string? msgType = el.TryGetProperty("type", out var typeEl) ? typeEl.GetString() : null;
+        if (text.Length > 0)
+        {
+            PrintMessage?.Invoke(text);
+            TypedMessage?.Invoke(text, msgType ?? "");
+        }
 
         // Fire hint-specific events
         if (msgType?.Equals("Hint", StringComparison.OrdinalIgnoreCase) == true &&

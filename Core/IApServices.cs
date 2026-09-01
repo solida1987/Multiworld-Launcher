@@ -70,4 +70,12 @@ public interface IApServices
     // The server decides what it will honour: !release only works when the
     // room's release_mode allows it. Refusals come back as chat.
     Task SendSayAsync(string text);
+
+    // A line from the room, decoded to plain text, with the PrintJSON type
+    // ("" when the packet carried none). This is the whole room's stream --
+    // chat, command replies, goals, releases, but also every item another
+    // player sends anywhere. A game that shows lines to the player must
+    // filter on the type; forwarding everything buries the player's own
+    // command reply under the multiworld's item chatter.
+    event Action<string, string>? ServerMessage;
 }

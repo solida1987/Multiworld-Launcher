@@ -32,12 +32,19 @@ internal sealed class ApServices : IApServices
         _gameId            = gameId;
 
         _ap.LocationInfoReceived += OnLocationInfo;
+        _ap.TypedMessage         += OnTypedMessage;
     }
 
     // Called when the session ends, so the client stops holding this alive.
-    public void Detach() => _ap.LocationInfoReceived -= OnLocationInfo;
+    public void Detach()
+    {
+        _ap.LocationInfoReceived -= OnLocationInfo;
+        _ap.TypedMessage         -= OnTypedMessage;
+    }
 
     private void OnLocationInfo(ApNetworkItem[] items) => LocationsScouted?.Invoke(items);
+
+    private void OnTypedMessage(string text, string type) => ServerMessage?.Invoke(text, type);
 
     // --- Identity ---
 
@@ -89,4 +96,6 @@ internal sealed class ApServices : IApServices
 
     public Task SendSayAsync(string text)
         => string.IsNullOrWhiteSpace(text) ? Task.CompletedTask : _ap.SendSayAsync(text);
+
+    public event Action<string, string>? ServerMessage;
 }

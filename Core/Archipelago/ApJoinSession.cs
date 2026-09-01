@@ -319,7 +319,40 @@ public sealed class ApJoinSession
             Action onGoal = () =>
             {
                 session.Set(Stage.Playing, "Goal complete!");
-                SendStatus(client, ClientStatus.Goal);
+
+                // Read before the sends: after a release the server reports
+                // everything checked, and the NEXT goal announcement (the game
+                // re-sends one per connection) must see zero and stay quiet.
+                int unchecked_ = client.UncheckedCount;
+
+                // One task, awaited in sequence -- NOT one SendStatus plus a
+                // fire-and-forget say. The server only honours !release after
+                // it has processed the goal status; two racing tasks let the
+                // say arrive first and be refused as "you have not finished".
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await client.SetStatusAsync(ClientStatus.Goal).ConfigureAwait(false);
+
+                        // The server auto-releases only in release_mode "auto",
+                        // and only on the goal TRANSITION -- one shot, consumed
+                        // even if nobody was listening. Asking explicitly works
+                        // in every mode except "disabled" once the goal stands,
+                        // so a finished world gets swept no matter the room's
+                        // mode or how the first announcement went.
+                        if (unchecked_ > 0)
+                        {
+                            await client.SendSayAsync("!release").ConfigureAwait(false);
+                            await client.SendSayAsync("!collect").ConfigureAwait(false);
+                        }
+                    }
+                    catch (Exception e)
+                    {
+                        System.Diagnostics.Debug.WriteLine(
+                            "[join] goal/release send failed: " + e.Message);
+                    }
+                });
             };
             Action<int> onExited = _ => session.End("Game closed");
 
@@ -494,6 +527,7 @@ public sealed class ApJoinSession
         {
             _ap = ap;
             _ap.LocationInfoReceived += items => LocationsScouted?.Invoke(items);
+            _ap.TypedMessage += (text, type) => ServerMessage?.Invoke(text, type);
             _ap.ServerCheckedLocations += ids =>
             {
                 lock (_checked) foreach (long id in ids) _checked.Add(id);
@@ -541,6 +575,8 @@ public sealed class ApJoinSession
 
         public Task SendSayAsync(string text)
             => string.IsNullOrWhiteSpace(text) ? Task.CompletedTask : _ap.SendSayAsync(text);
+
+        public event Action<string, string>? ServerMessage;
     }
 
     /// Everything, stopped — the launcher is closing.

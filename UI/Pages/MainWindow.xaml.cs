@@ -8900,7 +8900,29 @@ public partial class MainWindow : Window
         }
 
         _goalReachedThisSession = true;
-        _ = _apClient?.SendStatusUpdateAsync(ApClientStatus.Goal);
+
+        // Status first, then the sweep -- sequentially, on one task. The
+        // server only honours !release once it has processed the goal, and
+        // its own auto-release fires solely on the goal TRANSITION (one shot).
+        // Asking explicitly works in every release_mode except "disabled",
+        // so a finished world gets swept regardless of the room's policy.
+        if (_apClient is { } goalAp)
+        {
+            int unchecked_ = goalAp.UncheckedCount;
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await goalAp.SendStatusUpdateAsync(ApClientStatus.Goal).ConfigureAwait(false);
+                    if (unchecked_ > 0)
+                    {
+                        await goalAp.SendSayAsync("!release").ConfigureAwait(false);
+                        await goalAp.SendSayAsync("!collect").ConfigureAwait(false);
+                    }
+                }
+                catch { /* reconnect story lives in the client */ }
+            });
+        }
     }
 
     // Remove the named AP-bridge handlers from a plugin.

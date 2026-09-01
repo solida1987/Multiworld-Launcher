@@ -21,9 +21,9 @@
     <!-- do that.                                                            -->
     <AssemblyName>Multiworld Launcher</AssemblyName>
     <RootNamespace>LauncherV2</RootNamespace>
-    <Version>3.22.4</Version>
-    <FileVersion>3.22.4.0</FileVersion>
-    <AssemblyVersion>3.22.4.0</AssemblyVersion>
+    <Version>3.22.5</Version>
+    <FileVersion>3.22.5.0</FileVersion>
+    <AssemblyVersion>3.22.5.0</AssemblyVersion>
     <Company>Solida Games</Company>
     <Product>Multiworld Launcher</Product>
     <Copyright>Copyright (c) 2026 Solida Games</Copyright>
