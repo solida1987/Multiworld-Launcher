@@ -103,6 +103,29 @@ public sealed class ApJoinSession
         });
     }
 
+    ///
+    /// The slot's status on its way to the server, without waiting for it.
+    ///
+    /// ⚠ Goal is what marks the slot finished in the room. Without it the
+    /// server never counts the slot as done, so a release_mode of "auto"
+    /// never fires and the remaining locations stay unreleased -- the seed
+    /// looks abandoned no matter what the game shows.
+    ///
+    /// Called on the plugin's thread like SendChecks, for the same reason.
+    ///
+    private static void SendStatus(ApClient client, ClientStatus status)
+    {
+        _ = Task.Run(async () =>
+        {
+            try { await client.SetStatusAsync(status).ConfigureAwait(false); }
+            catch (Exception e)
+            {
+                System.Diagnostics.Debug.WriteLine(
+                    $"[join] status {status} send failed: " + e.Message);
+            }
+        });
+    }
+
     /// host:port this session is connected to. Kept because the map tracker
     /// needs it: PopTracker takes --ap-host and joins the same room, and
     /// nothing else on the session carried the address.
@@ -293,7 +316,11 @@ public sealed class ApJoinSession
                 session.Persist();
                 session.Changed?.Invoke();
             };
-            Action onGoal = () => session.Set(Stage.Playing, "Goal complete!");
+            Action onGoal = () =>
+            {
+                session.Set(Stage.Playing, "Goal complete!");
+                SendStatus(client, ClientStatus.Goal);
+            };
             Action<int> onExited = _ => session.End("Game closed");
 
             plugin.LocationsChecked += onChecked;
@@ -369,6 +396,10 @@ public sealed class ApJoinSession
             catch { /* a tracker that fails must not end the session */ }
 
             session.Set(Stage.Playing, $"Playing — {address}");
+            // The client announces Connected when the socket opens; this is the
+            // moment the slot is actually in a game, and the room's player list
+            // reads the difference.
+            SendStatus(client, ClientStatus.Playing);
             return (session, "Joined.");
         }
         catch (OperationCanceledException)
