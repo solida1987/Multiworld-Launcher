@@ -109,6 +109,16 @@ public sealed class ApClient : IAsyncDisposable
     // Points are earned per check (location_check_points in RoomInfo).
     public int HintPoints { get; private set; }
 
+    // Locations in our world checked as of right now, by anyone's hand:
+    // the connect snapshot, what we sent, and what the server reported live.
+    // The session's figures read THIS — a bridge game's checks arrive only
+    // as server reports, and counting just our own sends showed 0/714 for a
+    // slot the room said had five.
+    public int CheckedCount
+    {
+        get { lock (_checkedLock) return _localChecked.Count; }
+    }
+
     // Locations in our world nobody has checked yet, as of right now:
     // the connect-time missing set minus everything since sent by us or
     // reported checked by the server. Zero means the world is fully swept —

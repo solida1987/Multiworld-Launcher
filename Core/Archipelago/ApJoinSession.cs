@@ -58,8 +58,7 @@ public sealed class ApJoinSession
     /// earlier sitting. ChecksSent counts only what this connection sent, and
     /// showing that against the total would tell a returning player they had
     /// done nothing.
-    public int LocationsDone =>
-        Client is { } c ? Math.Max(c.ConnectedChecked.Count, 0) + ChecksSent : 0;
+    public int LocationsDone => Client is { } c ? c.CheckedCount : 0;
 
     public int ChecksSent { get; private set; }
     public int ItemsReceived { get; private set; }
@@ -298,7 +297,14 @@ public sealed class ApJoinSession
                 // has the table to name them with.
                 plugin.OnCheckedLocations(client.ConnectedChecked.ToArray());
             };
-            client.ServerCheckedLocations += ids => plugin.OnCheckedLocations(ids);
+            client.ServerCheckedLocations += ids =>
+            {
+                plugin.OnCheckedLocations(ids);
+                // A bridge game's checks land exactly here and nowhere else —
+                // the card and the seed panel must move on them.
+                session.Persist();
+                session.Changed?.Invoke();
+            };
             client.DeathLinkReceived += (source, cause) =>
                 _ = plugin.OnDeathLinkReceivedAsync(source, cause);
             // The table is a second round trip the client only makes on
