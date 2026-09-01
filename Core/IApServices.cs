@@ -56,4 +56,18 @@ public interface IApServices
 
     // The player died in-game. Ignored when DeathLink is off.
     void ReportDeath(string? cause);
+
+    // --- Chat ---
+
+    // Send a line to the room as this slot. Chat, but also the server's own
+    // commands: !release, !collect, !remaining, !hint.
+    //
+    // ⚠ Games that expose an in-game console need this to reach the server at
+    // all. OpenTTD's `ap <text>` command existed on both ends -- the game put
+    // the line on the pipe and the launcher could send it -- with nothing
+    // joining them, so every command the player typed was dropped in silence.
+    //
+    // The server decides what it will honour: !release only works when the
+    // room's release_mode allows it. Refusals come back as chat.
+    Task SendSayAsync(string text);
 }

@@ -84,4 +84,9 @@ internal sealed class ApServices : IApServices
         AchievementStore.Instance.IncrementCounter(
             _gameId, AchievementCounters.DeathsShared);
     }
+
+    // --- Chat ---
+
+    public Task SendSayAsync(string text)
+        => string.IsNullOrWhiteSpace(text) ? Task.CompletedTask : _ap.SendSayAsync(text);
 }

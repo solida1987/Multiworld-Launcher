@@ -538,6 +538,9 @@ public sealed class ApJoinSession
             if (!_ap.DeathLinkEnabled) return;
             _ = _ap.SendDeathLinkAsync(string.IsNullOrWhiteSpace(cause) ? "died" : cause);
         }
+
+        public Task SendSayAsync(string text)
+            => string.IsNullOrWhiteSpace(text) ? Task.CompletedTask : _ap.SendSayAsync(text);
     }
 
     /// Everything, stopped — the launcher is closing.
