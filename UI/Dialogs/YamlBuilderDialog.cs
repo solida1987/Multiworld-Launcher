@@ -27,8 +27,16 @@ namespace LauncherV2.UI.Dialogs;
 // ApOptionTemplate), and this only ever reads it.
 public sealed class YamlBuilderDialog : Window
 {
-    private readonly ApTemplate? _template;
-    private readonly string _gameName;      // the AP world name, e.g. "Ocarina of Time"
+    // Not readonly: the dialog can heal itself after opening — install the
+    // world, have the engine write the template, and reload — and the reload
+    // replaces both of these.
+    private ApTemplate? _template;
+    private string _gameName;               // the AP world name, e.g. "Ocarina of Time"
+    private readonly string _displayName;
+    private readonly string? _gameId;       // catalogue id, for the apworld updater
+    private readonly ApEngine.Report? _engine;
+    private ScrollViewer? _scroll;
+    private bool _userTouched;              // any input inside the options area
     private readonly Dictionary<string, string> _values = new(StringComparer.Ordinal);
     private readonly TextBox _slotName;
     private readonly TextBlock _status;
@@ -40,13 +48,18 @@ public sealed class YamlBuilderDialog : Window
     private TextBlock? _filterCount;
 
     /// Open the builder for one game. `apWorldName` is the name Archipelago
-    /// knows it by, which is not always the name on the card.
-    public static void ShowFor(Window? owner, string displayName, string apWorldName)
-        => new YamlBuilderDialog(owner, displayName, apWorldName).ShowDialog();
+    /// knows it by, which is not always the name on the card. `gameId` is the
+    /// catalogue id — with it, the dialog can fetch the world itself.
+    public static void ShowFor(Window? owner, string displayName, string apWorldName,
+                               string? gameId = null)
+        => new YamlBuilderDialog(owner, displayName, apWorldName, gameId).ShowDialog();
 
-    private YamlBuilderDialog(Window? owner, string displayName, string apWorldName)
+    private YamlBuilderDialog(Window? owner, string displayName, string apWorldName,
+                              string? gameId = null)
     {
         _gameName = apWorldName;
+        _displayName = displayName;
+        _gameId = gameId;
 
         Title  = $"Create YAML — {displayName}";
         Width  = 720;
@@ -66,20 +79,12 @@ public sealed class YamlBuilderDialog : Window
         var settings = SettingsStore.Load();
         var engine   = ApEngine.Discover(string.IsNullOrWhiteSpace(settings.ApEnginePath)
                                          ? null : settings.ApEnginePath);
+        _engine = engine;
         if (engine is { Usable: true })
-        {
-            string path = Path.Combine(engine.TemplatesDir, apWorldName + ".yaml");
-            if (File.Exists(path))
-            {
-                try { _template = ApOptionTemplate.ParseFile(path); }
-                catch (Exception) { _template = null; }
-            }
-        }
+            TryLoadTemplate(engine);
 
-        // Defaults first, so a player who changes nothing still gets a
-        // complete, honest YAML rather than an empty one.
-        foreach (var o in _template?.Options ?? Array.Empty<ApOption>())
-            if (!o.IsPlumbing && o.Default != null) _values[o.Key] = o.Default;
+        // (Defaults are seeded by TryLoadTemplate, so a reload after the
+        // dialog heals itself seeds them the same way.)
 
         var root = new Grid { Margin = new Thickness(22, 18, 22, 18) };
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -167,59 +172,26 @@ public sealed class YamlBuilderDialog : Window
         root.Children.Add(head);
 
         // ── options ───────────────────────────────────────────────────────
-        var list = new StackPanel();
-        if (_template == null)
-        {
-            list.Children.Add(NoTemplateNote(displayName, engine, _gameName));
-        }
-        else
-        {
-            // Plando last. It is the most advanced thing a world offers and it
-            // sorts first alphabetically, so the template order put "Plando
-            // Connections" — with a paragraph of format instructions — in front
-            // of every ordinary setting. Nobody's first impression of a game's
-            // options should be its expert feature.
-            var shown = _template.Options
-                .Where(o => !o.IsPlumbing)
-                .OrderBy(o => o.Key.StartsWith("plando", StringComparison.OrdinalIgnoreCase) ? 1 : 0)
-                .ToList();
-
-            if (shown.Count == 0)
-                list.Children.Add(Note($"{displayName} has no options to set — the "
-                                     + "YAML below is all it needs."));
-
-            foreach (var group in shown.Select(o => o.Group).Distinct())
-            {
-                var header = new TextBlock
-                {
-                    Text = group.ToUpperInvariant(),
-                    FontSize = 10,
-                    FontWeight = FontWeights.Bold,
-                    Margin = new Thickness(0, 14, 0, 8),
-                    Foreground = Brush("BrushAccent", "#CCA800"),
-                    Opacity = 0.9,
-                };
-                list.Children.Add(header);
-                _rows.Add((group, header, true));
-
-                foreach (var opt in shown.Where(o => o.Group == group))
-                {
-                    var row = BuildRow(opt);
-                    list.Children.Add(row);
-                    _rows.Add((Pretty(opt.Key) + " " + opt.Key + " "
-                             + opt.Description, row, false));
-                }
-            }
-        }
-
         var scroll = new ScrollViewer
         {
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-            Content = list,
+            Content = BuildOptionsList(),
             Margin = new Thickness(0, 0, 0, 12),
         };
+        // Any input inside the options area means the player has started
+        // filling the form. A background world-update must then leave the UI
+        // alone: rebuilding it would eat their edits, the same way the Join
+        // sweep ate slot names.
+        scroll.PreviewKeyDown   += (_, _) => _userTouched = true;
+        scroll.PreviewMouseDown += (_, _) => _userTouched = true;
+        _scroll = scroll;
         Grid.SetRow(scroll, 1);
         root.Children.Add(scroll);
+
+        // Heal after the window is up, not in the constructor: fetching a
+        // world and asking the engine to write templates takes seconds, and a
+        // dialog that blocks before it exists looks like a hang.
+        Loaded += (_, _) => _ = PrepareAsync();
 
         // ── foot ──────────────────────────────────────────────────────────
         var foot = new StackPanel();
@@ -520,6 +492,268 @@ public sealed class YamlBuilderDialog : Window
         return stack;
     }
 
+    // ------------------------------------------------------- template lookup
+
+    /// Resolve and parse this game's template, adopting the template's OWN
+    /// world name when it differs from what the catalogue said. The saved
+    /// YAML must carry the name the generator answers to — "Starcraft 2" —
+    /// not the retail spelling a store card was built with ("StarCraft II").
+    private void TryLoadTemplate(ApEngine.Report engine)
+    {
+        var hit = ResolveTemplate(engine.TemplatesDir, _gameName);
+        if (hit == null) return;
+        try { _template = ApOptionTemplate.ParseFile(hit.Value.Path); }
+        catch (Exception) { _template = null; return; }
+        _gameName = hit.Value.WorldName;
+
+        // Defaults first, so a player who changes nothing still gets a
+        // complete, honest YAML rather than an empty one. Never over a value
+        // the player has already set.
+        foreach (var o in _template?.Options ?? Array.Empty<ApOption>())
+            if (!o.IsPlumbing && o.Default != null && !_values.ContainsKey(o.Key))
+                _values[o.Key] = o.Default;
+    }
+
+    /// Find the template for a world name, forgivingly.
+    ///
+    /// 1. `<name>.yaml` — the honest case.
+    /// 2. The `game:` line INSIDE each template. Filenames drop characters
+    ///    Windows forbids (a colon), so the file's own name is the authority.
+    /// 3. Folded: case, accents, punctuation and roman numerals normalised,
+    ///    accepted only when exactly ONE template matches. This is what turns
+    ///    a catalogue's "StarCraft II" into the engine's "Starcraft 2" instead
+    ///    of an empty form.
+    private static (string Path, string WorldName)? ResolveTemplate(
+        string templatesDir, string apWorldName)
+    {
+        string direct = Path.Combine(templatesDir, apWorldName + ".yaml");
+        if (File.Exists(direct)) return (direct, apWorldName);
+        if (!Directory.Exists(templatesDir)) return null;
+
+        var all = new List<(string Path, string Name)>();
+        foreach (string f in Directory.EnumerateFiles(templatesDir, "*.yaml"))
+        {
+            string? name = TemplateGameName(f);
+            if (name == null) continue;
+            if (string.Equals(name, apWorldName, StringComparison.OrdinalIgnoreCase))
+                return (f, name);
+            all.Add((f, name));
+        }
+
+        string want = Fold(apWorldName);
+        var near = all.Where(c => Fold(c.Name) == want).ToList();
+        return near.Count == 1 ? (near[0].Path, near[0].Name) : null;
+    }
+
+    /// The world's name as the template itself states it, or null.
+    private static string? TemplateGameName(string path)
+    {
+        try
+        {
+            foreach (string line in File.ReadLines(path))
+            {
+                // Top-level key only — options are indented.
+                if (!line.StartsWith("game:", StringComparison.Ordinal)) continue;
+                string v = line[5..].Trim();
+                if (v.Length >= 2 && (v[0] == '"' || v[0] == '\'') && v[^1] == v[0])
+                {
+                    char q = v[0];
+                    v = v[1..^1];
+                    // YAML escapes a quote by doubling it: 'A Hero''s Tail'
+                    // means A Hero's Tail. Without this, the doubled quote
+                    // would be adopted as the world's name and the generator
+                    // would refuse it.
+                    if (q == '\'') v = v.Replace("''", "'");
+                    else v = v.Replace("\\\"", "\"");
+                }
+                return v.Length > 0 ? v : null;
+            }
+        }
+        catch (IOException) { }
+        return null;
+    }
+
+    /// What a human eye glosses over: case, accents, punctuation — and roman
+    /// numerals, because half this hobby's titles write 2 as II.
+    private static string Fold(string s)
+    {
+        s = s.Normalize(System.Text.NormalizationForm.FormD);
+        var sb = new System.Text.StringBuilder(s.Length);
+        foreach (char c in s)
+            if (System.Globalization.CharUnicodeInfo.GetUnicodeCategory(c)
+                != System.Globalization.UnicodeCategory.NonSpacingMark)
+                sb.Append(char.ToLowerInvariant(c));
+        string low = sb.ToString();
+        low = System.Text.RegularExpressions.Regex.Replace(
+            low, @"\b(viii|vii|vi|ix|iv|iii|ii|x|v|i)\b", m => m.Value switch
+            {
+                "i" => "1", "ii" => "2", "iii" => "3", "iv" => "4", "v" => "5",
+                "vi" => "6", "vii" => "7", "viii" => "8", "ix" => "9", _ => "10",
+            });
+        return System.Text.RegularExpressions.Regex.Replace(low, "[^a-z0-9]+", "");
+    }
+
+    // --------------------------------------------------------- self-healing
+
+    /// Whatever stands between the player and a full option list, fixed in
+    /// order, behind the one button they already pressed:
+    /// no apworld → fetch it; apworld but no template → have the engine write
+    /// them; template present but the world has an update → take it.
+    /// Best-effort throughout — a failure leaves the honest note standing.
+    private async Task PrepareAsync()
+    {
+        if (_engine is not { Usable: true } engine) return;
+
+        try
+        {
+            if (_template == null)
+            {
+                SetStatus("Fetching this game's option list…");
+
+                // The world itself, when the catalogue knows where it lives.
+                if (_gameId != null)
+                {
+                    var st = await ApworldUpdater.CheckAsync(_gameId).ConfigureAwait(true);
+                    if (st.State is ApworldState.Missing or ApworldState.UpdateAvailable)
+                    {
+                        SetStatus("Installing this game's world into the engine…");
+                        await ApworldUpdater.UpdateAsync(_gameId).ConfigureAwait(true);
+                    }
+                }
+
+                SetStatus("Asking Archipelago to write its option templates…");
+                await GenerateTemplatesAsync(engine).ConfigureAwait(true);
+
+                TryLoadTemplate(engine);
+                ReloadOptionsUi();
+                SetStatus(_template != null ? null
+                    : "The option list still could not be produced — the YAML "
+                    + "below works with the game's own defaults.");
+                return;
+            }
+
+            // Template already on screen: quietly take a world update so the
+            // options shown are the options the current world understands.
+            if (_gameId == null) return;
+            var check = await ApworldUpdater.CheckAsync(_gameId).ConfigureAwait(true);
+            if (check.State != ApworldState.UpdateAvailable) return;
+
+            SetStatus("A newer world was published — updating…");
+            string? err = await ApworldUpdater.UpdateAsync(_gameId).ConfigureAwait(true);
+            if (err != null) { SetStatus(null); return; }
+            await GenerateTemplatesAsync(engine).ConfigureAwait(true);
+
+            if (_userTouched)
+            {
+                // Their edits outrank our refresh — same lesson as the Join
+                // sweep that ate slot names mid-word.
+                SetStatus("The world was updated — reopen this to see any new options.");
+                return;
+            }
+            _template = null;
+            TryLoadTemplate(engine);
+            ReloadOptionsUi();
+            SetStatus("Updated to the newest world.");
+        }
+        catch (Exception)
+        {
+            SetStatus(null); // the form still saves a valid defaults YAML
+        }
+    }
+
+    /// Run the engine's own "Generate Template Options" — the only writer of
+    /// Players\Templates — and wait for it.
+    private static async Task GenerateTemplatesAsync(ApEngine.Report engine)
+    {
+        string exe = Path.Combine(engine.Root, "ArchipelagoLauncher.exe");
+        if (!File.Exists(exe)) return;
+        try
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = exe,
+                WorkingDirectory = engine.Root,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+            psi.ArgumentList.Add("Generate Template Options");
+            using var p = System.Diagnostics.Process.Start(psi);
+            if (p == null) return;
+            using var cts = new System.Threading.CancellationTokenSource(
+                TimeSpan.FromSeconds(180));
+            try { await p.WaitForExitAsync(cts.Token).ConfigureAwait(false); }
+            catch (OperationCanceledException)
+            {
+                try { p.Kill(entireProcessTree: true); } catch (Exception) { }
+            }
+        }
+        catch (Exception) { }
+    }
+
+    private void ReloadOptionsUi()
+    {
+        if (_scroll == null) return;
+        _scroll.Content = BuildOptionsList();
+        if (_filterCount != null) ApplyFilter("", _filterCount);
+    }
+
+    private void SetStatus(string? text)
+    {
+        _status.Text = text
+            ?? "Saved as a .yaml file you can send to the host — or drop into "
+             + "Multiworld → New seed to use yourself.";
+    }
+
+    /// The options area, built from whatever `_template` currently is.
+    private StackPanel BuildOptionsList()
+    {
+        _rows.Clear();
+        var list = new StackPanel();
+        if (_template == null)
+        {
+            list.Children.Add(NoTemplateNote(_displayName, _engine, _gameName));
+            return list;
+        }
+
+        // Plando last. It is the most advanced thing a world offers and it
+        // sorts first alphabetically, so the template order put "Plando
+        // Connections" — with a paragraph of format instructions — in front
+        // of every ordinary setting. Nobody's first impression of a game's
+        // options should be its expert feature.
+        var shown = _template.Options
+            .Where(o => !o.IsPlumbing)
+            .OrderBy(o => o.Key.StartsWith("plando", StringComparison.OrdinalIgnoreCase) ? 1 : 0)
+            .ToList();
+
+        if (shown.Count == 0)
+            list.Children.Add(Note($"{_displayName} has no options to set — the "
+                                 + "YAML below is all it needs."));
+
+        foreach (var group in shown.Select(o => o.Group).Distinct())
+        {
+            var header = new TextBlock
+            {
+                Text = group.ToUpperInvariant(),
+                FontSize = 10,
+                FontWeight = FontWeights.Bold,
+                Margin = new Thickness(0, 14, 0, 8),
+                Foreground = Brush("BrushAccent", "#CCA800"),
+                Opacity = 0.9,
+            };
+            list.Children.Add(header);
+            _rows.Add((group, header, true));
+
+            foreach (var opt in shown.Where(o => o.Group == group))
+            {
+                var row = BuildRow(opt);
+                list.Children.Add(row);
+                _rows.Add((Pretty(opt.Key) + " " + opt.Key + " "
+                         + opt.Description, row, false));
+            }
+        }
+        return list;
+    }
+
     private UIElement NoTemplateNote(string displayName, ApEngine.Report? engine,
                                      string apWorldName)
     {
@@ -530,9 +764,13 @@ public sealed class YamlBuilderDialog : Window
         // writes Players\Templates only when its Launcher is asked to, so an
         // installed world with no template is the normal state right after
         // installing, not a missing world.
+        // Both homes count: custom_worlds AND the worlds Archipelago itself
+        // ships (lib/worlds). StarCraft 2 is bundled, and telling its owner
+        // to "install the game" they were looking at was a lie.
         bool worldInstalled = engine is { Usable: true }
-            && engine.CustomWorlds.Any(w =>
-                   string.Equals(w.Game, apWorldName, StringComparison.OrdinalIgnoreCase));
+            && (engine.CustomWorlds.Any(w =>
+                    string.Equals(w.Game, apWorldName, StringComparison.OrdinalIgnoreCase))
+                || ApworldUpdater.BundledGames(engine.Root).Contains(apWorldName));
 
         string why = engine is not { Usable: true }
             ? "London has no usable Archipelago engine yet, and the options come "

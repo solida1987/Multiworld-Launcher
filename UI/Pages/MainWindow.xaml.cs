@@ -2699,7 +2699,8 @@ public partial class MainWindow : Window
                 "Build your Archipelago YAML for this game and save it — "
                 + "no text editor needed",
                 owner => Dialogs.YamlBuilderDialog.ShowFor(
-                             owner, plugin.DisplayName, plugin.ApWorldName),
+                             owner, plugin.DisplayName, plugin.ApWorldName,
+                             plugin.GameId),
                 // You write a YAML BEFORE you own the game — that is exactly
                 // when someone is joining a multiworld a friend generated.
                 NeedsInstall: false));
