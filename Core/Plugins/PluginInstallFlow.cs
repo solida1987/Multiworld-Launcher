@@ -37,6 +37,19 @@ public static class PluginInstallFlow
         if (!PluginConsentDialog.Ask(owner, candidate))
             return new Outcome(false, null, null);          // cancelled: say nothing
 
+        return Install(candidate);
+    }
+
+    ///
+    /// The post-consent half: unpack, record the hash, load, register.
+    /// Reached from AddFromFile (the player just said yes) and from
+    /// AutoApplyAsync (a first-party update, where the launcher's own
+    /// authorship stands in for the dialog).
+    ///
+    private static Outcome Install(PluginCandidate candidate)
+    {
+        var m = candidate.Manifest!;
+
         // Only now does anything reach the disk.
         GameRegistry.UnloadFromDisk(m.GameId);               // replacing an older copy
         string? err = PluginPackage.Install(candidate);
@@ -76,6 +89,83 @@ public static class PluginInstallFlow
         LibraryStore.Add(m.GameId);
 
         return new Outcome(true, $"{m.DisplayName} was added.", loaded);
+    }
+
+    ///
+    /// May this update be applied without asking?
+    ///
+    /// Yes only when every one of these holds:
+    ///   * the plugin is FIRST-PARTY — written by the launcher's own developer,
+    ///     decided by the launcher's own list (PluginProvenance), never by the
+    ///     package. Auto-installing it is the same act of trust as installing
+    ///     a launcher update: the same author's code, from the same releases.
+    ///   * the player already approved this plugin — automatic updates keep a
+    ///     choice current, they never make the choice.
+    /// Everything third-party keeps the two-prompt offer: somebody else's code
+    /// never changes on this machine without the player saying so.
+    ///
+    public static bool MayAutoApply(PluginUpdater.Available update)
+        => (FirstParty.For(update.GameId).IsFirstPartyPlugin
+            || PluginAutoUpdatePolicy.OursByReleaseOwner(update.Source))
+        && PluginTrustStore.Get(update.GameId) != null;
+
+    ///
+    /// Apply a first-party update with no dialogs: download, verify against
+    /// the published checksum, install, record the new hash, reload.
+    ///
+    /// Exists because the yaml dialog, the mission boards and every other
+    /// piece of per-game UI live in the PLUGIN — a player who updates the GAME
+    /// and declines (or never sees) the separate plugin offer keeps last
+    /// month's dialogs forever, and reports "it does not update". Measured on
+    /// Diablo II: game on v3.9.6, Create YAML still the old plugin's.
+    ///
+    /// Never throws; a failed auto-update must degrade to "still on the old
+    /// version", which is exactly the state the player was already in.
+    ///
+    public static async System.Threading.Tasks.Task<Outcome> AutoApplyAsync(
+        PluginUpdater.Available update)
+    {
+        if (!MayAutoApply(update))
+            return new Outcome(false, null, null);
+        string? pkg = null;
+        try
+        {
+            // No ConfigureAwait(false): Install() loads and registers the
+            // plugin, and callers sit on the UI thread — stay there.
+            pkg = await PluginUpdater.DownloadAsync(update, progress: null);
+
+            var candidate = PluginPackage.Inspect(pkg);
+            if (!candidate.IsUsable)
+                return new Outcome(false,
+                    $"{update.DisplayName}: the update package is not usable — "
+                    + candidate.Error, null);
+
+            // The feed and the package must agree about WHICH plugin this is.
+            // A feed that starts naming a different game id must not replace
+            // anything silently, whatever the checksum says.
+            if (!string.Equals(candidate.Manifest!.GameId, update.GameId,
+                               StringComparison.OrdinalIgnoreCase))
+                return new Outcome(false,
+                    $"{update.DisplayName}: the update names a different game "
+                    + $"id (\"{candidate.Manifest.GameId}\") — not applied.", null);
+
+            var outcome = Install(candidate);
+            return outcome.Added
+                ? new Outcome(true,
+                    $"{update.DisplayName} was updated to {update.NewVersion}.",
+                    outcome.Plugin)
+                : outcome;
+        }
+        catch (Exception ex)
+        {
+            return new Outcome(false,
+                $"{update.DisplayName}: the update could not be applied — "
+                + ex.Message, null);
+        }
+        finally
+        {
+            if (pkg != null) try { System.IO.File.Delete(pkg); } catch { }
+        }
     }
 
     ///

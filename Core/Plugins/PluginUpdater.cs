@@ -23,6 +23,11 @@ namespace LauncherV2.Core.Plugins;
 // would make that sentence a lie. So this class checks, downloads on request,
 // and then hands the package to the ordinary "Add plugin" flow -- which asks
 // again, showing the new hash and what the new version now declares it will do.
+//
+// The one exception lives in PluginInstallFlow.MayAutoApply and is not an
+// exception to the sentence above: FIRST-PARTY plugins (the launcher's own
+// developer's, per the launcher's own list) update automatically, and their
+// consent dialog says so at approval time. Everybody else still gets asked.
 public static class PluginUpdater
 {
     /// A newer build, found and not yet fetched.

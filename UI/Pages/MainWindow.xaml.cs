@@ -606,17 +606,89 @@ public partial class MainWindow : Window
         catch { return; }          // an update check must never break start-up
         if (found.Count == 0) return;
 
+        // Back on the UI thread (the await above kept the context). Our own
+        // first-party plugins apply themselves — the per-game UI (yaml dialog,
+        // mission boards) LIVES in the plugin, and an update left waiting
+        // behind a declined modal meant "the game updated but the dialog
+        // didn't" forever. Third-party plugins keep the offer: somebody
+        // else's code still never changes without a yes.
+        var offers = new List<Core.Plugins.PluginUpdater.Available>();
+        bool autoInstalled = false;
+        foreach (var u in found)
+        {
+            if (!Core.Plugins.PluginInstallFlow.MayAutoApply(u))
+            {
+                offers.Add(u);
+                continue;
+            }
+            AppendLog($"[Plugin] Updating {u.DisplayName} "
+                    + $"{u.InstalledVersion} → {u.NewVersion}…");
+            var r = await Core.Plugins.PluginInstallFlow.AutoApplyAsync(u);
+            if (r.Message != null)
+                AppendLog("[Plugin] " + r.Message.Replace(Environment.NewLine, " "));
+            if (r.Added)
+            {
+                autoInstalled = true;
+                ToastService.Show("Plugin updated",
+                    $"{u.DisplayName} {u.InstalledVersion} → {u.NewVersion}.",
+                    ToastKind.Info);
+            }
+        }
+        if (autoInstalled) RebuildGameList();
+        if (offers.Count == 0) return;
+
         await Dispatcher.InvokeAsync(() =>
         {
-            foreach (var u in found)
+            foreach (var u in offers)
                 AppendLog($"[Plugin] Update available: {u.DisplayName} "
                         + $"{u.InstalledVersion} → {u.NewVersion}");
 
             // One at a time, and only after the window is actually up —
             // a modal thrown at a launcher still drawing itself is a modal
             // nobody reads.
-            OfferPluginUpdates(found);
+            OfferPluginUpdates(offers);
         });
+    }
+
+    ///
+    /// Check ONE game's plugin feed right now, and apply (first-party) or
+    /// offer (third-party) whatever it finds. Called after a game update, so
+    /// the plugin's screens keep pace with the game they describe.
+    /// Quiet on "nothing newer" and on any failure — the player asked to
+    /// update the game, not to hear about a feed.
+    ///
+    private async Task OfferOrApplyPluginUpdateAsync(string gameId)
+    {
+        try
+        {
+            var loaded = GameRegistry.LoadedFromDisk.FirstOrDefault(p =>
+                string.Equals(p.Manifest.GameId, gameId, StringComparison.OrdinalIgnoreCase));
+            if (loaded == null) return;
+
+            var update = await Core.Plugins.PluginUpdater.CheckOneAsync(loaded.Manifest);
+            if (update == null) return;
+
+            if (Core.Plugins.PluginInstallFlow.MayAutoApply(update))
+            {
+                AppendLog($"[Plugin] Updating {update.DisplayName} "
+                        + $"{update.InstalledVersion} → {update.NewVersion}…");
+                var r = await Core.Plugins.PluginInstallFlow.AutoApplyAsync(update);
+                if (r.Message != null)
+                    AppendLog("[Plugin] " + r.Message.Replace(Environment.NewLine, " "));
+                if (r.Added)
+                {
+                    ToastService.Show("Plugin updated",
+                        $"{update.DisplayName} {update.InstalledVersion} → {update.NewVersion}.",
+                        ToastKind.Info);
+                    RebuildGameList();
+                }
+            }
+            else
+            {
+                OfferPluginUpdates(new[] { update });
+            }
+        }
+        catch { /* the game update already succeeded; stay quiet */ }
     }
 
     private void OfferPluginUpdates(IReadOnlyList<Core.Plugins.PluginUpdater.Available> found)
@@ -7438,6 +7510,19 @@ public partial class MainWindow : Window
             if (_selectedPlugin != null)
                 RefreshButtons(_selectedPlugin);
         }
+
+        // The game is current — is its PLUGIN? The yaml dialog and every other
+        // per-game screen ship in the plugin, so "I updated the game but
+        // Create YAML is still old" happens exactly here if the plugin only
+        // ever updates at start-up. First-party plugins are applied on the
+        // spot; third-party ones are offered. Runs AFTER the install flow is
+        // completely done with its `plugin` reference (applying an update
+        // reloads the plugin and would leave that reference stale mid-flow),
+        // and never while the game is running — a plugin must not reload
+        // under a live session.
+        if (success && !plugin.IsRunning)
+            await OfferOrApplyPluginUpdateAsync(plugin.GameId);
+
         return success;
     }
 

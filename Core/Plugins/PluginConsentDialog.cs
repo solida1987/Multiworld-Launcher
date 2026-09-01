@@ -98,6 +98,18 @@ internal sealed class PluginConsentDialog : Window
               + "It can read and write files and use the internet.",
                 12, FontWeights.Normal, Fg, new Thickness(0, 8, 0, 0)));
 
+        // Approving a plugin that updates itself includes those future
+        // updates — say so here, where the approval happens, so the automatic
+        // update that later lands is something the player agreed to rather
+        // than something that merely happened. Same test as the behaviour
+        // (PluginInstallFlow), so the sentence and the fact cannot drift.
+        if (PluginAutoUpdatePolicy.WouldAutoUpdate(m))
+            inner.Children.Add(Text(
+                "Updates to this plugin are published by the launcher's own "
+              + "developer and install automatically, verified against their "
+              + "published checksum.",
+                12, FontWeights.Normal, Fg, new Thickness(0, 8, 0, 0)));
+
         box.Child = inner;
         root.Children.Add(box);
 
