@@ -226,8 +226,7 @@ public partial class JoinPanel
 
     private UIElement BuildExternalCard(ExternalSlot ext)
     {
-        var plugin = ext.Game == null ? null : GameRegistry.All.FirstOrDefault(p =>
-            string.Equals(p.ApWorldName, ext.Game, StringComparison.OrdinalIgnoreCase));
+        var plugin = GameRegistry.ByWorldName(ext.Game);
         var session = plugin == null ? null : ApJoinSession.For(plugin);
         bool playing = session is { Current: ApJoinSession.Stage.Playing
                                            or ApJoinSession.Stage.Connecting };

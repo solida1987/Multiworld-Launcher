@@ -573,25 +573,9 @@ public sealed class YamlBuilderDialog : Window
         return null;
     }
 
-    /// What a human eye glosses over: case, accents, punctuation — and roman
-    /// numerals, because half this hobby's titles write 2 as II.
-    private static string Fold(string s)
-    {
-        s = s.Normalize(System.Text.NormalizationForm.FormD);
-        var sb = new System.Text.StringBuilder(s.Length);
-        foreach (char c in s)
-            if (System.Globalization.CharUnicodeInfo.GetUnicodeCategory(c)
-                != System.Globalization.UnicodeCategory.NonSpacingMark)
-                sb.Append(char.ToLowerInvariant(c));
-        string low = sb.ToString();
-        low = System.Text.RegularExpressions.Regex.Replace(
-            low, @"\b(viii|vii|vi|ix|iv|iii|ii|x|v|i)\b", m => m.Value switch
-            {
-                "i" => "1", "ii" => "2", "iii" => "3", "iv" => "4", "v" => "5",
-                "vi" => "6", "vii" => "7", "viii" => "8", "ix" => "9", _ => "10",
-            });
-        return System.Text.RegularExpressions.Regex.Replace(low, "[^a-z0-9]+", "");
-    }
+    /// One fold for the whole launcher — the registry's plugin lookup and
+    /// this template lookup must forgive the same set of drifts.
+    private static string Fold(string s) => GameRegistry.FoldWorldName(s);
 
     // --------------------------------------------------------- self-healing
 

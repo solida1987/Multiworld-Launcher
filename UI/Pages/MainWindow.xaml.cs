@@ -3273,8 +3273,7 @@ public partial class MainWindow : Window
 
         // Route by the apworld name the patch states about itself, not by its
         // file extension: the extension is a convention, `game` is the record.
-        var plugin = GameRegistry.All.FirstOrDefault(p =>
-            string.Equals(p.ApWorldName, game, StringComparison.OrdinalIgnoreCase));
+        var plugin = GameRegistry.ByWorldName(game);
 
         if (plugin == null)
         {
@@ -3585,8 +3584,7 @@ public partial class MainWindow : Window
     // downloads land with the same suffix as a generator's output), or ".zip".
     private static string PatchExtensionFor(string game)
     {
-        var plugin = GameRegistry.All.FirstOrDefault(p =>
-            string.Equals(p.ApWorldName, game, StringComparison.OrdinalIgnoreCase));
+        var plugin = GameRegistry.ByWorldName(game);
         // Known mapping for the integrated game; fall back to a neutral ".appatch".
         return ".appatch";
     }
@@ -3792,7 +3790,8 @@ public partial class MainWindow : Window
         };
         _apClient.DataPackageReceived += (gameKey, data) =>
         {
-            bool own = string.Equals(gameKey, plugin.ApWorldName, StringComparison.OrdinalIgnoreCase);
+            bool own = GameRegistry.FoldWorldName(gameKey)
+                           == GameRegistry.FoldWorldName(plugin.ApWorldName);
             _tracker.OnDataPackage(gameKey, data, own);
             _locationTracker.OnDataPackage(gameKey, data, own);
             // Our package landed → silently scout ALL locations (checked ones
@@ -4075,8 +4074,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        _suggestedPlugin = GameRegistry.All.FirstOrDefault(
-            p => string.Equals(p.ApWorldName, connGame, StringComparison.OrdinalIgnoreCase));
+        _suggestedPlugin = GameRegistry.ByWorldName(connGame);
 
         if (_suggestedPlugin == null ||
             string.Equals(_suggestedPlugin.GameId, _selectedPlugin.GameId, StringComparison.OrdinalIgnoreCase))
@@ -9339,7 +9337,8 @@ public partial class MainWindow : Window
             };
             _apClient.DataPackageReceived += (gameKey, data) =>
             {
-                bool own = string.Equals(gameKey, plugin.ApWorldName, StringComparison.OrdinalIgnoreCase);
+                bool own = GameRegistry.FoldWorldName(gameKey)
+                           == GameRegistry.FoldWorldName(plugin.ApWorldName);
                 _tracker.OnDataPackage(gameKey, data, own);
                 _locationTracker.OnDataPackage(gameKey, data, own);
                 // Scout ALL locations — see the sidebar-connect twin for why.

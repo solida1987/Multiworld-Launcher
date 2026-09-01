@@ -219,8 +219,7 @@ public partial class JoinPanel : System.Windows.Controls.UserControl
 
     private UIElement BuildCard(SeedInfo seed, SeedSlot slot)
     {
-        var plugin = GameRegistry.All.FirstOrDefault(p =>
-            string.Equals(p.ApWorldName, slot.Game, StringComparison.OrdinalIgnoreCase));
+        var plugin = GameRegistry.ByWorldName(slot.Game);
         var session = plugin == null ? null : ApJoinSession.For(plugin);
         bool playing = session is { Current: ApJoinSession.Stage.Playing or ApJoinSession.Stage.Connecting };
 
