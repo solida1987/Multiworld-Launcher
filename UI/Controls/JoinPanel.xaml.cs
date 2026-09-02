@@ -160,7 +160,7 @@ public partial class JoinPanel : System.Windows.Controls.UserControl
     {
         if (_inRefreshCards) return;
         _inRefreshCards = true;
-        try { RefreshCardsCore(); }
+        try { RefreshCardsCore(); RefreshItemFlow(); }
         finally { _inRefreshCards = false; }
     }
 

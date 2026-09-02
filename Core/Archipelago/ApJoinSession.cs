@@ -63,6 +63,14 @@ public sealed class ApJoinSession
     public int ChecksSent { get; private set; }
     public int ItemsReceived { get; private set; }
 
+    /// Every item this session has seen move, with who sent it, who got it
+    /// and where it was found.
+    ///
+    /// The counters above say HOW MANY; this says WHAT. The Join page had the
+    /// numbers and nothing behind them, so a player watching a multiworld
+    /// could see "60 in" and not one word about what any of it was.
+    public ApItemTracker Items { get; } = new();
+
     /// Raised on pool threads; the UI hops itself.
     public event Action? Changed;
 
@@ -268,11 +276,21 @@ public sealed class ApJoinSession
             plugin.OnApServicesAttached(new JoinApServices(client));
             if (client.SlotData is { } sd) plugin.OnSlotData(sd);
 
+            // Who is in this multiworld, so the feed can say "from Marco" and
+            // not "from slot 3".
+            session.Items.OnConnected(client.Slot, client.Players);
+
             string worldName = gameName;
             Dictionary<string, long>? table = null;
             Dictionary<string, long>? itemTable = null;
             client.DataPackageReceived += (gameKey, data) =>
             {
+                // ⚠ Every game's package, not just ours: an item we FOUND
+                // belongs to somebody else's game, and without their names the
+                // feed can only print a number.
+                session.Items.OnDataPackage(
+                    gameKey, data,
+                    string.Equals(gameKey, worldName, StringComparison.OrdinalIgnoreCase));
                 if (!string.Equals(gameKey, worldName, StringComparison.OrdinalIgnoreCase))
                     return;
                 // Extract while the JsonElement is alive -- the client does
@@ -375,6 +393,7 @@ public sealed class ApJoinSession
             client.ItemsReceived += (items, _, _) =>
             {
                 session.ItemsReceived += items.Length;
+                session.Items.RecordItems(items, client.Slot);
                 session.Persist();
                 session.Changed?.Invoke();
             };

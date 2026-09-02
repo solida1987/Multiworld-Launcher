@@ -86,6 +86,53 @@
                     <WrapPanel x:Name="PanelExternal"/>
                 </StackPanel>
 
+                <!--  What actually moved. The cards carry the counts; this
+                      carries the names, so "60 in" stops being a number with
+                      nothing behind it. Hidden until something has moved.  -->
+                <StackPanel x:Name="SectionItemFlow" Visibility="Collapsed" Margin="0,16,0,0">
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                        <TextBlock Text="ITEM FLOW" FontSize="10" FontWeight="Bold"
+                                   Foreground="{StaticResource BrushMuted}" VerticalAlignment="Center"/>
+                        <Border Background="#262C3E" CornerRadius="3" Padding="6,1" Margin="9,0,0,0">
+                            <TextBlock x:Name="TxtItemFlowCount" FontSize="10"
+                                       Foreground="{StaticResource BrushMuted}"/>
+                        </Border>
+                        <ComboBox x:Name="CmbItemFlow" Width="150" Margin="12,0,0,0"
+                                  FontSize="11" SelectedIndex="0"
+                                  SelectionChanged="CmbItemFlow_Changed">
+                            <ComboBoxItem Content="Everything"/>
+                            <ComboBoxItem Content="Received by me"/>
+                            <ComboBoxItem Content="Sent by me"/>
+                        </ComboBox>
+                    </StackPanel>
+                    <Border Background="#141824" CornerRadius="6" BorderBrush="#1E2233"
+                            BorderThickness="1">
+                        <DataGrid x:Name="GridItemFlow" AutoGenerateColumns="False"
+                                  IsReadOnly="True" HeadersVisibility="Column"
+                                  GridLinesVisibility="None" Background="#0D1018"
+                                  RowBackground="#0D1018"
+                                  AlternatingRowBackground="#141720" BorderThickness="0"
+                                  MaxHeight="420" FontSize="11"
+                                  Foreground="{StaticResource BrushText}"
+                                  VerticalScrollBarVisibility="Auto">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Item" Width="2*"
+                                                    Binding="{Binding ItemName}"/>
+                                <DataGridTextColumn Header="Type" Width="60"
+                                                    Binding="{Binding TypeLabel}"/>
+                                <DataGridTextColumn Header="From" Width="*"
+                                                    Binding="{Binding SenderName}"/>
+                                <DataGridTextColumn Header="To" Width="*"
+                                                    Binding="{Binding ReceiverName}"/>
+                                <DataGridTextColumn Header="Found at" Width="2*"
+                                                    Binding="{Binding LocationName}"/>
+                                <DataGridTextColumn Header="Time" Width="70"
+                                                    Binding="{Binding Timestamp, StringFormat=HH:mm:ss}"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </Border>
+                </StackPanel>
+
                 <StackPanel x:Name="PanelJoinEmpty" Margin="0,60,0,0"
                             HorizontalAlignment="Center" MaxWidth="480">
                     <TextBlock Text="Nothing to join yet" FontSize="16" FontWeight="Bold"
