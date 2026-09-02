@@ -56,10 +56,37 @@ public static class PluginUpdater
     /// wait for before you can play.
     public static async Task<IReadOnlyList<Available>> CheckAllAsync(
         IEnumerable<LoadedPlugin> installed, CancellationToken ct = default)
+        => await CheckAsync(installed.Select(p => p.Manifest), ct).ConfigureAwait(false);
+
+    ///
+    /// Check every plugin that is INSTALLED — not merely every plugin that
+    /// loaded.
+    ///
+    /// ⚠⚠ This distinction is the whole point. A plugin only loads if the
+    /// trust store still recognises its files AND its code still fits the
+    /// launcher it is being loaded into. Neither is guaranteed: an old build
+    /// meets a launcher whose plugin interface has moved on, or a file in the
+    /// folder changes and the approval no longer matches. The plugin then
+    /// drops out of the loaded list — which used to be the list this check ran
+    /// over, so the plugin was never offered the very update that would fix
+    /// it. Measured: a launcher on 3.24.4 with the D2 plugin on 1.2.6 sat
+    /// there with an empty library and never once asked the feed, while
+    /// 1.2.12 was published and would have loaded fine.
+    ///
+    /// The manifest is a text file next to the DLL, so it can always be read
+    /// even when nothing in the folder can run. That is what we ask.
+    ///
+    public static async Task<IReadOnlyList<Available>> CheckAllInstalledAsync(
+        CancellationToken ct = default)
+        => await CheckAsync(PluginPackage.Installed().Select(x => x.Manifest), ct)
+                 .ConfigureAwait(false);
+
+    private static async Task<IReadOnlyList<Available>> CheckAsync(
+        IEnumerable<PluginManifest> manifests, CancellationToken ct)
     {
-        var checks = installed
-            .Where(p => p.Manifest.Update != null)
-            .Select(p => CheckOneAsync(p.Manifest, ct))
+        var checks = manifests
+            .Where(m => m.Update != null)
+            .Select(m => CheckOneAsync(m, ct))
             .ToList();
 
         var results = await Task.WhenAll(checks).ConfigureAwait(false);

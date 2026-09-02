@@ -611,8 +611,10 @@ public partial class MainWindow : Window
         IReadOnlyList<Core.Plugins.PluginUpdater.Available> found;
         try
         {
-            found = await Core.Plugins.PluginUpdater.CheckAllAsync(
-                GameRegistry.LoadedFromDisk);
+            // Everything INSTALLED, not everything that loaded. A plugin too
+            // old to load is the one that most needs the update, and asking
+            // only the loaded ones left it stranded with no way back.
+            found = await Core.Plugins.PluginUpdater.CheckAllInstalledAsync();
         }
         catch { return; }          // an update check must never break start-up
         if (found.Count == 0) return;
@@ -2091,6 +2093,12 @@ public partial class MainWindow : Window
                 Color.FromRgb(0xE8, 0xA0, 0x18),
                 "A newer version is available — Play installs it first.");
 
+        // The GAME and the PLUGIN are two separate downloads, and the screens
+        // this page is made of live in the plugin. They can drift apart
+        // silently, so both versions are stated here and a stale plugin gets
+        // a button of its own.
+        ShowPluginVersionBadge(plugin, AddOverviewBadge);
+
         // --- Capability/requirement badges are STATE-AWARE: once everything a
         // game needs is in place, the nagging amber pills collapse into one
         // green "READY TO PLAY" instead of contradicting the installed
@@ -2726,6 +2734,107 @@ public partial class MainWindow : Window
         if (BtnStandalone.IsEnabled)
             BtnStandalone.RaiseEvent(new RoutedEventArgs(
                 System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+    }
+
+    ///
+    /// What the feed said about this plugin, once per launcher run.
+    /// A missing key means "not asked yet"; a null value means "asked, nothing
+    /// newer" — two different things that must not collapse into one, or the
+    /// badge would re-check the network on every redraw of the page.
+    ///
+    private readonly Dictionary<string, Core.Plugins.PluginUpdater.Available?>
+        _pluginUpdateSeen = new(StringComparer.OrdinalIgnoreCase);
+
+    ///
+    /// Say which plugin build is behind this game, and offer the newer one.
+    ///
+    /// A game and its plugin are two separate downloads from two separate
+    /// feeds, and everything this page draws — the YAML form, the trackers,
+    /// the mission boards — comes from the PLUGIN. So "the game is up to date"
+    /// is not the same claim as "what you are looking at is up to date", and
+    /// only one of them was ever on screen. When they drift, the symptom is a
+    /// player insisting an option does not exist while it plainly does on the
+    /// machine of whoever built it.
+    ///
+    /// The offer is optional on purpose: plugins already update themselves at
+    /// start-up, and this is the belt to that pair of braces — something to
+    /// look at when a player is told "you must be on an old version" and wants
+    /// to check for themselves.
+    ///
+    private void ShowPluginVersionBadge(
+        IGamePlugin plugin, Action<string, Color, string?> addBadge)
+    {
+        var installed = Core.Plugins.PluginPackage.Installed()
+            .FirstOrDefault(x => string.Equals(x.Manifest.GameId, plugin.GameId,
+                                               StringComparison.OrdinalIgnoreCase));
+        // Nothing on disk means this game is not a disk plugin at all; there
+        // is no second version to be out of step with.
+        if (installed.Manifest is not { } manifest) return;
+
+        var grey  = Color.FromRgb(0x8A, 0x90, 0xA8);
+        var green = Color.FromRgb(0x22, 0xC5, 0x5E);
+        var amber = Color.FromRgb(0xE8, 0xA0, 0x18);
+
+        if (!_pluginUpdateSeen.TryGetValue(plugin.GameId, out var newer))
+        {
+            // Not asked yet: state what is installed now, and go and find out.
+            addBadge($"PLUGIN {manifest.Version}", grey,
+                     "The launcher-side plugin for this game — it draws this page, "
+                   + "the YAML form and the trackers. Checking for a newer one…");
+            _ = LookUpPluginUpdateAsync(plugin.GameId, manifest);
+            return;
+        }
+
+        if (newer == null)
+        {
+            addBadge($"✓ PLUGIN {manifest.Version}", green,
+                     "This game's plugin is the newest published build.");
+            return;
+        }
+
+        addBadge($"↑ PLUGIN {manifest.Version} → {newer.NewVersion}", amber,
+                 "A newer plugin is published. The screens on this page come from "
+               + "the plugin, so an old one can show old options.");
+
+        var btn = new Button
+        {
+            Content = $"⬇  Update plugin to {newer.NewVersion}",
+            FontSize = 10,
+            Padding  = new Thickness(8, 2, 8, 2),
+            Margin   = new Thickness(2, 0, 0, 0),
+            Cursor   = System.Windows.Input.Cursors.Hand,
+            ToolTip  = "Download and install the newest plugin for this game. "
+                     + "The game files themselves are not touched.",
+        };
+        btn.Click += (_, _) =>
+        {
+            var r = Core.Plugins.PluginInstallFlow.OfferUpdate(this, newer);
+            if (r.Message != null) AppendLog("[Plugin] " + r.Message.Replace(Environment.NewLine, " "));
+            if (r.Added)
+            {
+                // It is current now, whatever the cache remembers.
+                _pluginUpdateSeen[plugin.GameId] = null;
+                RebuildGameList();
+                RefreshOverview(plugin);
+            }
+        };
+        OverviewBadgesPanel.Children.Add(btn);
+    }
+
+    /// Ask this one plugin's feed, remember the answer, and redraw if the
+    /// player is still looking at the same game. Silent on failure: a feed we
+    /// could not reach is not something to interrupt anybody about.
+    private async Task LookUpPluginUpdateAsync(
+        string gameId, Core.Plugins.PluginManifest manifest)
+    {
+        Core.Plugins.PluginUpdater.Available? found = null;
+        try { found = await Core.Plugins.PluginUpdater.CheckOneAsync(manifest); }
+        catch (Exception) { return; }   // leave it unasked; next redraw retries
+
+        _pluginUpdateSeen[gameId] = found;
+        if (_selectedPlugin is { } sel
+            && string.Equals(sel.GameId, gameId, StringComparison.OrdinalIgnoreCase))
+            RefreshOverview(sel);
     }
 
     // Opt-in "Update available" button — downloads + installs the newest
