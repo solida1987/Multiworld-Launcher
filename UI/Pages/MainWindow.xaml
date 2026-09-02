@@ -226,6 +226,18 @@
                             FontSize="11"
                             ToolTip="Fetch the newest version of every AP world in the catalogue into your generator — asks first"
                             Click="BtnApworldSync_Click"/>
+                    <!-- Templates are DERIVED from the worlds installed at
+                         the moment they were written, so they go stale in
+                         silence: a stale one still draws a form, just the
+                         wrong one. This throws the whole set away and has
+                         Archipelago write them again. -->
+                    <Button x:Name="BtnYamlRefresh"
+                            Content="Update YAML forms"
+                            Style="{StaticResource BtnSecondaryStyle}"
+                            Padding="12,4" Margin="0,0,6,0"
+                            FontSize="11"
+                            ToolTip="Throw away every generated option template and have Archipelago write them all again, so Create YAML shows what the worlds actually offer"
+                            Click="BtnYamlRefresh_Click"/>
                     <Button x:Name="BtnModeStreamers"
                             Content="Streamers"
                             Style="{StaticResource BtnSecondaryStyle}"

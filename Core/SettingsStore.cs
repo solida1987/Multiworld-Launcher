@@ -99,6 +99,14 @@ public sealed class LauncherSettings
     [JsonPropertyName("ap_engine_path")]
     public string ApEnginePath { get; set; } = string.Empty;
 
+    // What the option templates were last built from: the launcher version
+    // plus the worlds that were installed. Templates are DERIVED, and a stale
+    // one still draws a form -- just yesterday's. Comparing this on start-up
+    // is how the launcher notices on its own, instead of a player noticing
+    // that a game offers options it no longer has.
+    [JsonPropertyName("templates_stamp")]
+    public string TemplatesStamp { get; set; } = string.Empty;
+
     // Launch Ship of Harkinian fullscreen.
     // CVar into the install's own shipofharkinian.json before each launch
     // (the JSON CVar store next to soh.exe).

@@ -185,4 +185,87 @@ public static class ApWorldProvisioner
         => engine is { Usable: true }
            && apWorldName.Length > 0
            && File.Exists(Path.Combine(engine.TemplatesDir, apWorldName + ".yaml"));
+
+    // ───────────────────────────── full refresh ────────────────────────────
+
+    public sealed record Refresh(bool Ok, int Removed, int Written, string? Note);
+
+    ///
+    /// Throw every generated template away and let Archipelago write them all
+    /// again.
+    ///
+    /// Rebuilding alone only OVERWRITES: a template for a world that was
+    /// renamed, removed, or that now fails to load simply stays behind, and
+    /// the Create YAML form keeps drawing yesterday's options from it. That is
+    /// how a game ends up showing six shuffles when the world has four.
+    ///
+    /// ⚠ Only the .yaml files sitting directly in Templates. The folder also
+    /// holds `Presets\`, 169 curated starting points that Archipelago ships
+    /// and NOTHING regenerates — deleting those would destroy work no button
+    /// can bring back. So: no recursion, no other extensions.
+    ///
+    public static async Task<Refresh> RefreshTemplatesAsync(
+        ApEngine.Report? engine, CancellationToken ct = default)
+    {
+        if (engine is not { Usable: true, HasLauncher: true })
+            return new Refresh(false, 0, 0, "no Archipelago engine is set up yet");
+
+        string dir = engine.TemplatesDir;
+        int removed = 0;
+        try
+        {
+            if (Directory.Exists(dir))
+                foreach (string f in Directory.EnumerateFiles(dir, "*.yaml",
+                                                              SearchOption.TopDirectoryOnly))
+                {
+                    try { File.Delete(f); removed++; }
+                    catch (IOException) { /* open in an editor: leave it, it gets overwritten */ }
+                    catch (UnauthorizedAccessException) { }
+                }
+        }
+        catch (Exception) { /* an unreadable folder is one the rebuild will fill */ }
+
+        bool ok = await RebuildTemplatesAsync(engine, ct).ConfigureAwait(false);
+        int written = 0;
+        try
+        {
+            if (Directory.Exists(dir))
+                written = Directory.GetFiles(dir, "*.yaml", SearchOption.TopDirectoryOnly).Length;
+        }
+        catch (Exception) { }
+
+        // Wiping and then failing to rebuild would leave every game without a
+        // form. Say so plainly rather than reporting a clean number.
+        if (!ok && written == 0)
+            return new Refresh(false, removed, 0,
+                "Archipelago did not finish writing the templates — nothing to draw forms from");
+        return new Refresh(ok, removed, written, null);
+    }
+
+    ///
+    /// What the templates were built from, as one short string.
+    ///
+    /// Templates are DERIVED: from the launcher that asked for them and from
+    /// the worlds installed at that moment. When either moves, they are stale
+    /// — which is invisible, because a stale template still draws a form.
+    /// Comparing this against the stamp from last time is how the staleness
+    /// becomes something the launcher can notice on its own.
+    ///
+    public static string Fingerprint(ApEngine.Report? engine, string launcherVersion)
+    {
+        var sb = new System.Text.StringBuilder(launcherVersion);
+        try
+        {
+            if (engine is { Usable: true } && Directory.Exists(engine.CustomWorldsDir))
+                foreach (string f in Directory.GetFiles(engine.CustomWorldsDir, "*.apworld")
+                                              .OrderBy(x => x, StringComparer.OrdinalIgnoreCase))
+                {
+                    var fi = new FileInfo(f);
+                    sb.Append('|').Append(fi.Name).Append(':').Append(fi.Length)
+                      .Append(':').Append(fi.LastWriteTimeUtc.Ticks);
+                }
+        }
+        catch (Exception) { /* a fingerprint we cannot take is one that differs */ }
+        return sb.ToString();
+    }
 }

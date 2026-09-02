@@ -394,6 +394,13 @@ public partial class MainWindow : Window
         RefreshTrackerSwitch();
         _ = RefreshApworldRailAsync();
 
+        // Two things that go wrong on OTHER people's machines and never on the
+        // one a fix is written on: a world whose file name Python cannot
+        // import (which stops the server dead, for every game), and option
+        // templates left over from a launcher or a world that has since moved.
+        RepairApworldNames();
+        EnsureTemplatesFresh();
+
         _ = Dispatcher.BeginInvoke(new Action(async () => await LoadCommunityCardAsync()),
                                    System.Windows.Threading.DispatcherPriority.Background);
 
