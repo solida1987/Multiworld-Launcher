@@ -617,6 +617,13 @@ public partial class MainWindow : Window
             found = await Core.Plugins.PluginUpdater.CheckAllInstalledAsync();
         }
         catch { return; }          // an update check must never break start-up
+
+        // ⚠ Before the early return below, not after it. A machine whose only
+        // out-of-date plugin is one that cannot be asked has NOTHING in
+        // `found` — which is exactly the machine this repair exists for, and
+        // putting the call further down meant it never ran on it.
+        await RepairFeedlessPluginsAsync();
+
         if (found.Count == 0) return;
 
         // Back on the UI thread (the await above kept the context). Our own
@@ -661,6 +668,56 @@ public partial class MainWindow : Window
             // nobody reads.
             OfferPluginUpdates(offers);
         });
+    }
+
+    ///
+    /// Put right the plugins that carry no address to check against.
+    ///
+    /// These are builds from before the update system existed. Nothing about
+    /// them is broken except that they cannot be asked, so they sat at
+    /// whatever version they were installed at while every later release went
+    /// past them — a player on Diablo II 1.1.0 while 1.2.12 was published, and
+    /// no button anywhere could have changed it.
+    ///
+    /// Costs one small download per such plugin, and only while one is still
+    /// there: the package it installs carries a modern manifest, so the next
+    /// start-up finds an address and this never runs for that game again.
+    ///
+    private async Task RepairFeedlessPluginsAsync()
+    {
+        var stale = Core.Plugins.LegacyPluginRepair.WithoutFeed();
+        if (stale.Count == 0) return;
+
+        Core.Plugins.StoreIndex? index;
+        try { index = await Core.Plugins.StoreCatalog.FetchAsync(); }
+        catch (Exception) { return; }      // offline is not something to report
+        if (index is not { Games.Length: > 0 }) return;
+
+        bool any = false;
+        foreach (var manifest in stale)
+        {
+            var c = await Core.Plugins.LegacyPluginRepair.FindNewerAsync(manifest, index);
+            if (c == null) continue;
+
+            AppendLog($"[Plugin] {c.DisplayName} {c.InstalledVersion} is older than the "
+                    + $"update system and cannot check itself — the catalogue has "
+                    + $"{c.NewVersion}.");
+
+            // Ours repairs itself; anybody else's is offered like any update.
+            var r = Core.Plugins.PluginInstallFlow.ApplyRepair(this, c);
+            if (r.Added)
+            {
+                any = true;
+                AppendLog($"[Plugin] {c.DisplayName} repaired: {c.InstalledVersion} → {c.NewVersion}.");
+                ToastService.Show("Plugin updated",
+                    $"{c.DisplayName} {c.InstalledVersion} → {c.NewVersion}.", ToastKind.Info);
+            }
+            else if (r.Message != null)
+            {
+                AppendLog("[Plugin] " + r.Message.Replace(Environment.NewLine, " "));
+            }
+        }
+        if (any) RebuildGameList();
     }
 
     ///
@@ -2774,6 +2831,20 @@ public partial class MainWindow : Window
         var grey  = Color.FromRgb(0x8A, 0x90, 0xA8);
         var green = Color.FromRgb(0x22, 0xC5, 0x5E);
         var amber = Color.FromRgb(0xE8, 0xA0, 0x18);
+
+        // ⚠⚠ A plugin from before update feeds existed carries no address to
+        // ask. That is not "up to date" — it is "cannot be asked", and the two
+        // must never wear the same tick. A player was shown a green ✓ on
+        // 1.1.0 while 1.2.12 was published, which is worse than saying nothing.
+        if (!Core.Plugins.PluginUpdater.HasFeed(manifest))
+        {
+            addBadge($"⚠ PLUGIN {manifest.Version} · CANNOT CHECK", amber,
+                     "This plugin is older than the update system and carries no "
+                   + "address to check against, so London cannot tell whether it is "
+                   + "current. Reinstall it from the Plugin Library to fix that for "
+                   + "good.");
+            return;
+        }
 
         if (!_pluginUpdateSeen.TryGetValue(plugin.GameId, out var newer))
         {

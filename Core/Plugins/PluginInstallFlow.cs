@@ -41,6 +41,35 @@ public static class PluginInstallFlow
     }
 
     ///
+    /// Put right a plugin that predates update feeds.
+    ///
+    /// Same rule as an ordinary update, reached a different way: London could
+    /// not ask this plugin's own address because it has none, so the catalogue
+    /// answered instead. Ours is repaired without a dialog — the per-game
+    /// screens live in the plugin, and a repair left waiting behind a modal is
+    /// the state the player was already stuck in. Anybody else's is offered.
+    ///
+    public static Outcome ApplyRepair(Window? owner, LegacyPluginRepair.Candidate c)
+    {
+        var candidate = PluginPackage.Inspect(c.PackagePath);
+        if (!candidate.IsUsable)
+            return new Outcome(false,
+                $"{c.DisplayName}: the published package is not usable — {candidate.Error}",
+                null);
+
+        // The package must be the game it claims to repair.
+        if (!string.Equals(candidate.Manifest!.GameId, c.GameId,
+                           StringComparison.OrdinalIgnoreCase))
+            return new Outcome(false,
+                $"{c.DisplayName}: the catalogue package names a different game id "
+              + $"(\"{candidate.Manifest.GameId}\") — not applied.", null);
+
+        return LegacyPluginRepair.MayAutoApply(c)
+            ? Install(candidate)
+            : AddFromFile(owner, c.PackagePath);
+    }
+
+    ///
     /// The post-consent half: unpack, record the hash, load, register.
     /// Reached from AddFromFile (the player just said yes) and from
     /// AutoApplyAsync (a first-party update, where the launcher's own

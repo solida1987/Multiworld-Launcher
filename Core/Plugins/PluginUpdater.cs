@@ -96,6 +96,18 @@ public static class PluginUpdater
     /// Check one. Null means "no newer build", "no feed", or "could not tell" --
     /// three different things that all mean the same to the player: nothing to
     /// do right now.
+    ///
+    /// Whether this plugin can be asked at all.
+    ///
+    /// ⚠⚠ "Nothing newer" and "there is nobody to ask" are not the same
+    /// answer, and collapsing them is how a player was shown a green tick on
+    /// plugin 1.1.0 while 1.2.12 was published. Plugins built before update
+    /// feeds existed carry no `update` block, so the check skipped them in
+    /// silence — and anything that reports on the check has to be able to tell
+    /// the two apart.
+    ///
+    public static bool HasFeed(PluginManifest m) => m.Update != null;
+
     public static async Task<Available?> CheckOneAsync(
         PluginManifest m, CancellationToken ct = default)
     {

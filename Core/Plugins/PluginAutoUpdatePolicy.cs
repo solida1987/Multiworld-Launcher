@@ -42,6 +42,12 @@ public static class PluginAutoUpdatePolicy
     public static bool OursByReleaseOwner(PluginUpdateSource src)
         => UnderReleaseOwner(src.VersionUrl) && UnderReleaseOwner(src.PackageUrl);
 
+    /// Same question about a single address — for a plugin that carries no
+    /// update block of its own, where the only thing we can judge is the
+    /// catalogue address the package actually came from.
+    public static bool OursByAddress(string? url)
+        => url is { Length: > 0 } && UnderReleaseOwner(url);
+
     private static bool UnderReleaseOwner(string url)
         => Uri.TryCreate(url, UriKind.Absolute, out var u)
         && u.Scheme == Uri.UriSchemeHttps
