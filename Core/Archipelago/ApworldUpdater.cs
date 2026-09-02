@@ -364,16 +364,22 @@ public static class ApworldUpdater
             File.Move(part, dest, overwrite: true);
 
             // An author who renamed the asset leaves the old file behind, and
-            // Archipelago would load BOTH copies of the same world.
-            // ⚠ This now also cleans up the published name when it differed
-            // from the module name — otherwise renaming to the importable form
-            // would leave the broken original sitting beside it.
-            var old = ApworldRecord.Get(gameId);
-            foreach (string stale in new[] { old?.Asset, entry.Asset })
+            // Archipelago would load BOTH copies of the same world. London
+            // clears that up — but ONLY the copy London itself put there.
+            //
+            // ⚠ The published asset name is NOT ours to delete. A file sitting
+            // in the player's folder under that name may be their own copy,
+            // put there by hand or by some other tool, and deleting it because
+            // we happen to be installing the same game is us throwing away
+            // somebody else's file without asking. That is what ApworldDoctor
+            // exists for: it notices the broken name, explains it, and offers.
+            //
+            // ApworldRecord is London's own bookkeeping of what London wrote,
+            // so it is the only safe answer to "did we put this here?".
+            if (ApworldDoctor.OurStaleCopy(ApworldRecord.Get(gameId)?.Asset, fileName)
+                is { } ours)
             {
-                if (stale is not { Length: > 0 }) continue;
-                if (string.Equals(stale, fileName, StringComparison.OrdinalIgnoreCase)) continue;
-                try { File.Delete(Path.Combine(worlds, stale)); }
+                try { File.Delete(Path.Combine(worlds, ours)); }
                 catch (Exception) { /* leaving it is not worth failing over */ }
             }
 
@@ -504,70 +510,4 @@ public static class ApworldUpdater
 
     private static string Fold(string s)
         => new(s.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
-
-    ///
-    /// Rename worlds already on disk whose file name Python cannot import.
-    ///
-    /// ⚠⚠ This is the half a code fix cannot reach. Downloads are named from
-    /// the module inside the zip now, but a file that arrived BEFORE that
-    /// keeps the name it came with — and one bad name takes the whole engine
-    /// down, not just its own world:
-    ///
-    ///     cyberpunk2077-0.7.1.apworld
-    ///       -> ModuleNotFoundError: No module named 'worlds.cyberpunk2077-0'
-    ///       -> ArchipelagoServer.exe will not start AT ALL
-    ///
-    /// Measured on a real install 2026-09-02: the server refused to host any
-    /// seed, for any game, because of one file. Fixing it in the code that
-    /// writes new files leaves everybody who already has the old one stuck,
-    /// which is exactly the shape of bug that only ever happens to other
-    /// people.
-    ///
-    /// Only files whose stem is NOT a valid module name are touched, and only
-    /// when the zip itself says what the name should be. Returns what was
-    /// repaired, for the log.
-    ///
-    public static IReadOnlyList<string> RepairImportableNames(string? customWorldsDir)
-    {
-        var fixedUp = new List<string>();
-        if (string.IsNullOrWhiteSpace(customWorldsDir) || !Directory.Exists(customWorldsDir))
-            return fixedUp;
-
-        static bool Importable(string stem) =>
-            stem.Length > 0
-            && !char.IsDigit(stem[0])
-            && stem.All(c => char.IsLetterOrDigit(c) || c == '_');
-
-        foreach (string path in Directory.GetFiles(customWorldsDir, "*.apworld"))
-        {
-            string stem = Path.GetFileNameWithoutExtension(path);
-            if (Importable(stem)) continue;
-
-            string? mod;
-            try { mod = ModuleNameInside(File.ReadAllBytes(path)); }
-            catch (Exception) { continue; }
-            if (mod is not { Length: > 0 } || !Importable(mod)) continue;
-
-            string dest = Path.Combine(customWorldsDir, mod + ".apworld");
-            try
-            {
-                // A correctly named copy already there means this one is a
-                // duplicate under a broken name: Archipelago would load the
-                // world twice. Remove it rather than overwrite the good file.
-                if (File.Exists(dest))
-                {
-                    if (!string.Equals(dest, path, StringComparison.OrdinalIgnoreCase))
-                    {
-                        File.Delete(path);
-                        fixedUp.Add($"{stem}.apworld (duplicate of {mod}.apworld) removed");
-                    }
-                    continue;
-                }
-                File.Move(path, dest);
-                fixedUp.Add($"{stem}.apworld -> {mod}.apworld");
-            }
-            catch (Exception) { /* a file we cannot rename stays as it was */ }
-        }
-        return fixedUp;
-    }
 }

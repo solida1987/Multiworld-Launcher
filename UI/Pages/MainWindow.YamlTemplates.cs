@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
 using LauncherV2.Core;
@@ -150,14 +151,17 @@ public partial class MainWindow
     }
 
     ///
-    /// Rename any world on disk whose file name Archipelago cannot import.
+    /// Offer to fix a world London can see is broken — and offer only.
     ///
-    /// One such file stops ArchipelagoServer from starting at all — not that
-    /// world, the whole engine — so this runs before anything asks the engine
-    /// to do something. Silent when there is nothing to repair, which is the
-    /// normal case.
+    /// ⚠ Somebody else's world is not ours to mend uninvited. London looks,
+    /// says what is wrong and what it would do, and does nothing at all
+    /// unless the player says yes. An answer is remembered against the exact
+    /// file, so a no is honoured for that copy and a version the player
+    /// installs later gets looked at again instead of inheriting it.
     ///
-    private void RepairApworldNames()
+    /// Silent when nothing is wrong, which is the normal case.
+    ///
+    private void OfferApworldFixes()
     {
         _ = Task.Run(() =>
         {
@@ -165,17 +169,39 @@ public partial class MainWindow
             {
                 var engine = TemplateEngine();
                 if (engine is not { Usable: true }) return;
-                var fixedUp = ApworldUpdater.RepairImportableNames(engine.CustomWorldsDir);
-                if (fixedUp.Count == 0) return;
+
+                var all = ApworldDoctor.Scan(engine.CustomWorldsDir);
+                if (all.Count == 0) return;
+
+                var answers = SettingsStore.Load().ApworldFixAnswers;
+                var unanswered = all.Where(i => !answers.ContainsKey(i.Identity)).ToList();
+
                 Dispatcher.BeginInvoke(() =>
                 {
-                    AppendLog($"[AP worlds] Repaired {fixedUp.Count} world file name(s) "
-                            + "Archipelago could not import — the server would not "
-                            + "have started with them there:");
-                    foreach (string line in fixedUp) AppendLog("[AP worlds]   " + line);
+                    // Said out loud whether or not we ask: the player should be
+                    // able to see the problem in the log even after declining.
+                    foreach (var i in all)
+                        AppendLog($"[AP worlds] {i.FileName}: {i.Problem} {i.Consequence}");
+                    if (unanswered.Count == 0) return;
+
+                    var (accepted, offered) = UI.Dialogs.ApworldFixDialog.Ask(this, unanswered);
+
+                    var s = SettingsStore.Load();
+                    foreach (var i in offered)
+                        s.ApworldFixAnswers[i.Identity] =
+                            accepted.Any(a => a.Identity == i.Identity);
+                    SettingsStore.Save(s);
+
+                    foreach (var i in accepted)
+                    {
+                        var r = ApworldDoctor.Apply(i);
+                        AppendLog("[AP worlds] " + r.Note);
+                    }
+                    if (accepted.Count == 0)
+                        AppendLog("[AP worlds] Left alone — you said no. Nothing was changed.");
                 });
             }
-            catch (Exception) { }
+            catch (Exception) { /* a scan that fails changes nothing */ }
         });
     }
 

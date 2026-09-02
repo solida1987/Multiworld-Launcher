@@ -394,11 +394,12 @@ public partial class MainWindow : Window
         RefreshTrackerSwitch();
         _ = RefreshApworldRailAsync();
 
-        // Two things that go wrong on OTHER people's machines and never on the
-        // one a fix is written on: a world whose file name Python cannot
-        // import (which stops the server dead, for every game), and option
-        // templates left over from a launcher or a world that has since moved.
-        RepairApworldNames();
+        // Somebody else's world that is broken is not ours to quietly mend —
+        // it is theirs, and the repair is an OFFER. This only looks, and only
+        // speaks when there is something to say.
+        OfferApworldFixes();
+        // Templates, by contrast, are derived data London asked Archipelago to
+        // write. Refreshing those is housekeeping, not interference.
         EnsureTemplatesFresh();
 
         _ = Dispatcher.BeginInvoke(new Action(async () => await LoadCommunityCardAsync()),

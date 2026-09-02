@@ -107,6 +107,16 @@ public sealed class LauncherSettings
     [JsonPropertyName("templates_stamp")]
     public string TemplatesStamp { get; set; } = string.Empty;
 
+    // Answers to "may London fix this world for you?", keyed on the EXACT
+    // file — name, size and timestamp.
+    //
+    // ⚠ Deliberately not keyed on the world's name. These are other people's
+    // worlds; a no means no for THAT copy, and a version the player installs
+    // later is a different file that deserves to be looked at again rather
+    // than silently inheriting an old answer either way.
+    [JsonPropertyName("apworld_fix_answers")]
+    public Dictionary<string, bool> ApworldFixAnswers { get; set; } = new();
+
     // Launch Ship of Harkinian fullscreen.
     // CVar into the install's own shipofharkinian.json before each launch
     // (the JSON CVar store next to soh.exe).
