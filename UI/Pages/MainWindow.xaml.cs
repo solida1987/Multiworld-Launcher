@@ -7410,7 +7410,8 @@ public partial class MainWindow : Window
                     _ = Task.Run(async () =>
                     {
                         string? err = await Core.Trackers.PopTrackerService
-                                                .SetUpAsync(tkEntry);
+                                                .SetUpAsync(tkEntry, null,
+                                                            owner.BuildTrackerArtworkAsync);
                         Dispatcher.BeginInvoke(() =>
                         {
                             AppendLog($"[{owner.DisplayName}] " + (err ??

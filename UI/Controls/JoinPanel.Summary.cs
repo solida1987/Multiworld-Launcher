@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Windows;
@@ -360,7 +360,9 @@ public partial class JoinPanel
                 b.Content = m.Length > 30 ? m[..30] + "…" : m);
             try
             {
-                b.Content = await PopTrackerService.OpenAsync(entry, progress, host, slot, null);
+                b.Content = await PopTrackerService.OpenAsync(
+                    entry, progress, host, slot, null,
+                    plugin.BuildTrackerArtworkAsync);
             }
             finally
             {

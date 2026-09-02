@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
@@ -146,7 +146,7 @@ public partial class MainWindow
             string.Equals(s.Plugin.GameId, plugin.GameId, StringComparison.OrdinalIgnoreCase));
 
         await OpenTrackerAsync(entry, BtnOverviewTracker,
-                               live?.ServerAddress, live?.SlotName, null);
+                               live?.ServerAddress, live?.SlotName, null, plugin);
     }
 
     // ------------------------------------------------------- the switch
@@ -198,7 +198,8 @@ public partial class MainWindow
     /// tracker is offered from two places and two copies would drift. This owns
     /// only the label and the log line.
     internal async Task OpenTrackerAsync(TrackerEntry entry, Button? button,
-                                         string? host, string? slot, string? password)
+                                         string? host, string? slot, string? password,
+                                         IGamePlugin? plugin = null)
     {
         if (button != null) button.IsEnabled = false;
 
@@ -210,8 +211,12 @@ public partial class MainWindow
 
         try
         {
+            // A method group cannot be null-conditioned, so the null case is
+            // spelled out.
+            Func<string, System.Threading.CancellationToken, Task<int>>? build =
+                plugin == null ? null : plugin.BuildTrackerArtworkAsync;
             Say(await PopTrackerService.OpenAsync(entry, new Progress<string>(Say),
-                                                  host, slot, password));
+                                                  host, slot, password, build));
         }
         finally
         {

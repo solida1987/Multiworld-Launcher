@@ -368,6 +368,11 @@ public sealed class SafePluginProxy : IGamePlugin
     public Task<int> RepairMissingCriticalFilesAsync(IProgress<(int Pct, string Msg)> progress)
         => GetAsync(() => _inner.RepairMissingCriticalFilesAsync(progress), 0);
 
+    // 0 = "this game's pack ships complete", which is the honest default for
+    // every game that does not build its artwork locally.
+    public Task<int> BuildTrackerArtworkAsync(string packDir, CancellationToken ct = default)
+        => GetAsync(() => _inner.BuildTrackerArtworkAsync(packDir, ct), 0);
+
     // false = "not an antivirus problem", so the launcher shows its own error
     // rather than swallowing one the plugin never handled.
     public Task<bool> TryHandleAntivirusBlockAsync(Window owner, Exception failure)

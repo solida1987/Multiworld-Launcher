@@ -437,6 +437,23 @@ public interface IGamePlugin
     Task<int> RepairMissingCriticalFilesAsync(IProgress<(int Pct, string Msg)> progress)
         => Task.FromResult(0);
 
+    // --- Map tracker artwork ---
+
+    // Build this game's tracker pictures here, from the player's own copy.
+    //
+    // A tracker pack for one of OUR games cannot ship the game's own sprites —
+    // those belong to its publisher. So the pack carries a recipe saying which
+    // sprite goes where, and the picture is made on this machine. Same trade as
+    // cover art and emulators: we supply the machinery, the player supplies the
+    // content, and nothing copyrighted is distributed.
+    //
+    // Called after the pack is installed, and again before it opens, so a pack
+    // that arrived before the game still fills in. Must be cheap when there is
+    // nothing to do. Returns how many pictures were made; 0 for a game whose
+    // pack ships complete, which is most of them.
+    Task<int> BuildTrackerArtworkAsync(string packDir, CancellationToken ct = default)
+        => Task.FromResult(0);
+
     // --- Antivirus ---
 
     // A launch failed and looks like antivirus. True = the game handled it

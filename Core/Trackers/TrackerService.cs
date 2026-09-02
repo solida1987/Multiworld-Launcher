@@ -116,6 +116,10 @@ public static class PopTrackerService
         Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
         "PopTracker", "packs");
 
+    /// Where one pack's files end up.
+    public static string PackDirFor(string packageUid) =>
+        Path.Combine(PacksDir, packageUid);
+
     // ---------------------------------------------------------------- install
 
     /// Fetch and unpack PopTracker itself. Does nothing when it is already here.
@@ -319,8 +323,16 @@ public static class PopTrackerService
     /// copy of the sequence.
     ///
     /// Returns null when everything is in place, a sentence otherwise.
+    /// <param name="buildArtwork">
+    /// The game's own chance to draw pictures the pack is not allowed to ship
+    /// — see IGamePlugin.BuildTrackerArtworkAsync. Runs after the pack is in
+    /// place, on every set-up rather than only the first, because a pack
+    /// installed before the game has nothing to draw from yet. Games whose
+    /// packs ship complete pass nothing and nothing happens.
+    /// </param>
     public static async Task<string?> SetUpAsync(TrackerEntry entry,
                                                  IProgress<string>? progress = null,
+                                                 Func<string, CancellationToken, Task<int>>? buildArtwork = null,
                                                  CancellationToken ct = default)
     {
         if (!IsInstalled)
@@ -329,7 +341,24 @@ public static class PopTrackerService
             if (err != null) return "PopTracker: " + err;
         }
         if (!IsPackInstalled(entry.PackageUid))
-            return await InstallPackAsync(entry, progress, ct).ConfigureAwait(false);
+        {
+            string? err = await InstallPackAsync(entry, progress, ct).ConfigureAwait(false);
+            if (err != null) return err;
+        }
+
+        if (buildArtwork != null)
+        {
+            try
+            {
+                progress?.Report("Building the tracker's pictures from your copy of the game…");
+                int made = await buildArtwork(PackDirFor(entry.PackageUid), ct)
+                                 .ConfigureAwait(false);
+                if (made > 0) progress?.Report($"{made} pictures built.");
+            }
+            // Artwork is the trimming, not the tracker. A pack that draws
+            // nothing still tracks; one that refuses to open helps nobody.
+            catch (Exception) { }
+        }
         return null;
     }
 
@@ -343,9 +372,10 @@ public static class PopTrackerService
                                                IProgress<string>? progress = null,
                                                string? host = null, string? slot = null,
                                                string? password = null,
+                                               Func<string, CancellationToken, Task<int>>? buildArtwork = null,
                                                CancellationToken ct = default)
     {
-        string? setup = await SetUpAsync(entry, progress, ct).ConfigureAwait(false);
+        string? setup = await SetUpAsync(entry, progress, buildArtwork, ct).ConfigureAwait(false);
         if (setup != null) return setup;
 
         // ⚠ --ap-host takes host:port. A address that still carries its scheme
