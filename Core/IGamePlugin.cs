@@ -561,6 +561,29 @@ public interface IGamePlugin
     // 1-2 short badges next to the version badges, e.g. ["Requires D2"].
     string[] GameBadges { get; }
 
+    ///
+    /// File names this game or its mod REWRITES while playing — data tables a
+    /// randomiser patches per seed, and the like.
+    ///
+    /// ⚠⚠ Verify files compares every file against what was installed, and it
+    /// can only tell "damaged" from "the game changed this on purpose" if
+    /// somebody says which is which. Its own rule is extension-based
+    /// (.ini/.cfg/.dat), which covers configs and misses data: Diablo II's
+    /// randomiser rewrites eleven excel tables, and two of them happen to
+    /// change size when patched. Those two were reported as "the wrong size"
+    /// — and the repair offered to fetch the pristine copies and overwrite
+    /// the tables the player's seed is actually running on.
+    ///
+    /// Names only, no paths: the same table is the same table wherever the
+    /// game keeps it. Empty for the games that rewrite nothing, which is most.
+    ///
+    /// Defaulted so no existing plugin has to change. ⚠ A default is NOT
+    /// enough on its own: SafePluginProxy stands between the launcher and
+    /// every plugin, and a member it does not forward answers with this
+    /// default forever.
+    ///
+    IReadOnlyList<string> VolatileDataFiles => System.Array.Empty<string>();
+
     // Patch notes / announcements, newest first, at most 20.
     Task<NewsItem[]> GetNewsAsync(CancellationToken ct = default);
 }

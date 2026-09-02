@@ -210,6 +210,11 @@ public sealed class SafePluginProxy : IGamePlugin
     public string   ApWorldName      => Get(() => _inner.ApWorldName, "");
     public string   ThemeAccentColor => Get(() => _inner.ThemeAccentColor, "#3A4060");
     public string[] GameBadges       => Get(() => _inner.GameBadges, Array.Empty<string>());
+    // Forwarded, not inherited: an interface default reached through this
+    // proxy would answer "nothing" for every plugin that actually has an
+    // answer, and Verify files would go on calling patched tables damaged.
+    public IReadOnlyList<string> VolatileDataFiles
+        => Get(() => _inner.VolatileDataFiles, Array.Empty<string>());
 
     public Task<NewsItem[]> GetNewsAsync(CancellationToken ct = default)
         => GetAsync(() => _inner.GetNewsAsync(ct), Array.Empty<NewsItem>());

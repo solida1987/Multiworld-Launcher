@@ -87,6 +87,16 @@ public static class InstallVerifier
     /// settings is not a mistake worth leaving to one line of logic.
     public static bool IsPlayerOwned(string path) => IsGameManaged(path);
 
+    /// The same question with the plugin's answer folded in. A table the mod
+    /// rewrites per seed belongs to the seed being played, and fetching the
+    /// pristine copy over it would undo the randomisation the player is in the
+    /// middle of — the very thing the repair button offered to do.
+    public static bool IsPlayerOwned(string path, IReadOnlyList<string>? volatileNames)
+        => IsGameManaged(path)
+        || (volatileNames is { Count: > 0 }
+            && volatileNames.Contains(System.IO.Path.GetFileName(path),
+                                      StringComparer.OrdinalIgnoreCase));
+
     private static bool IsGameManaged(string path)
         => GameManagedExtensions.Contains(System.IO.Path.GetExtension(path),
                                           StringComparer.OrdinalIgnoreCase)
@@ -170,8 +180,18 @@ public static class InstallVerifier
         string gameDirectory,
         string? installedVersion = null,
         IProgress<(int Pct, string Msg)>? progress = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        /// File NAMES the game rewrites as it plays, from the plugin that
+        /// knows. Without it the classifier falls back to extensions, which
+        /// calls a patched data table damage.
+        IReadOnlyList<string>? volatileNames = null)
     {
+        var volatiles = volatileNames is { Count: > 0 }
+            ? new HashSet<string>(volatileNames, StringComparer.OrdinalIgnoreCase)
+            : null;
+        bool Volatile(string path) =>
+            volatiles != null
+            && volatiles.Contains(System.IO.Path.GetFileName(path));
         string manifestPath = ManifestPath(gameDirectory);
         Manifest? manifest;
         try
@@ -236,6 +256,10 @@ public static class InstallVerifier
                 // writes them itself and a fresh install has not run yet.
                 // Anything else missing is damage.
                 bad.Add(new BadFile(f.Path,
+                    // ⚠ Volatile does NOT excuse a missing file. The mod
+                    // REWRITES these tables; it does not delete them, and one
+                    // that is gone is genuinely broken — which is exactly the
+                    // case the repair button is for.
                     IsGameManaged(f.Path) ? Fault.ChangedSinceInstall : Fault.Missing,
                     IsGameManaged(f.Path)
                         ? "not there yet — the game writes this one itself"
@@ -257,7 +281,8 @@ public static class InstallVerifier
                 // Damage is for files the game does not write. Everything the
                 // game owns is reported apart and never repaired.
                 bad.Add(new BadFile(f.Path,
-                    IsGameManaged(f.Path) ? Fault.ChangedSinceInstall : Fault.WrongSize,
+                    IsGameManaged(f.Path) || Volatile(f.Path)
+                        ? Fault.ChangedSinceInstall : Fault.WrongSize,
                     IsGameManaged(f.Path)
                         ? "a different size — normal for a file the game writes to"
                         : $"{info.Length:N0} bytes, expected {f.Size:N0}"));

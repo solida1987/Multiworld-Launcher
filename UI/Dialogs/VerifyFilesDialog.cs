@@ -181,7 +181,11 @@ public sealed class VerifyFilesDialog : Window
         try
         {
             result = await InstallVerifier.VerifyAsync(
-                _gameDir, SafeVersion(_plugin), progress, _cts.Token);
+                _gameDir, SafeVersion(_plugin), progress, _cts.Token,
+                // The plugin knows which of its data files the mod rewrites
+                // as it plays. Without asking, the check calls a patched
+                // table damage and offers to overwrite the player's seed.
+                VolatileNames());
         }
         catch (OperationCanceledException)
         {
@@ -195,8 +199,101 @@ public sealed class VerifyFilesDialog : Window
             return;
         }
 
+        // Versions before files. "Verify" is the button people press when
+        // something is wrong, and the commonest wrong thing is not a damaged
+        // file at all — it is a game or a plugin a version behind, which every
+        // file check in the world will call healthy.
+        _versions = await ReadVersionsAsync();
+
         _bar.Visibility = Visibility.Collapsed;
         Render(result);
+    }
+
+    /// What is installed against what is published, for both halves.
+    private sealed record Versions(
+        string? GameInstalled, string? GameAvailable,
+        string? PluginInstalled, string? PluginAvailable, bool PluginCanCheck);
+
+    private Versions? _versions;
+
+    private async Task<Versions?> ReadVersionsAsync()
+    {
+        try
+        {
+            string? gi = SafeVersion(_plugin);
+            string? ga = null;
+            try { ga = _plugin.AvailableVersion; } catch (Exception) { }
+
+            string? pi = null, pa = null;
+            bool canCheck = false;
+            var installed = Core.Plugins.PluginPackage.Installed()
+                .FirstOrDefault(x => string.Equals(x.Manifest.GameId, _plugin.GameId,
+                                                   StringComparison.OrdinalIgnoreCase));
+            if (installed.Manifest is { } m)
+            {
+                pi = m.Version;
+                canCheck = Core.Plugins.PluginUpdater.HasFeed(m);
+                if (canCheck)
+                {
+                    var newer = await Core.Plugins.PluginUpdater.CheckOneAsync(m);
+                    pa = newer?.NewVersion.ToString();
+                }
+            }
+            return new Versions(gi, ga, pi, pa, canCheck);
+        }
+        catch (Exception) { return null; }
+    }
+
+    /// The two version lines, said plainly, with the one that is behind
+    /// marked. Drawn above the file findings on every result.
+    private void AddVersionLines()
+    {
+        if (_versions is not { } v) return;
+
+        var rows = new StackPanel { Margin = new Thickness(0, 0, 0, 12) };
+        rows.Children.Add(new TextBlock
+        {
+            Text = "VERSIONS", FontSize = 10, FontWeight = FontWeights.Bold,
+            Foreground = Brush("BrushMuted", "#727A99"),
+            Margin = new Thickness(0, 0, 0, 4),
+        });
+
+        void Row(string label, string? have, string? newer, string? note)
+        {
+            string text = $"{label}: {have ?? "unknown"}";
+            bool behind = newer is { Length: > 0 } && newer != have;
+            if (behind) text += $"  →  {newer} available";
+            else if (note != null) text += "  ·  " + note;
+            else if (have != null) text += "  ·  up to date";
+            rows.Children.Add(new TextBlock
+            {
+                Text = text, FontSize = 12, TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 2, 0, 0),
+                Foreground = behind || note != null
+                    ? Brush("BrushAccent", "#CCA800")
+                    : Brush("BrushText", "#CCD0E0"),
+            });
+        }
+
+        Row("Game", v.GameInstalled, v.GameAvailable, null);
+        Row("Plugin", v.PluginInstalled, v.PluginAvailable,
+            v.PluginInstalled == null ? "not a disk plugin"
+            : !v.PluginCanCheck ? "too old to check itself — reinstall it from the Plugin Library"
+            : null);
+
+        // Said once, where it will be read: the screens are the plugin's, so a
+        // plugin a version behind explains far more symptoms than a file does.
+        rows.Children.Add(new TextBlock
+        {
+            Text = "The Create YAML form, the trackers and this page come from the "
+                 + "plugin — not from the game files. A plugin behind the game "
+                 + "explains more problems than a damaged file does.",
+            FontSize = 11, TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 6, 0, 0),
+            Foreground = Brush("BrushMuted", "#727A99"),
+        });
+
+        _findings.Children.Add(rows);
     }
 
     private async Task RepairAsync()
@@ -272,6 +369,7 @@ public sealed class VerifyFilesDialog : Window
     {
         _findings.Children.Clear();
         _repairable = new List<string>();
+        AddVersionLines();
 
         if (r.CouldNotRun != null)
         {
@@ -328,7 +426,7 @@ public sealed class VerifyFilesDialog : Window
             // fetched over, even if something upstream mislabels it as damage.
             // The cost of the check is nothing; the cost of being wrong is a
             // player's settings.
-            .Where(b => !InstallVerifier.IsPlayerOwned(b.Path))
+            .Where(b => !InstallVerifier.IsPlayerOwned(b.Path, VolatileNames()))
             .Select(b => b.Path)
             .Distinct()
             .ToList();
@@ -449,6 +547,15 @@ public sealed class VerifyFilesDialog : Window
     private static string? SafeVersion(IGamePlugin p)
     {
         try { return p.InstalledVersion; } catch (Exception) { return null; }
+    }
+
+    /// Which files this game rewrites while it is played. Asked of the plugin
+    /// rather than guessed from extensions — a data table looks exactly like a
+    /// data file the game never touches.
+    private IReadOnlyList<string> VolatileNames()
+    {
+        try { return _plugin.VolatileDataFiles; }
+        catch (Exception) { return Array.Empty<string>(); }
     }
 
     private static Brush Brush(string key, string fallback)
