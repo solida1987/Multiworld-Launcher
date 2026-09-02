@@ -152,15 +152,28 @@ public sealed class ApworldSyncDialog : Window
         string? worlds = ApworldUpdater.WorldsDir();
         if (worlds == null)
         {
-            _step = Step.Unavailable;
-            _head.Text = "London has no Archipelago generator to put worlds into yet.";
-            _status.Text = "Open Multiworld and point London at your Archipelago "
-                         + "install first; this button fills that install's "
-                         + "custom_worlds folder.";
-            _action.Content = "Close";
-            _action.IsEnabled = true;
-            _close.Visibility = Visibility.Collapsed;
-            return;
+            // Nowhere to put the worlds. The old wording sent the player off to
+            // "point London at your install" in a panel where nothing could be
+            // pointed at — so ask here, where the problem actually is, and
+            // carry on the moment they answer.
+            var located = ApEngineFolderDialog.Ask(this,
+                "This button fills your Archipelago install's custom_worlds folder, "
+                + "so London needs to know where that install is.");
+            if (located is { Usable: true })
+            {
+                worlds = ApworldUpdater.WorldsDir();
+            }
+            if (worlds == null)
+            {
+                _step = Step.Unavailable;
+                _head.Text = "London has no Archipelago generator to put worlds into yet.";
+                _status.Text = "Nothing was changed. You can point London at your "
+                             + "Archipelago folder at any time under Settings.";
+                _action.Content = "Close";
+                _action.IsEnabled = true;
+                _close.Visibility = Visibility.Collapsed;
+                return;
+            }
         }
 
         ApworldIndex? index;

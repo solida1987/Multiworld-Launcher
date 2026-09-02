@@ -401,6 +401,9 @@ public partial class MainWindow : Window
         // Templates, by contrast, are derived data London asked Archipelago to
         // write. Refreshing those is housekeeping, not interference.
         EnsureTemplatesFresh();
+        // ...and neither of those can happen at all if we do not know where
+        // Archipelago is, so say so rather than failing silently.
+        OfferApEngineFolder();
 
         _ = Dispatcher.BeginInvoke(new Action(async () => await LoadCommunityCardAsync()),
                                    System.Windows.Threading.DispatcherPriority.Background);
@@ -6322,6 +6325,73 @@ public partial class MainWindow : Window
             GlobalSettingsPanel.Children.Add(SettingsCard("Connection",
                 "Where the connect panel points by default, and what happens "
                 + "when a connection drops.", body));
+        }
+
+        // ── Archipelago installation ──────────────────────────────────────
+        // Where London drives Archipelago from. It used to be settable in the
+        // settings FILE and nowhere else, so on a machine where the guess was
+        // wrong the update buttons simply did nothing and there was no way to
+        // see why. Now it says the path, how it was arrived at, and what is
+        // wrong with it if anything is.
+        {
+            var engWarn = new SolidColorBrush(Color.FromRgb(0xE0, 0x9A, 0x3C));
+            var body = new StackPanel();
+            body.Children.Add(new TextBlock
+            {
+                Text = "Archipelago folder", FontSize = 11, Foreground = muted,
+                Margin = new Thickness(0, 0, 0, 4),
+            });
+
+            var engRow = new DockPanel();
+            var engBox = SettingsBox(string.Empty,
+                "the folder that holds ArchipelagoGenerate.exe");
+            engBox.IsReadOnly = true;   // a typed path that does not exist helps nobody
+            var engBrowse = SettingsButton("Change");
+            engBrowse.Margin = new Thickness(6, 0, 0, 0);
+            var engStatus = new TextBlock
+            {
+                FontSize = 10, Foreground = muted, TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 6, 0, 0),
+            };
+            var engFolders = new TextBlock
+            {
+                FontSize = 10, Foreground = muted, TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 4, 0, 0),
+            };
+
+            void ShowEngine()
+            {
+                var w = Core.Archipelago.ApEngineLocation.Current();
+                engBox.Text = w.Path ?? string.Empty;
+                engStatus.Text = Core.Archipelago.ApEngineLocation.Describe(w);
+                engStatus.Foreground = w.Usable ? muted : engWarn;
+                engFolders.Text = Core.Archipelago.ApEngineLocation.DescribeFolders(w);
+                engFolders.Visibility = engFolders.Text.Length == 0
+                    ? Visibility.Collapsed : Visibility.Visible;
+            }
+
+            engBrowse.Click += (_, _) =>
+            {
+                var picked = UI.Dialogs.ApEngineFolderDialog.Ask(this,
+                    "Pick the installation you want London to use. Everything that "
+                    + "needs Archipelago — updating worlds, rewriting the YAML forms, "
+                    + "generating a seed — will use this one.");
+                if (picked != null)
+                    AppendLog($"[Settings] Archipelago folder set to {picked.Path}");
+                ShowEngine();
+            };
+
+            DockPanel.SetDock(engBrowse, Dock.Right);
+            engRow.Children.Add(engBrowse);
+            engRow.Children.Add(engBox);
+            body.Children.Add(engRow);
+            body.Children.Add(engStatus);
+            body.Children.Add(engFolders);
+            ShowEngine();
+
+            GlobalSettingsPanel.Children.Add(SettingsCard("Archipelago installation",
+                "London does not ship Archipelago — it drives the copy you already "
+                + "have. This is the one it uses.", body));
         }
 
         // ── Archipelago worlds ────────────────────────────────────────────

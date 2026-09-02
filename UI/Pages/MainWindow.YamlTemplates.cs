@@ -39,15 +39,17 @@ public partial class MainWindow
 
     private async void BtnYamlRefresh_Click(object sender, RoutedEventArgs e)
     {
+        // The templates are written by Archipelago, not by London, so this
+        // button is worthless without an install. Rather than refusing and
+        // sending the player off to find a setting, ask them where it is.
         var engine = TemplateEngine();
         if (engine is not { Usable: true })
         {
-            MessageBox.Show(this,
-                "No Archipelago engine is set up yet. Point London at one under "
-                + "Multiworld first — the templates are written by Archipelago "
-                + "itself, not by London.",
-                "Update YAML forms", MessageBoxButton.OK, MessageBoxImage.Information);
-            return;
+            var located = UI.Dialogs.ApEngineFolderDialog.Ask(this,
+                "The YAML forms are written by Archipelago itself, so London needs "
+                + "to know which installation to ask.");
+            if (located is not { Usable: true }) return;
+            engine = located.Report;
         }
 
         // Asked, not assumed: this deletes files, and it takes a while because
@@ -161,6 +163,47 @@ public partial class MainWindow
     ///
     /// Silent when nothing is wrong, which is the normal case.
     ///
+    ///
+    /// Ask where Archipelago is, once, when London genuinely cannot find it.
+    ///
+    /// Everything that needs the engine — updating worlds, rewriting the YAML
+    /// forms, generating a seed — fails quietly without it, and the failure
+    /// looks like a broken button rather than a missing folder. So London says
+    /// so itself instead of waiting to be asked.
+    ///
+    /// Asked once and then remembered: a prompt that returns every launch is
+    /// one the player closes without reading, and the buttons ask again at the
+    /// moment the answer actually buys them something.
+    ///
+    private void OfferApEngineFolder()
+    {
+        try
+        {
+            var s = SettingsStore.Load();
+            if (s.ApEngineAsked) return;
+            if (ApEngineLocation.Current().Usable) return;
+
+            // After the window is up: a modal on top of a half-drawn launcher
+            // reads as a crash, not a question.
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                if (ApEngineLocation.Current().Usable) return;
+                var s2 = SettingsStore.Load();
+                s2.ApEngineAsked = true;
+                SettingsStore.Save(s2);
+
+                var w = UI.Dialogs.ApEngineFolderDialog.Ask(this,
+                    "London could not find an Archipelago installation on this "
+                    + "machine. Without one it cannot update your AP worlds, "
+                    + "rewrite the YAML forms, or generate a seed.");
+                AppendLog(w is { Usable: true }
+                    ? $"[AP] Archipelago folder set to {w.Path}"
+                    : "[AP] No Archipelago folder set — you can point at one under Settings.");
+            }), System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+        }
+        catch (Exception) { /* a question we cannot ask is not worth crashing over */ }
+    }
+
     private void OfferApworldFixes()
     {
         _ = Task.Run(() =>

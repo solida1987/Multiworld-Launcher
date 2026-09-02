@@ -99,6 +99,15 @@ public sealed class LauncherSettings
     [JsonPropertyName("ap_engine_path")]
     public string ApEnginePath { get; set; } = string.Empty;
 
+    // Whether we have already asked where Archipelago is. London asks once,
+    // on a start-up where it genuinely cannot find one -- and then stops,
+    // because a question that returns every launch is a question the player
+    // learns to dismiss without reading. The buttons that actually need the
+    // folder ask again at the moment they need it, which is when the answer
+    // is worth giving.
+    [JsonPropertyName("ap_engine_asked")]
+    public bool ApEngineAsked { get; set; }
+
     // What the option templates were last built from: the launcher version
     // plus the worlds that were installed. Templates are DERIVED, and a stale
     // one still draws a form -- just yesterday's. Comparing this on start-up
