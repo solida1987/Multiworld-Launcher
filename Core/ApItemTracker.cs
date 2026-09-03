@@ -61,6 +61,15 @@ public sealed class TrackedItem
                                   : (ItemFlags & 0b010) != 0 ? "Useful"
                                   : (ItemFlags & 0b100) != 0 ? "Trap"
                                   : "Filler";
+
+    // Which way this item moved, relative to the local player. Three answers,
+    // because a feed of the whole room has three kinds of row and a reader
+    // has to tell them apart at a glance:
+    //   "in"    — it is coming to me (from anyone, myself included)
+    //   "out"   — I found it and it goes to somebody else
+    //   "other" — two other players, neither of them me
+    // A self-find is "in": it is something I receive, whoever found it.
+    public string   Flow         => IsForMe ? "in" : IFoundIt ? "out" : "other";
 }
 
 public sealed class ApItemTracker

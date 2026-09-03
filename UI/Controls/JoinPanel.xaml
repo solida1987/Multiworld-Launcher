@@ -115,6 +115,27 @@
                                   MaxHeight="420" FontSize="11"
                                   Foreground="{StaticResource BrushText}"
                                   VerticalScrollBarVisibility="Auto">
+                            <!-- Three kinds of row, told apart by colour so a
+                                 reader watching the room can see at a glance
+                                 what is theirs: green comes to me, white is
+                                 mine going to somebody else, blue is two other
+                                 players trading between themselves. -->
+                            <DataGrid.RowStyle>
+                                <Style TargetType="DataGridRow">
+                                    <Setter Property="Foreground" Value="{StaticResource BrushText}"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding Flow}" Value="in">
+                                            <Setter Property="Foreground" Value="#4ADE80"/>
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding Flow}" Value="out">
+                                            <Setter Property="Foreground" Value="#F1F3F8"/>
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding Flow}" Value="other">
+                                            <Setter Property="Foreground" Value="#7FB4FF"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </DataGrid.RowStyle>
                             <DataGrid.Columns>
                                 <DataGridTextColumn Header="Item" Width="2*"
                                                     Binding="{Binding ItemName}"/>

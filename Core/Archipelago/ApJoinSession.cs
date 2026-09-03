@@ -398,6 +398,23 @@ public sealed class ApJoinSession
                 session.Changed?.Invoke();
             };
 
+            // ⚠ ReceivedItems only ever carries items for OUR slot. Everything
+            // else that moves in the room — what we sent to somebody, what two
+            // other players traded between themselves — arrives as a PrintJSON
+            // "ItemSend", which the client already decodes and nobody here was
+            // listening to. That is why Item flow read "0 out" under a card
+            // saying "16 out": the sends were real, the feed never heard them.
+            //
+            // The tracker de-duplicates on (location, finder, receiver, item),
+            // so an item that reaches us BOTH ways is one row, not two.
+            client.ItemSendReceived += (receivingSlot, sendingSlot, itemId, itemFlags, locationId) =>
+            {
+                session.Items.RecordItems(
+                    new[] { new ApNetworkItem(itemId, locationId, sendingSlot, itemFlags) },
+                    receivingSlot);
+                session.Changed?.Invoke();
+            };
+
             // 4½. The patch, on the external path only. The seed name exists
             // now that we are connected, and this is the first moment the
             // question "does the store hold this seed's patch for this slot?"
