@@ -340,13 +340,21 @@ public partial class JoinPanel
 
         // The label is the promise: "Open" when it will open, "Get" when a
         // download has to happen first.
+        // "Get" downloads, "Update" replaces the pack with the newer published
+        // one and then opens, "Open" opens. Same three promises as the game page.
+        var pending = ready ? PopTrackerService.PendingUpdate(entry.PackageUid) : null;
         var b = new Button
         {
-            Content = ready ? "🗺  Open tracker" : "🗺  Get the tracker",
-            ToolTip = ready ? $"Open {entry.PackName} in PopTracker"
-                            : $"Download {entry.PackName}"
-                              + (PopTrackerService.IsInstalled ? "" : " and PopTracker itself")
-                              + ", then open it",
+            Content = !ready ? "🗺  Get the tracker"
+                    : pending != null ? "🗺  Update tracker"
+                    : "🗺  Open tracker",
+            ToolTip = !ready ? $"Download {entry.PackName}"
+                               + (PopTrackerService.IsInstalled ? "" : " and PopTracker itself")
+                               + ", then open it"
+                    : pending != null
+                    ? $"{entry.PackName} {pending.Newest} is published and you have "
+                      + $"{pending.Installed} — update it, then open it"
+                    : $"Open {entry.PackName} in PopTracker",
             Padding = new Thickness(0, 6, 0, 6),
             Margin = new Thickness(0, 6, 0, 0),
             Style = (Style)FindResource("BtnSecondaryStyle"),

@@ -5,7 +5,9 @@ using System.Windows;
 using System.Windows.Controls;
 using LauncherV2.Core;
 using LauncherV2.Core.Archipelago;
+using LauncherV2.Core.Plugins;
 using LauncherV2.Core.Trackers;
+using LauncherV2.UI.Controls;
 using LauncherV2.UI.Dialogs;
 
 namespace LauncherV2.UI.Pages;
@@ -92,12 +94,20 @@ public partial class MainWindow
         // The label is the promise. "Open" when it will open; "Get" when a
         // download has to happen first, so nobody is surprised by a progress
         // bar they did not ask for.
-        BtnOverviewTracker.Content = ready ? "🗺  Open tracker" : "🗺  Get the tracker";
-        BtnOverviewTracker.ToolTip = ready
-            ? $"Open {entry.PackName} in PopTracker"
-            : $"Download {entry.PackName} by {entry.PackRepo.Split('/')[0]}"
+        // Three labels, three promises: "Get" downloads, "Update" replaces the
+        // pack with the newer published one and then opens, "Open" opens.
+        var pending = ready ? PopTrackerService.PendingUpdate(entry.PackageUid) : null;
+        BtnOverviewTracker.Content = !ready ? "🗺  Get the tracker"
+                                   : pending != null ? "🗺  Update tracker"
+                                   : "🗺  Open tracker";
+        BtnOverviewTracker.ToolTip = !ready
+            ? $"Download {entry.PackName} by {entry.PackRepo.Split('/')[0]}"
               + (PopTrackerService.IsInstalled ? "" : ", and PopTracker itself")
-              + " — then open it";
+              + " — then open it"
+            : pending != null
+            ? $"{entry.PackName} {pending.Newest} is published and you have {pending.Installed} "
+              + "— update it, then open it"
+            : $"Open {entry.PackName} in PopTracker";
         BtnOverviewTracker.Visibility = Visibility.Visible;
     }
 
@@ -190,6 +200,80 @@ public partial class MainWindow
 
         RefreshTrackerSwitch();
         if (_selectedPlugin != null) _ = RefreshTrackerButtonAsync(_selectedPlugin);
+    }
+
+    ///
+    /// At start-up: is any installed game's tracker pack behind its feed?
+    ///
+    /// Ours are updated on the spot — the pack is our own work, the player
+    /// said yes to trackers once, and a newer pack is the same promise kept
+    /// better. Somebody else's pack is only remembered, so the button can say
+    /// "Update tracker" and let the player decide; it is never replaced
+    /// uninvited. Either way the check is quiet: no toast, no dialog, unless
+    /// something actually changed.
+    ///
+    /// Only packs that are already installed are looked at. A game with no
+    /// pack yet is the button's job, and consent is asked there.
+    ///
+    private async Task CheckTrackerPackUpdatesAsync()
+    {
+        try
+        {
+            if (TrackerConsent.Answer != true) return;     // never asked, or said no
+            if (!PopTrackerService.IsInstalled) return;
+
+            var installed = GameRegistry.All
+                .Where(p => { try { return p.IsInstalled; } catch { return false; } })
+                .ToList();
+            bool any = false;
+            foreach (var plugin in installed)
+            {
+                TrackerEntry? entry;
+                try { entry = await TrackerCatalog.ForGameAsync(plugin.GameId); }
+                catch (Exception) { continue; }
+                if (entry == null || !PopTrackerService.IsPackInstalled(entry.PackageUid)) continue;
+
+                var update = await PopTrackerService.CheckPackUpdateAsync(entry);
+                if (update == null) continue;
+                PopTrackerService.RememberPending(entry.PackageUid, update);
+
+                // Ours: the repository the pack is published from is ours.
+                bool ours = FirstParty.For(plugin.GameId).IsFirstPartyPlugin
+                         || Core.Plugins.PluginAutoUpdatePolicy.OursByAddress(entry.VersionsUrl);
+                if (!ours)
+                {
+                    AppendLog($"[Tracker] {entry.PackName} {update.Newest} is published "
+                            + $"(you have {update.Installed}) — press Update tracker on the game page.");
+                    continue;
+                }
+
+                AppendLog($"[Tracker] Updating {entry.PackName} {update.Installed} → {update.Newest}…");
+                string? err = await PopTrackerService.InstallPackAsync(
+                    entry, null, default, reinstall: true);
+                if (err != null)
+                {
+                    AppendLog("[Tracker] " + err);
+                    continue;
+                }
+                PopTrackerService.RememberPending(entry.PackageUid, null);
+                // The pictures the pack is not allowed to ship: rebuilt from the
+                // player's own game, since a new pack may map them differently.
+                try { await plugin.BuildTrackerArtworkAsync(PopTrackerService.PackDirFor(entry.PackageUid)); }
+                catch (Exception) { }
+                AppendLog($"[Tracker] {entry.PackName} is now {update.Newest}.");
+                foreach (string dup in PopTrackerService.DuplicatePackFolders(entry.PackageUid))
+                    AppendLog($"[Tracker] ⚠ {dup} also claims to be {entry.PackageUid} — PopTracker "
+                            + "may open that older copy instead. Remove it if it is not yours to keep.");
+                ToastService.Show("Tracker updated",
+                    $"{entry.PackName} {update.Installed} → {update.Newest}.", ToastKind.Info);
+                any = true;
+            }
+            // Relabel whatever is on screen: a pending "Update tracker" now
+            // reads "Open tracker", or the other way round.
+            if (_selectedPlugin != null) _ = RefreshTrackerButtonAsync(_selectedPlugin);
+            if (any) PanelJoin.Refresh();
+        }
+        catch (Exception) { /* a check that fails changes nothing */ }
     }
 
     /// Install what is missing, then open.

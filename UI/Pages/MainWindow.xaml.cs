@@ -595,6 +595,9 @@ public partial class MainWindow : Window
         });
         _ = _launcherUpdater.CheckAsync();
         _ = CheckPluginUpdatesAsync();
+        // The map trackers are the third thing that can go stale: a pack is
+        // fetched once and the game keeps improving it. Ours update themselves.
+        _ = CheckTrackerPackUpdatesAsync();
     }
 
     ///

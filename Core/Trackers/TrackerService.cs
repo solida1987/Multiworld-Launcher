@@ -204,9 +204,12 @@ public static class PopTrackerService
     ///      than pretended otherwise.
     public static async Task<string?> InstallPackAsync(TrackerEntry entry,
                                                        IProgress<string>? progress = null,
-                                                       CancellationToken ct = default)
+                                                       CancellationToken ct = default,
+                                                       bool reinstall = false)
     {
-        if (IsPackInstalled(entry.PackageUid)) return null;
+        // `reinstall` is the update path: the pack IS there, and a newer one
+        // is published. Everything below already replaces the folder whole.
+        if (!reinstall && IsPackInstalled(entry.PackageUid)) return null;
 
         using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
         http.DefaultRequestHeaders.UserAgent.ParseAdd("MultiworldLauncher");
@@ -317,6 +320,146 @@ public static class PopTrackerService
 
     /// Put PopTracker and this game's pack in place, opening nothing.
     ///
+    // ---------------------------------------------------------------- updates
+    //
+    // A pack was fetched ONCE and then never looked at again: IsPackInstalled
+    // matches on the uid alone, and the feed's version was read only while
+    // nothing was installed. So a player who took 1.1.0 kept 1.1.0 while
+    // 1.1.1 — the one where the counters actually count — sat published.
+    // Same shape as the plugin bug of 2 September: "is it there?" asked in
+    // place of "is it the newest?".
+    //
+    // The pack knows its own version (package_version in manifest.json) and
+    // the feed names the newest with a sha256. Comparing the two is all the
+    // update ever needed.
+
+    public sealed record PackUpdate(string Installed, string Newest,
+                                    string DownloadUrl, string? Sha256);
+
+    /// package_version of the installed pack with this uid, or null.
+    public static string? InstalledPackVersion(string packageUid)
+    {
+        // ⚠ The folder London itself installs into is asked FIRST. A second
+        // folder can carry the same package_uid — a hand copy, a dev copy, an
+        // older pack under its old folder name — and a plain scan answered
+        // with whichever sorted first, so London updated one folder while
+        // reading the version off another and never saw its own work.
+        try
+        {
+            string own = Path.Combine(PackDirFor(packageUid), "manifest.json");
+            if (File.Exists(own))
+            {
+                string? v = VersionInManifest(own, packageUid);
+                if (v != null) return v;
+            }
+            if (!Directory.Exists(PacksDir)) return null;
+            foreach (string dir in Directory.EnumerateDirectories(PacksDir))
+            {
+                string manifest = Path.Combine(dir, "manifest.json");
+                if (!File.Exists(manifest)) continue;
+                string? v = VersionInManifest(manifest, packageUid);
+                if (v != null) return v;
+            }
+        }
+        catch (Exception) { }
+        return null;
+    }
+
+    /// Other folders in the packs directory that claim this pack's uid — a
+    /// hand copy, a dev copy, an old folder name. PopTracker is asked for the
+    /// pack by uid, so it may open one of THESE rather than the folder London
+    /// just updated. They are the player's own files and are never removed;
+    /// they are named, so the player can.
+    public static IReadOnlyList<string> DuplicatePackFolders(string packageUid)
+    {
+        var dups = new List<string>();
+        try
+        {
+            if (!Directory.Exists(PacksDir)) return dups;
+            string own = Path.GetFullPath(PackDirFor(packageUid));
+            foreach (string dir in Directory.EnumerateDirectories(PacksDir))
+            {
+                if (string.Equals(Path.GetFullPath(dir), own, StringComparison.OrdinalIgnoreCase)) continue;
+                string manifest = Path.Combine(dir, "manifest.json");
+                if (File.Exists(manifest) && VersionInManifest(manifest, packageUid) != null)
+                    dups.Add(dir);
+            }
+        }
+        catch (Exception) { }
+        return dups;
+    }
+
+    /// The manifest's package_version when it belongs to this pack; null when
+    /// it is somebody else's pack or cannot be read. "" when the pack carries
+    /// no version at all.
+    private static string? VersionInManifest(string manifest, string packageUid)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(File.ReadAllText(manifest));
+            if (!doc.RootElement.TryGetProperty("package_uid", out var uid)
+                || !string.Equals(uid.GetString(), packageUid, StringComparison.Ordinal))
+                return null;
+            return doc.RootElement.TryGetProperty("package_version", out var v)
+                ? (v.GetString() ?? "") : "";
+        }
+        catch (Exception) { return null; }
+    }
+
+    /// Ask the pack's feed whether something newer than the installed copy is
+    /// published. Null for every ordinary answer — no feed, nothing installed,
+    /// nothing newer, feed unreachable — because none of those is worth a word.
+    public static async Task<PackUpdate?> CheckPackUpdateAsync(TrackerEntry entry,
+                                                              CancellationToken ct = default)
+    {
+        if (entry.VersionsUrl.Length == 0) return null;
+        string? have = InstalledPackVersion(entry.PackageUid);
+        if (have == null) return null;
+        try
+        {
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(25) };
+            http.DefaultRequestHeaders.UserAgent.ParseAdd("MultiworldLauncher");
+            using var doc = JsonDocument.Parse(
+                await http.GetStringAsync(entry.VersionsUrl, ct).ConfigureAwait(false));
+            if (!doc.RootElement.TryGetProperty("versions", out var arr)
+                || arr.ValueKind != JsonValueKind.Array || arr.GetArrayLength() == 0)
+                return null;
+            var newest = arr[0];
+            string? version = newest.TryGetProperty("package_version", out var v) ? v.GetString() : null;
+            string? url     = newest.TryGetProperty("download_url", out var u) ? u.GetString() : null;
+            string? sha     = newest.TryGetProperty("sha256", out var s) ? s.GetString() : null;
+            if (version is not { Length: > 0 } || url is not { Length: > 0 }) return null;
+            if (!IsNewer(version, have)) return null;
+            return new PackUpdate(have, version, url, sha);
+        }
+        catch (Exception) { return null; }
+    }
+
+    /// "1.1.1" is newer than "1.1.0"; anything unparseable is not newer.
+    private static bool IsNewer(string candidate, string installed)
+    {
+        if (!Version.TryParse(candidate, out var c)) return false;
+        if (!Version.TryParse(installed, out var i)) return true;   // an unversioned pack takes the published one
+        return c > i;
+    }
+
+    // What the start-up check found, per pack, for this run — so the buttons
+    // can say "Update tracker" without asking the network on every redraw.
+    private static readonly Dictionary<string, PackUpdate> _pending =
+        new(StringComparer.Ordinal);
+
+    public static PackUpdate? PendingUpdate(string packageUid)
+    { lock (_pending) return _pending.TryGetValue(packageUid, out var u) ? u : null; }
+
+    public static void RememberPending(string packageUid, PackUpdate? update)
+    {
+        lock (_pending)
+        {
+            if (update == null) _pending.Remove(packageUid);
+            else _pending[packageUid] = update;
+        }
+    }
+
     /// The install half of OpenAsync, split out because the offer made at the
     /// END of a game install must not throw a tracker window at somebody who
     /// was installing a game. OpenAsync calls this, so there is still only one
@@ -344,6 +487,25 @@ public static class PopTrackerService
         {
             string? err = await InstallPackAsync(entry, progress, ct).ConfigureAwait(false);
             if (err != null) return err;
+        }
+        else
+        {
+            // Installed — but is it the newest? Update first, then open, so
+            // the button never opens yesterday's pack. The start-up check
+            // usually knows already; if it has not run, ask the feed now.
+            var update = PendingUpdate(entry.PackageUid)
+                      ?? await CheckPackUpdateAsync(entry, ct).ConfigureAwait(false);
+            if (update != null)
+            {
+                progress?.Report($"Updating {entry.PackName} {update.Installed} → {update.Newest}…");
+                string? err = await InstallPackAsync(entry, progress, ct, reinstall: true)
+                                  .ConfigureAwait(false);
+                if (err != null) return "Could not update the pack: " + err;
+                RememberPending(entry.PackageUid, null);
+                foreach (string dup in DuplicatePackFolders(entry.PackageUid))
+                    progress?.Report($"⚠ {dup} also claims to be {entry.PackageUid} — PopTracker "
+                                   + "may open that older copy instead.");
+            }
         }
 
         if (buildArtwork != null)
