@@ -46,6 +46,11 @@ public sealed class VerifyFilesDialog : Window
     /// finished scan, so a repair can never act on a stale list.
     private List<string> _repairable = new();
 
+    /// What happened to the install record on the way to the last result:
+    /// fetched again for the installed version, or left as it was and why.
+    private bool _recordRefreshed;
+    private string? _recordProblem;
+
     public static void ShowFor(Window? owner, IGamePlugin plugin)
         => new VerifyFilesDialog(owner, plugin).ShowDialog();
 
@@ -180,12 +185,22 @@ public sealed class VerifyFilesDialog : Window
         InstallVerifier.Result result;
         try
         {
-            result = await InstallVerifier.VerifyAsync(
-                _gameDir, SafeVersion(_plugin), progress, _cts.Token,
+            // The record on disk may be for an earlier version than the one
+            // installed -- an update path that replaced the files without
+            // replacing the note about them. This fetches the right note
+            // first, so the check is always against the version that is
+            // actually there, and never says "reinstall" for a correct game.
+            var checkedNow = await InstallVerifier.VerifyCurrentAsync(
+                _gameDir, SafeVersion(_plugin),
+                (p, ct) => _plugin.RefreshInstallRecordAsync(p, ct),
+                progress, _cts.Token,
                 // The plugin knows which of its data files the mod rewrites
                 // as it plays. Without asking, the check calls a patched
                 // table damage and offers to overwrite the player's seed.
                 VolatileNames());
+            result           = checkedNow.Result;
+            _recordRefreshed = checkedNow.RecordRefreshed;
+            _recordProblem   = checkedNow.RefreshProblem;
         }
         catch (OperationCanceledException)
         {
@@ -371,32 +386,36 @@ public sealed class VerifyFilesDialog : Window
         _repairable = new List<string>();
         AddVersionLines();
 
+        // Said before the findings, because it changes what they mean: every
+        // line below was measured against a record fetched a moment ago, not
+        // the one that was on disk.
+        if (_recordRefreshed)
+            _findings.Children.Add(Note(
+                "The launcher's record of this install was for an earlier version, "
+                + $"so the record for {SafeVersion(_plugin) ?? "the installed version"} "
+                + "was fetched first. Everything below is measured against that."));
+
         if (r.CouldNotRun != null)
         {
             _step = Step.Done;
             _action.Content = "Check again";
             Say(r.CouldNotRun, "BrushError", "#D94A4A");
+            if (_recordProblem != null)
+                _findings.Children.Add(Note(RecordNotFetched()));
             return;
         }
 
-        // A record written for a different build. Nothing measured against it
-        // means anything -- and the fix is the same download, so it is offered
-        // as one rather than described.
+        // A record written for a different build, and fetching the right one
+        // did not work. Nothing measured against the old one means anything,
+        // so nothing is listed -- a list of "wrong" files that are in fact
+        // correct is worse than no list.
         if (r.StaleRecord != null)
         {
             Say(r.StaleRecord, "BrushAccent", "#CCA800");
             // No repair button here on purpose: a repair works from a list of
             // bad files, and this state means we could not decide which files
-            // ARE bad. Reinstalling is what rewrites the note, so that is what
-            // is asked for — plainly, with no path or version in sight.
-            _findings.Children.Add(Note(
-                "Nothing is damaged. The launcher simply has an out-of-date note "
-                + "of what this game should look like, so it has nothing reliable "
-                + "to compare against.\n\n"
-                + $"To put it right: open {_plugin.DisplayName} in the library and "
-                + "press Install. It fetches the game's files again and writes a "
-                + "fresh note at the same time, after which this check works "
-                + "properly. Your saves and characters are not part of that."));
+            // ARE bad.
+            _findings.Children.Add(Note(RecordNotFetched()));
             _step = Step.Done;
             _action.Content = "Check again";
             return;
@@ -465,6 +484,17 @@ public sealed class VerifyFilesDialog : Window
             + "them back. Your saves and settings are not touched — only the "
             + "files listed here. Press the button below to do it now."));
     }
+
+    /// The record for the installed version could not be fetched. Said with
+    /// the reason and the two things that put it right, and without claiming
+    /// anything about the files -- nothing was measured.
+    private string RecordNotFetched()
+        => "Nothing could be checked. The launcher's note of what this game should "
+         + "look like is for a different version than the one installed, and "
+         + $"fetching the right one did not work ({_recordProblem ?? "unknown reason"}).\n\n"
+         + "Check your internet connection and press Check again. Updating or "
+         + $"repairing {_plugin.DisplayName} from the library also writes a fresh "
+         + "note. Your saves and characters are not part of any of that.";
 
     private string HowToFixByHand()
         => "This game cannot replace single files on its own. To put it right, "

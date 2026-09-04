@@ -315,6 +315,80 @@ public static class InstallVerifier
         return new Result(files.Count, bytesRead, bad, manifest?.Version, null);
     }
 
+    /// A check that may first have had to fetch the record it checks against.
+    /// RecordRefreshed says the plugin wrote a fresh one; RefreshProblem says
+    /// why it could not, in words for the player, when the record stayed as
+    /// it was.
+    public sealed record Checked(Result Result, bool RecordRefreshed, string? RefreshProblem);
+
+    /// VerifyAsync, with one difference for the case a tester hit: when the
+    /// record on disk was written for a different version than the game
+    /// reports -- or there is no record at all -- ask the plugin for the
+    /// record of the version that IS installed, and check against that.
+    ///
+    /// A record goes stale whenever an install path replaces the files
+    /// without replacing the note about them. Telling the player to reinstall
+    /// sent him down the very path that had left the note behind, and the
+    /// next launch would have called every correct file the wrong size. The
+    /// plugin knows where its records are published; the launcher only knows
+    /// that this one does not match.
+    ///
+    /// refreshRecord is the plugin's RefreshInstallRecordAsync, passed as a
+    /// delegate so that this file depends on nothing else: the proofs compile
+    /// it alone, and a fake plugin is then one lambda rather than a class.
+    public static async Task<Checked> VerifyCurrentAsync(
+        string gameDirectory,
+        string? installedVersion,
+        Func<IProgress<(int Pct, string Msg)>?, CancellationToken, Task<bool>> refreshRecord,
+        IProgress<(int Pct, string Msg)>? progress = null,
+        CancellationToken ct = default,
+        IReadOnlyList<string>? volatileNames = null)
+    {
+        bool noRecord = !File.Exists(ManifestPath(gameDirectory));
+        Result first = noRecord
+            ? new Result(0, 0, Array.Empty<BadFile>(), null,
+                "There is no install record to check against.")
+            : await VerifyAsync(gameDirectory, installedVersion, progress, ct, volatileNames)
+                    .ConfigureAwait(false);
+
+        if (first.StaleRecord == null && !noRecord)
+            return new Checked(first, false, null);
+
+        // Nothing to fetch a record FOR: a game that does not say what
+        // version it is cannot be matched to a published record.
+        if (string.IsNullOrWhiteSpace(installedVersion))
+            return new Checked(first, false,
+                "the game does not report which version is installed");
+
+        progress?.Report((0, noRecord
+            ? $"Fetching the install record for {installedVersion}…"
+            : $"The record on disk is for {first.ManifestVersion}; fetching the one for "
+              + $"{installedVersion}…"));
+
+        bool refreshed;
+        try
+        {
+            refreshed = await refreshRecord(progress, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            return new Checked(first, false, ex.Message);
+        }
+        if (!refreshed)
+            return new Checked(first, false,
+                "the record could not be fetched -- offline, or no such release");
+
+        // Confirm rather than assume: the record the plugin wrote is checked
+        // the same way as any other, version match included.
+        Result second = await VerifyAsync(gameDirectory, installedVersion, progress, ct, volatileNames)
+                              .ConfigureAwait(false);
+        return new Checked(second, true,
+            second.StaleRecord != null
+                ? "the fetched record still names a different version"
+                : null);
+    }
+
     /// "v3.8.6" and "3.8.6" are the same version written two ways, and a
     /// false mismatch here would hide every real one behind a wrong warning.
     private static bool SameVersion(string a, string b)

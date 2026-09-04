@@ -111,6 +111,13 @@ public static class PluginInstallFlow
 
         GameRegistry.Register(loaded.Plugin);
 
+        // The new object knows nothing until asked -- InstalledVersion is null
+        // until its own version check has read the disk -- and every route
+        // that installs a plugin ends here. Asked now, detached and bounded,
+        // so no screen meets it before it has looked at its own folder. The
+        // launcher's own screens await the same call again and then redraw.
+        _ = ReadOwnDiskAsync(loaded.Plugin);
+
         // Into the library, so it appears in the sidebar the moment the player
         // approves it. Adding a plugin IS the act of putting a game there;
         // asking them to add it a second time in a different place would be a
@@ -118,6 +125,16 @@ public static class PluginInstallFlow
         LibraryStore.Add(m.GameId);
 
         return new Outcome(true, $"{m.DisplayName} was added.", loaded);
+    }
+
+    private static async System.Threading.Tasks.Task ReadOwnDiskAsync(IGamePlugin plugin)
+    {
+        try
+        {
+            using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(15));
+            await plugin.CheckForUpdateAsync(cts.Token).WaitAsync(cts.Token).ConfigureAwait(false);
+        }
+        catch { /* offline, or a plugin that ignores the token: nothing to do */ }
     }
 
     ///

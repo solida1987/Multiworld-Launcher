@@ -325,6 +325,7 @@ should not rearrange the disk while answering it.
 |---|---|
 | `ScanInstallProblemsAsync` | thorough per-file integrity pass. **null means "could not tell"** — never treat that as failure |
 | `RepairFilesAsync` | restore the named files |
+| `RefreshInstallRecordAsync` | write a fresh install record (the per-file sizes and hashes "Verify files" checks against) for the version installed **now**. Asked when the record on disk names a different version than `InstalledVersion`. True = written; false = could not, or this game keeps no record. Every path that replaces your files must also replace the record, or the next check calls correct files damaged |
 | `GetMissingCriticalFiles` | the short list the game cannot start without. Checked right before launch |
 | `MissingCriticalFilesCause` | one sentence on what usually removes them, shown in the repair prompt |
 | `RepairMissingCriticalFilesAsync` | put them back |

@@ -651,6 +651,7 @@ public partial class MainWindow : Window
                 AppendLog("[Plugin] " + r.Message.Replace(Environment.NewLine, " "));
             if (r.Added)
             {
+                await SettleReplacedPluginAsync(r.Plugin);
                 autoInstalled = true;
                 ToastService.Show("Plugin updated",
                     $"{u.DisplayName} {u.InstalledVersion} → {u.NewVersion}.",
@@ -710,6 +711,7 @@ public partial class MainWindow : Window
             var r = Core.Plugins.PluginInstallFlow.ApplyRepair(this, c);
             if (r.Added)
             {
+                await SettleReplacedPluginAsync(r.Plugin);
                 any = true;
                 AppendLog($"[Plugin] {c.DisplayName} repaired: {c.InstalledVersion} → {c.NewVersion}.");
                 ToastService.Show("Plugin updated",
@@ -750,6 +752,7 @@ public partial class MainWindow : Window
                     AppendLog("[Plugin] " + r.Message.Replace(Environment.NewLine, " "));
                 if (r.Added)
                 {
+                    await SettleReplacedPluginAsync(r.Plugin);
                     ToastService.Show("Plugin updated",
                         $"{update.DisplayName} {update.InstalledVersion} → {update.NewVersion}.",
                         ToastKind.Info);
@@ -772,9 +775,66 @@ public partial class MainWindow : Window
             var result = Core.Plugins.PluginInstallFlow.OfferUpdate(this, u);
             if (result.Message != null)
                 AppendLog("[Plugin] " + result.Message.Replace(Environment.NewLine, " "));
-            if (result.Added) anyInstalled = true;
+            if (result.Added)
+            {
+                anyInstalled = true;
+                _ = SettleReplacedPluginAsync(result.Plugin);
+            }
         }
         if (anyInstalled) RebuildGameList();
+    }
+
+    ///
+    /// A plugin that has just been installed or replaced is a NEW object, and
+    /// it knows nothing until asked: its InstalledVersion is null until its
+    /// own version check has read the disk. In that window the library shows
+    /// the game as not installed, and Play runs a FRESH install over a
+    /// complete one -- measured on Diablo II after a plugin auto-update: a
+    /// full 10 MB reinstall that left the install record a version behind,
+    /// and Verify files then telling the player to reinstall.
+    ///
+    /// So the new object is asked straight away, bounded so being offline
+    /// cannot hold anything up, and every screen that still pointed at the
+    /// old object is pointed at the new one. Never throws.
+    ///
+    private async Task SettleReplacedPluginAsync(Core.Plugins.LoadedPlugin? loaded)
+    {
+        IGamePlugin? plugin = null;
+        try { plugin = loaded?.Plugin; } catch { }
+        if (plugin == null) return;
+
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            // WaitAsync abandons a check whose HttpClient ignores the token.
+            await plugin.CheckForUpdateAsync(cts.Token).WaitAsync(cts.Token);
+        }
+        catch { /* offline -- the disk half of the check still ran */ }
+
+        try
+        {
+            await Dispatcher.InvokeAsync(() =>
+            {
+                RebuildGameList();
+                if (_selectedPlugin == null) return;
+                if (!string.Equals(_selectedPlugin.GameId, plugin.GameId,
+                                   StringComparison.OrdinalIgnoreCase)) return;
+
+                // The page was drawn for the object that no longer exists.
+                // Selecting the new one redraws everything from it.
+                if (!ReferenceEquals(_selectedPlugin, plugin)) { SelectGame(plugin); return; }
+
+                RefreshVersionBadges(plugin);
+                RefreshHeaderBadges(plugin);
+                RefreshButtons(plugin);
+                SyncOverviewPlayButton();
+                RefreshOverview(plugin);
+            });
+        }
+        catch (Exception ex)
+        {
+            AppendLog("[Plugin] The game page could not be refreshed: " + ex.Message);
+        }
     }
 
     // The player's view of the library: density, grouping, order. Loaded
@@ -2890,6 +2950,7 @@ public partial class MainWindow : Window
                 _pluginUpdateSeen[plugin.GameId] = null;
                 RebuildGameList();
                 RefreshOverview(plugin);
+                _ = SettleReplacedPluginAsync(r.Plugin);
             }
         };
         OverviewBadgesPanel.Children.Add(btn);
@@ -4417,6 +4478,7 @@ public partial class MainWindow : Window
         }
 
         var result = Core.Plugins.PluginInstallFlow.AddFromFile(this, dlg.FileName);
+        if (result.Added) _ = SettleReplacedPluginAsync(result.Plugin);
 
         // A cancelled consent dialog says nothing — the player just declined.
         if (result.Message != null)
@@ -7542,6 +7604,18 @@ public partial class MainWindow : Window
                 TxtProgress.Text  = $"{plugin.DisplayName} — {p.Msg}{ComputeEtaSuffix(p.Pct)}";
                 SetStatus($"{plugin.DisplayName}: {p.Msg}");
             });
+
+            // Let the plugin read what is on disk BEFORE it chooses between a
+            // fresh install and an update. A plugin object that has not run
+            // its version check yet answers "not installed", and its
+            // fresh-install path then downloads the whole game over a
+            // complete one. Bounded: being offline must not hold the install.
+            try
+            {
+                using var look = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+                await plugin.CheckForUpdateAsync(look.Token).WaitAsync(look.Token);
+            }
+            catch { /* the install below reports its own network trouble */ }
 
             await plugin.InstallOrUpdateAsync(progress, installCts.Token);
             await plugin.CheckForUpdateAsync();

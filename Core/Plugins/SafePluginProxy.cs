@@ -351,6 +351,12 @@ public sealed class SafePluginProxy : IGamePlugin
                     ((IReadOnlyList<string>)Array.Empty<string>(),
                      (IReadOnlyList<string>)paths.ToList()));
 
+    // A record that was never refreshed is the state the caller already
+    // handles: it says the record is stale rather than checking against it.
+    public Task<bool> RefreshInstallRecordAsync(IProgress<(int Pct, string Msg)>? progress,
+                                                CancellationToken ct = default)
+        => GetAsync(() => _inner.RefreshInstallRecordAsync(progress, ct), false);
+
     // --- the original game a mod is built from ---
 
     public BaseGameFolderRequest? NeedsBaseGameFolder()

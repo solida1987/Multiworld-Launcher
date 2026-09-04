@@ -215,6 +215,20 @@ public interface IGamePlugin
         => Task.FromResult<(IReadOnlyList<string>, IReadOnlyList<string>)>(
                (Array.Empty<string>(), paths.ToList()));
 
+    // Write a fresh install record -- the per-file sizes and hashes that
+    // "Verify files" measures against -- for the version installed NOW.
+    //
+    // Asked when the record on disk names a different version than the game
+    // reports. That happens whenever an install path replaces the files
+    // without replacing the note about them, and a check against the wrong
+    // note calls every correct file damaged. True = a record for the installed
+    // version was written and a check can go ahead. False = it could not be
+    // fetched (offline, no such release) or this game keeps no record; the
+    // launcher then says so instead of measuring against the wrong yardstick.
+    Task<bool> RefreshInstallRecordAsync(IProgress<(int Pct, string Msg)>? progress,
+                                         CancellationToken ct = default)
+        => Task.FromResult(false);
+
     // DeathLink receive side; send side is IApServices.ReportDeath.
     Task OnDeathLinkReceivedAsync(string source, string cause) => Task.CompletedTask;
 
