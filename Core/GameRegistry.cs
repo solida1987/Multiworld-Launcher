@@ -129,16 +129,40 @@ public static class GameRegistry
         problems = issues;
     }
 
-    /// Drop a disk plugin from the library — removal, or revoked trust.
+    /// Register a plugin that was just loaded from disk — at start-up or by
+    /// an install or update mid-session — and REMEMBER that it came from disk.
+    ///
+    /// ⚠⚠ Install used to call Register(lp.Plugin) alone. The plugin then sat
+    /// in the registry with no LoadedPlugin behind it, so the next update's
+    /// UnloadFromDisk found nothing to unload, left the old object in place,
+    /// and Register refused the new one: "A plugin with GameId
+    /// 'diablo2_archipelago' is already registered." Measured on a tester's
+    /// launcher, 4 September: every plugin update after the first one in a
+    /// session failed that way, twice, thirty minutes apart.
+    public static void RegisterLoaded(Plugins.LoadedPlugin lp)
+    {
+        Register(lp.Plugin);
+        _loaded.Add(lp);
+    }
+
+    /// Drop a disk plugin from the library — removal, revoked trust, or the
+    /// moment before its replacement is registered.
+    ///
+    /// Removes the registration whether or not a LoadedPlugin is on record
+    /// for it: a stale registration with no record behind it is exactly the
+    /// state that blocked updates, and leaving it in place helps nobody.
+    /// Returns true when anything was removed.
     public static bool UnloadFromDisk(string gameId)
     {
         var lp = _loaded.FirstOrDefault(p =>
             string.Equals(p.Manifest.GameId, gameId, StringComparison.OrdinalIgnoreCase));
-        if (lp == null) return false;
 
-        _plugins.RemoveAll(p => string.Equals(p.GameId, gameId, StringComparison.OrdinalIgnoreCase));
-        _loaded.Remove(lp);
-        lp.Unload();
-        return true;
+        int removed = _plugins.RemoveAll(p => string.Equals(p.GameId, gameId, StringComparison.OrdinalIgnoreCase));
+        if (lp != null)
+        {
+            _loaded.Remove(lp);
+            lp.Unload();
+        }
+        return removed > 0 || lp != null;
     }
 }

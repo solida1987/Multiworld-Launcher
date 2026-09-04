@@ -109,7 +109,10 @@ public static class PluginInstallFlow
             return new Outcome(false, $"{m.DisplayName} could not be started.\n\n{loadErr}", null);
         }
 
-        GameRegistry.Register(loaded.Plugin);
+        // Registered AND recorded as loaded-from-disk, so the next update can
+        // unload this one. Register() alone left a registration nothing could
+        // remove, and every later update in the session failed on it.
+        GameRegistry.RegisterLoaded(loaded);
 
         // The new object knows nothing until asked -- InstalledVersion is null
         // until its own version check has read the disk -- and every route

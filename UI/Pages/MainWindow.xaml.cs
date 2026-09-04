@@ -680,6 +680,18 @@ public partial class MainWindow : Window
                 offers.Add(u);
                 continue;
             }
+            // Never while that game is running. The plugin object IS the
+            // session — it holds the bridge to the game and the AP
+            // connection — and replacing it mid-game would cut both. The
+            // check now repeats every half hour, so the update is simply
+            // taken at the next pass after the game closes.
+            var live = GameRegistry.Find(u.GameId);
+            if (live is { IsRunning: true })
+            {
+                AppendLog($"[Plugin] {u.DisplayName} {u.NewVersion} is out — "
+                        + "waiting until the game is closed to update.");
+                continue;
+            }
             AppendLog($"[Plugin] Updating {u.DisplayName} "
                     + $"{u.InstalledVersion} → {u.NewVersion}…");
             var r = await Core.Plugins.PluginInstallFlow.AutoApplyAsync(u);
