@@ -46,8 +46,18 @@ public sealed class ApworldSyncDialog : Window
     private enum Step { Asking, Running, Done, Unavailable }
     private Step _step = Step.Asking;
 
-    public static void ShowFor(Window? owner)
-        => new ApworldSyncDialog(owner).ShowDialog();
+    /// Did the Archipelago engine itself change version during this run? The
+    /// caller rewrites the option templates when it did: a new engine ships
+    /// new options, and the forms drawn from the old ones are now wrong.
+    public bool EngineUpdated { get; private set; }
+
+    /// Shows the dialog; true when the engine was updated along the way.
+    public static bool ShowFor(Window? owner)
+    {
+        var dlg = new ApworldSyncDialog(owner);
+        dlg.ShowDialog();
+        return dlg.EngineUpdated;
+    }
 
     private ApworldSyncDialog(Window? owner)
     {
@@ -204,6 +214,20 @@ public sealed class ApworldSyncDialog : Window
           + "people's games.";
         _action.Content = $"Yes, update all {_ids.Count}";
         _action.IsEnabled = true;
+
+        // The engine is checked here, while the question is still on screen,
+        // so the player reads about an engine update BEFORE saying yes to a
+        // run that will offer it. The offer itself comes in RunAsync.
+        try
+        {
+            var check = await ApEngineUpdater.CheckAsync();
+            if (check.Newer && check.Offer != null)
+                _status.Text += $"\n\nArchipelago {check.Offer.Version} is also out — you "
+                              + $"have {check.Engine!.Version}. London will offer to "
+                              + "install it first, since the worlds are only as current "
+                              + "as the engine that loads them.";
+        }
+        catch (Exception) { /* the worlds still update without the engine check */ }
     }
 
     // ------------------------------------------------------------- the run
@@ -243,7 +267,18 @@ public sealed class ApworldSyncDialog : Window
         _bar.Value = 0;
         _findings.Children.Clear();
 
-        int updated = 0, current = 0, alreadyNewest = 0;
+        // The engine first. A world published for a newer Archipelago than
+        // the one on disk fails in the engine's own words, and every world
+        // fetched below is loaded by whatever engine this leaves behind.
+        _status.Text = "Checking the Archipelago engine…";
+        try
+        {
+            if (await ApEngineUpdateDialog.OfferAsync(this, m => AddLine(m, "")))
+                EngineUpdated = true;
+        }
+        catch (Exception e) { AddLine("The engine could not be checked", e.Message); }
+
+        int updated = 0, current = 0, alreadyNewest = 0, shipped = 0;
         var problems = new List<string>();
 
         foreach (string id in _ids)
@@ -264,6 +299,16 @@ public sealed class ApworldSyncDialog : Window
             string label = status.Entry?.Game is { Length: > 0 } g ? g : id;
             _status.Text = $"{current} of {_ids.Count} — {label}";
             _bar.Value = current;
+
+            // Worlds Archipelago carries inside itself are not fetched: a
+            // second copy in custom_worlds is never loaded, and would only
+            // look like an update. Counted so the summary says so.
+            if (status.State == ApworldState.None
+                && status.Detail == ApworldUpdater.BundledDetail)
+            {
+                shipped++;
+                continue;
+            }
 
             if (!status.Actionable)
             {
@@ -299,11 +344,28 @@ public sealed class ApworldSyncDialog : Window
         _head.Text = stopped ? "Stopped." : "Done.";
         _status.Text =
             $"{updated} updated · {alreadyNewest} already newest"
+          + (shipped > 0 ? $" · {shipped} shipped inside Archipelago, not fetched" : "")
           + (problems.Count > 0 ? $" · {problems.Count} could not be fetched" : "")
           + (stopped ? $" · stopped after {current} of {_ids.Count}" : "");
 
         if (problems.Count == 0 && !stopped)
             AddLine("Every world in the catalogue is now at its newest version.", "");
+
+        // Then look at what is in the folder now. A copy of a world the
+        // engine already ships, or a file the engine cannot import, is worth
+        // an offer at exactly this moment — the player just asked London to
+        // make the folder current, and is looking at the answer.
+        if (!stopped)
+        {
+            try
+            {
+                int fixedCount = ApworldFixDialog.OfferNow(this, ApworldUpdater.WorldsDir(),
+                                                           m => AddLine(m, ""));
+                if (fixedCount > 0)
+                    AddLine($"{fixedCount} file(s) in custom_worlds tidied up.", "");
+            }
+            catch (Exception) { /* the sweep above stands on its own */ }
+        }
     }
 
     private void AddLine(string what, string detail)

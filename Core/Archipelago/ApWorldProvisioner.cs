@@ -256,6 +256,14 @@ public static class ApWorldProvisioner
         var sb = new System.Text.StringBuilder(launcherVersion);
         try
         {
+            // The engine's own version is part of what the templates were
+            // built from: a new Archipelago ships new bundled worlds and new
+            // options for old ones, with not one file in custom_worlds
+            // changing. Without this line an engine update left every form
+            // drawing the previous release's options.
+            if (engine?.Version != null)
+                sb.Append("|engine:").Append(engine.Version);
+
             if (engine is { Usable: true } && Directory.Exists(engine.CustomWorldsDir))
                 foreach (string f in Directory.GetFiles(engine.CustomWorldsDir, "*.apworld")
                                               .OrderBy(x => x, StringComparer.OrdinalIgnoreCase))

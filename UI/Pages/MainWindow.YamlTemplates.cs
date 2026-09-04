@@ -52,6 +52,18 @@ public partial class MainWindow
             engine = located.Report;
         }
 
+        // The engine before the templates: the forms are written BY
+        // Archipelago from the worlds it can load, so a newer Archipelago
+        // means different forms. Rewriting them first and updating second
+        // would leave the player with the forms of the release they no
+        // longer have.
+        try
+        {
+            if (await UI.Dialogs.ApEngineUpdateDialog.OfferAsync(this, m => AppendLog(m)))
+                engine = TemplateEngine() ?? engine;
+        }
+        catch (Exception ex) { AppendLog("[AP engine] Could not check for an update: " + ex.Message); }
+
         // Asked, not assumed: this deletes files, and it takes a while because
         // Archipelago loads every installed world to write them.
         var answer = MessageBox.Show(this,
@@ -213,36 +225,12 @@ public partial class MainWindow
                 var engine = TemplateEngine();
                 if (engine is not { Usable: true }) return;
 
-                var all = ApworldDoctor.Scan(engine.CustomWorldsDir);
-                if (all.Count == 0) return;
-
-                var answers = SettingsStore.Load().ApworldFixAnswers;
-                var unanswered = all.Where(i => !answers.ContainsKey(i.Identity)).ToList();
+                // The scan opens zips, so it runs here off the window; the
+                // asking and the fixing happen on it, in the one shared flow.
+                if (ApworldDoctor.Scan(engine.CustomWorldsDir).Count == 0) return;
 
                 Dispatcher.BeginInvoke(() =>
-                {
-                    // Said out loud whether or not we ask: the player should be
-                    // able to see the problem in the log even after declining.
-                    foreach (var i in all)
-                        AppendLog($"[AP worlds] {i.FileName}: {i.Problem} {i.Consequence}");
-                    if (unanswered.Count == 0) return;
-
-                    var (accepted, offered) = UI.Dialogs.ApworldFixDialog.Ask(this, unanswered);
-
-                    var s = SettingsStore.Load();
-                    foreach (var i in offered)
-                        s.ApworldFixAnswers[i.Identity] =
-                            accepted.Any(a => a.Identity == i.Identity);
-                    SettingsStore.Save(s);
-
-                    foreach (var i in accepted)
-                    {
-                        var r = ApworldDoctor.Apply(i);
-                        AppendLog("[AP worlds] " + r.Note);
-                    }
-                    if (accepted.Count == 0)
-                        AppendLog("[AP worlds] Left alone — you said no. Nothing was changed.");
-                });
+                    UI.Dialogs.ApworldFixDialog.OfferNow(this, engine.CustomWorldsDir, m => AppendLog(m)));
             }
             catch (Exception) { /* a scan that fails changes nothing */ }
         });

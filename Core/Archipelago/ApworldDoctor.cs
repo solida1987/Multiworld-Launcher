@@ -63,7 +63,14 @@ public static class ApworldDoctor
     /// nothing but file names until something looks wrong, so a healthy
     /// folder of 500 worlds costs a directory listing.
     ///
-    public static IReadOnlyList<Issue> Scan(string? customWorldsDir)
+    public const string KindUnimportableName = "unimportable-name";
+    public const string KindShadowedByBundled = "shadowed-by-bundled";
+
+    /// <param name="engineRootOverride">Where lib\worlds is. Normally the
+    /// parent of custom_worlds, which is how Archipelago lays itself out; the
+    /// proof passes a folder of its own making.</param>
+    public static IReadOnlyList<Issue> Scan(string? customWorldsDir,
+                                            string? engineRootOverride = null)
     {
         var found = new List<Issue>();
         if (string.IsNullOrWhiteSpace(customWorldsDir) || !Directory.Exists(customWorldsDir))
@@ -73,9 +80,71 @@ public static class ApworldDoctor
         try { files = Directory.GetFiles(customWorldsDir, "*.apworld"); }
         catch (Exception) { return found; }
 
+        // What the engine ships, by both the names a world goes under. Read
+        // once per scan: seventy-odd small zips, and the answer does not move
+        // while the scan runs.
+        string? engineRoot = engineRootOverride;
+        if (engineRoot == null)
+        {
+            try { engineRoot = Path.GetDirectoryName(Path.GetFullPath(customWorldsDir)); }
+            catch (Exception) { }
+        }
+        var bundledGames   = ApworldUpdater.BundledGames(engineRoot ?? "");
+        var bundledModules = ApworldUpdater.BundledModules(engineRoot ?? "");
+
         foreach (string path in files)
         {
             string stem = Path.GetFileNameWithoutExtension(path);
+
+            // ⚠⚠ A copy of a world Archipelago already carries. Measured on a
+            // real machine, 4 September: seven of these in custom_worlds.
+            // Archipelago loads ONE of each pair — whichever it reaches
+            // first, which the same generation log showed going both ways:
+            //
+            //   Did not load C:\...\custom_worlds\mm3.apworld  (bundled won)
+            //   Did not load satisfactory.apworld              (the COPY won)
+            //
+            // When the copy wins, the seed is generated with it — and every
+            // copy on that machine was older than the world 0.6.7 shipped
+            // (58 KB from February against 112 KB from April). When it loses,
+            // updating it changes nothing while looking like it did. Neither
+            // outcome is one the player chose, and both cost a zip open per
+            // generation.
+            //
+            // Six predated London; one was dated the night of a London sweep,
+            // before the download learned to check. Whose they are changes
+            // nothing about the offer: it is a file in the player's install,
+            // and the player says whether it goes.
+            string? shadowedAs = bundledModules.Contains(stem) ? $"{stem}.apworld" : null;
+            if (shadowedAs == null && bundledGames.Count > 0
+                && GameNameInside(path) is { Length: > 0 } game
+                && bundledGames.Contains(game))
+                shadowedAs = $"the world for \"{game}\"";
+
+            if (shadowedAs != null)
+            {
+                found.Add(new Issue(
+                    FilePath: path,
+                    FileName: Path.GetFileName(path),
+                    Identity: IdentityOf(path),
+                    Kind: KindShadowedByBundled,
+                    Problem: $"Archipelago already ships {shadowedAs} inside itself, so "
+                           + "it has this world twice and loads only one of them — "
+                           + "whichever it reaches first. Every generation log says "
+                           + "so: \"Did not load … as its game is already loaded\".",
+                    Consequence: "If this copy is the one that loads, your seeds are "
+                               + "generated with it rather than with the version "
+                               + "Archipelago was released and tested with — usually "
+                               + "an older one. If it is not, updating it changes "
+                               + "nothing while looking like it did. Either way every "
+                               + "generation opens it and throws one of the two away.",
+                    Fix: "Remove this copy from custom_worlds. The world itself stays "
+                       + "— the copy inside Archipelago is the one that loads from "
+                       + "then on, and it moves forward with every Archipelago update.",
+                    ProposedName: null));
+                continue;
+            }
+
             if (Importable(stem)) continue;
 
             string? module = ModuleNameInside(path);
@@ -85,7 +154,7 @@ public static class ApworldDoctor
                 FilePath: path,
                 FileName: Path.GetFileName(path),
                 Identity: IdentityOf(path),
-                Kind: "unimportable-name",
+                Kind: KindUnimportableName,
                 Problem: $"Its file name is \"{stem}\", and Archipelago turns a world's "
                        + $"file name into a Python module path. The dot ends the name "
                        + $"early, so it looks for \"worlds.{stem.Split('.')[0]}\" and "
@@ -117,7 +186,22 @@ public static class ApworldDoctor
             return new Applied(false,
                 $"{issue.FileName} has changed since this was offered — left alone.");
 
-        if (issue.Kind != "unimportable-name" || issue.ProposedName is not { Length: > 0 })
+        if (issue.Kind == KindShadowedByBundled)
+        {
+            try
+            {
+                File.Delete(issue.FilePath);
+                return new Applied(true,
+                    $"{issue.FileName} removed — Archipelago's own copy of that world "
+                  + "is the one that loads.");
+            }
+            catch (Exception e)
+            {
+                return new Applied(false, $"{issue.FileName} could not be removed: {e.Message}");
+            }
+        }
+
+        if (issue.Kind != KindUnimportableName || issue.ProposedName is not { Length: > 0 })
             return new Applied(false, $"No fix is implemented for {issue.Kind}.");
 
         string dir = Path.GetDirectoryName(issue.FilePath)!;
@@ -160,6 +244,24 @@ public static class ApworldDoctor
         && !string.Equals(recordedAsset, newFileName, StringComparison.OrdinalIgnoreCase)
             ? recordedAsset
             : null;
+
+    /// The `game` a world declares in its own archipelago.json — the field the
+    /// engine keys on when it says "already loaded". Null for a world without
+    /// a manifest, which is common and not a fault.
+    private static string? GameNameInside(string path)
+    {
+        try
+        {
+            using var zip = ZipFile.OpenRead(path);
+            var entry = zip.Entries.FirstOrDefault(e =>
+                e.FullName.EndsWith("archipelago.json", StringComparison.OrdinalIgnoreCase));
+            if (entry == null) return null;
+            using var s = entry.Open();
+            using var doc = System.Text.Json.JsonDocument.Parse(s);
+            return doc.RootElement.TryGetProperty("game", out var g) ? g.GetString() : null;
+        }
+        catch (Exception) { return null; }
+    }
 
     /// The single top-level folder inside the zip IS the module name, so the
     /// right name never has to be guessed at.

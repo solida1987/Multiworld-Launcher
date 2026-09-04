@@ -584,11 +584,17 @@ public partial class MainWindow : Window
         // Install-Update click duplicated log lines after a failed retry.
         _launcherUpdater.DownloadProgress += pct =>
             Dispatcher.Invoke(() => AppendLog($"[Update] {pct}%"));
+        string? announced = null;
         _launcherUpdater.UpdateAvailable += version => Dispatcher.Invoke(() =>
         {
-            AppendLog($"[Update] Launcher update available: v{version} — open Settings to install.");
             BannerLauncherUpdate.Visibility = Visibility.Visible;
             TxtLauncherUpdateVersion.Text   = $"Launcher v{version} available";
+            // The check now repeats while the launcher is open. The banner
+            // stays; the toast and the log line are for a version the player
+            // has not been told about yet.
+            if (announced == version) return;
+            announced = version;
+            AppendLog($"[Update] Launcher update available: v{version} — open Settings to install.");
             ToastService.Show("Launcher update available",
                 $"Version {version} is ready — use the banner above to install.",
                 ToastKind.Info);
@@ -598,6 +604,23 @@ public partial class MainWindow : Window
         // The map trackers are the third thing that can go stale: a pack is
         // fetched once and the game keeps improving it. Ours update themselves.
         _ = CheckTrackerPackUpdatesAsync();
+
+        // And again while the launcher stays open. A player who opens London
+        // in the morning and plays all day never restarts it, so a plugin
+        // published at four in the afternoon was never seen: the only check
+        // ran at nine. Half an hour is short enough that a release lands the
+        // same afternoon and long enough that the feeds are not hammered.
+        var recheck = new System.Windows.Threading.DispatcherTimer
+        {
+            Interval = TimeSpan.FromMinutes(30),
+        };
+        recheck.Tick += (_, _) =>
+        {
+            _ = _launcherUpdater.CheckAsync();
+            _ = CheckPluginUpdatesAsync();
+            _ = CheckTrackerPackUpdatesAsync();
+        };
+        recheck.Start();
     }
 
     ///
@@ -609,7 +632,20 @@ public partial class MainWindow : Window
     /// exactly nothing. The prompt only ever appears because a real newer
     /// version exists.
     ///
+    private bool _pluginCheckRunning;
+
     private async Task CheckPluginUpdatesAsync()
+    {
+        // Runs at start, on a timer and from the update buttons; two at once
+        // would auto-apply the same plugin twice, so a check that finds one
+        // already in flight is simply done.
+        if (_pluginCheckRunning) return;
+        _pluginCheckRunning = true;
+        try { await CheckPluginUpdatesOnceAsync(); }
+        finally { _pluginCheckRunning = false; }
+    }
+
+    private async Task CheckPluginUpdatesOnceAsync()
     {
         IReadOnlyList<Core.Plugins.PluginUpdater.Available> found;
         try
@@ -8319,7 +8355,17 @@ public partial class MainWindow : Window
     /// downloads hundreds of files from hundreds of strangers' release pages,
     /// which is not something a title-bar button should start on one click.
     private void BtnApworldSync_Click(object sender, RoutedEventArgs e)
-        => UI.Dialogs.ApworldSyncDialog.ShowFor(this);
+    {
+        bool engineUpdated = UI.Dialogs.ApworldSyncDialog.ShowFor(this);
+        // A new engine writes different option templates. The start-up check
+        // would catch this next time; the player is here now.
+        if (engineUpdated) EnsureTemplatesFresh();
+        _ = RefreshApworldRailAsync();
+        // "Update" is what the player just asked for, and the plugins are the
+        // third thing that can be behind. Ask their feeds now rather than at
+        // the next start.
+        _ = CheckPluginUpdatesAsync();
+    }
 
     /// Swaps the whole content area. The sidebar and the community rail stay
     /// hidden in multiworld mode: neither is about the seed being built, and a

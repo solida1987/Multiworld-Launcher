@@ -130,6 +130,17 @@ public partial class MainWindow
             : behind == 0
                 ? $"All {known} world(s) match what their authors publish."
                 : $"{behind} of {known} world(s) are behind.";
+
+        // And the engine itself, on the same line: the number above is the
+        // reason to press, and an engine that is behind is a second one.
+        try
+        {
+            var check = await ApEngineUpdater.CheckAsync();
+            if (check.Newer && check.Offer != null)
+                TxtApworldState.Text += $" Archipelago {check.Offer.Version} is out — "
+                                      + $"you have {check.Engine!.Version}.";
+        }
+        catch (Exception) { /* the worlds line stands on its own */ }
     }
 
     // ------------------------------------------------------- all at once
@@ -151,6 +162,12 @@ public partial class MainWindow
                   + "have to go into its own folder.", ToastKind.Warning);
                 return;
             }
+
+            // The engine before its worlds — see ApEngineUpdater for why.
+            bool engineUpdated = false;
+            try { engineUpdated = await UI.Dialogs.ApEngineUpdateDialog.OfferAsync(this, m => AppendLog(m)); }
+            catch (Exception ex) { AppendLog("[AP engine] Could not check for an update: " + ex.Message); }
+            if (engineUpdated) EnsureTemplatesFresh();
 
             var ids = await ApworldUpdater.CandidatesAsync(InstalledGameIds());
 
@@ -174,6 +191,7 @@ public partial class MainWindow
 
             if (_selectedPlugin != null) _ = RefreshApworldButtonAsync(_selectedPlugin);
             _ = RefreshApworldRailAsync();
+            _ = CheckPluginUpdatesAsync();
         }
         finally
         {

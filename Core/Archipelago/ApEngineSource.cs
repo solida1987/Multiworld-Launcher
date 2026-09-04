@@ -41,7 +41,11 @@ public static class ApEngineSource
     /// The Windows artefact is named "Setup.Archipelago.<version>.exe".
     private const string AssetPattern = "Setup.Archipelago";
 
-    public sealed record Offer(string Version, string AssetName, string Url, long Size);
+    /// <param name="Sha256">The hash GitHub records for the asset, lower-case
+    /// hex, or empty when the API did not say. Size proves a download is
+    /// complete; only the hash proves it is the file the project published.</param>
+    public sealed record Offer(string Version, string AssetName, string Url, long Size,
+                               string Sha256 = "");
     public sealed record Progress(string Stage, int Percent);
     public sealed record Fetched(bool Ok, string Message, string? InstallerPath, string? Sha256);
 
@@ -80,7 +84,12 @@ public static class ApEngineSource
                 string url = a.TryGetProperty("browser_download_url", out var u)
                              ? u.GetString() ?? "" : "";
                 long size = a.TryGetProperty("size", out var s) ? s.GetInt64() : 0;
-                if (url.Length > 0 && size > 0) return new Offer(tag, name, url, size);
+                // "digest": "sha256:<hex>" — present on every asset the API
+                // has served since 2025, absent on older uploads.
+                string digest = a.TryGetProperty("digest", out var d) ? d.GetString() ?? "" : "";
+                string sha = digest.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase)
+                             ? digest["sha256:".Length..].Trim().ToLowerInvariant() : "";
+                if (url.Length > 0 && size > 0) return new Offer(tag, name, url, size, sha);
             }
             return null;
         }
@@ -141,6 +150,19 @@ public static class ApEngineSource
             string sha;
             using (var fs = File.OpenRead(dest))
                 sha = Convert.ToHexString(await SHA256.HashDataAsync(fs, ct)).ToLowerInvariant();
+
+            // The size said the download finished; the hash says it is the
+            // file the project published and not something that answered in
+            // its place. Only checked when the release stated one.
+            if (offer.Sha256.Length > 0
+                && !string.Equals(sha, offer.Sha256, StringComparison.OrdinalIgnoreCase))
+            {
+                File.Delete(dest);
+                return new Fetched(false,
+                    $"The downloaded {offer.AssetName} does not match the hash the "
+                  + "release publishes. Nothing was kept — install by hand from "
+                  + ProjectPage, null, null);
+            }
 
             return new Fetched(true,
                 $"Archipelago {offer.Version} installer downloaded. Run it to install "

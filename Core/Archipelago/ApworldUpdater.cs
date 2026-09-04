@@ -196,6 +196,27 @@ public static class ApworldUpdater
     /// Cached per process: 70-odd small zips, and the answer cannot change
     /// while the launcher is running.
     private static HashSet<string>? _bundled;
+    private static HashSet<string>? _bundledModules;
+
+    /// The one sentence CheckAsync uses for a bundled world, so callers that
+    /// want to count those separately compare against a constant rather than
+    /// a copy of the prose.
+    public const string BundledDetail = "Archipelago already ships this world";
+
+    /// The folder the engine keeps its own worlds in, or null without an engine.
+    private static string? BundledDir(string? engineRootOverride)
+    {
+        string? root = engineRootOverride;
+        if (root == null)
+        {
+            var s = SettingsStore.Load();
+            root = ApEngine.Discover(
+                string.IsNullOrWhiteSpace(s.ApEnginePath) ? null : s.ApEnginePath)?.Root;
+        }
+        if (root == null) return null;
+        string dir = Path.Combine(root, "lib", "worlds");
+        return Directory.Exists(dir) ? dir : null;
+    }
 
     public static HashSet<string> BundledGames(string? engineRootOverride = null)
     {
@@ -203,17 +224,8 @@ public static class ApworldUpdater
         var found = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         try
         {
-            string? root = engineRootOverride;
-            if (root == null)
-            {
-                var s = SettingsStore.Load();
-                root = ApEngine.Discover(
-                    string.IsNullOrWhiteSpace(s.ApEnginePath) ? null : s.ApEnginePath)?.Root;
-            }
-            if (root == null) return _bundled = found;
-
-            string dir = Path.Combine(root, "lib", "worlds");
-            if (!Directory.Exists(dir)) return _bundled = found;
+            string? dir = BundledDir(engineRootOverride);
+            if (dir == null) return _bundled = found;
 
             foreach (string f in Directory.EnumerateFiles(dir, "*.apworld"))
             {
@@ -229,6 +241,40 @@ public static class ApworldUpdater
         catch (Exception) { /* no engine, no bundled list — download as before */ }
         if (engineRootOverride == null) _bundled = found;
         return found;
+    }
+
+    /// The FILE stems the engine ships — "musedash", "mm3" — beside the game
+    /// names above.
+    ///
+    /// ⚠ A second signal, because the first has a hole: a bundled world with no
+    /// archipelago.json inside declares no game name, and a catalogue row for
+    /// it would sail past BundledGames. Archipelago imports every world as
+    /// `worlds.<stem>`, so two files with one stem are one module twice, and
+    /// the stem alone is enough to know the download would be dead on arrival.
+    public static HashSet<string> BundledModules(string? engineRootOverride = null)
+    {
+        if (_bundledModules != null && engineRootOverride == null) return _bundledModules;
+        var found = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            string? dir = BundledDir(engineRootOverride);
+            if (dir != null)
+                foreach (string f in Directory.EnumerateFiles(dir, "*.apworld"))
+                    found.Add(Path.GetFileNameWithoutExtension(f));
+        }
+        catch (Exception) { }
+        if (engineRootOverride == null) _bundledModules = found;
+        return found;
+    }
+
+    /// Does the engine already carry this catalogue row's world, by either
+    /// name it goes under?
+    public static bool IsBundled(ApworldEntry entry, string? engineRootOverride = null)
+    {
+        if (entry.ApWorldName is { Length: > 0 } name
+            && BundledGames(engineRootOverride).Contains(name)) return true;
+        string stem = Path.GetFileNameWithoutExtension(entry.Asset ?? "");
+        return stem.Length > 0 && BundledModules(engineRootOverride).Contains(stem);
     }
 
     public static async Task<ApworldStatus> CheckAsync(string gameId,
@@ -255,10 +301,8 @@ public static class ApworldUpdater
         //
         // Measured on a real engine: three catalogue rows (Mega Man 3,
         // Satisfactory, Shapez) name games Archipelago 0.6.7 bundles.
-        if (entry.ApWorldName is { Length: > 0 } name
-            && BundledGames().Contains(name))
-            return new(ApworldState.None,
-                       "Archipelago already ships this world", entry, null);
+        if (IsBundled(entry))
+            return new(ApworldState.None, BundledDetail, entry, null);
 
         string path = Path.Combine(worlds, entry.Asset);
         var rec = ApworldRecord.Get(gameId);
@@ -304,6 +348,16 @@ public static class ApworldUpdater
         var status = await CheckAsync(gameId, ct).ConfigureAwait(false);
         if (status.Entry is not { } entry)
             return "There is no world for London to fetch for this game.";
+
+        // ⚠⚠ CheckAsync hands the entry back even when it says None, so a
+        // bundled world reached this far with a perfectly good download
+        // address. Every button hides itself on !Actionable, but a refusal
+        // that lives only in the buttons is a refusal the next caller forgets.
+        // The download itself has to say no.
+        if (status.State == ApworldState.None)
+            return status.Detail.Length > 0
+                ? $"{entry.Asset} was not fetched — {status.Detail}."
+                : "There is no world for London to fetch for this game.";
         string? worlds = WorldsDir();
         if (worlds == null)
             return "No Archipelago engine is set up yet — do that under Multiworld first.";
