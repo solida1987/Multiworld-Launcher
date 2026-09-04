@@ -46,8 +46,15 @@ public static class PluginTrustStore
     private static void Save(Dictionary<string, PluginTrustRecord> map)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
-        File.WriteAllText(FilePath,
+        // Written beside and swapped in, never in place. An unclean exit in
+        // the middle of a plain write leaves a zero-byte file (seen on this
+        // project, 3 September: 4299 NUL bytes that listed as a normal size),
+        // and a zero-byte trust store means NO plugin is approved, NO plugin
+        // loads, and the sidebar says the library is empty.
+        string tmp = FilePath + ".tmp";
+        File.WriteAllText(tmp,
             JsonSerializer.Serialize(map, new JsonSerializerOptions { WriteIndented = true }));
+        File.Move(tmp, FilePath, overwrite: true);
     }
 
     /// Record that the player accepted exactly these bytes.
@@ -80,6 +87,13 @@ public static class PluginTrustStore
     public static PluginTrustRecord? Get(string gameId)
     {
         lock (Gate) { return Load().TryGetValue(gameId, out var r) ? r : null; }
+    }
+
+    /// Every approval on record. The installed-plugin registry seeds itself
+    /// from this once, on machines that installed plugins before it existed.
+    public static IReadOnlyDictionary<string, PluginTrustRecord> All()
+    {
+        lock (Gate) { return Load(); }
     }
 
     /// Why a plugin may not load, or null when it may.

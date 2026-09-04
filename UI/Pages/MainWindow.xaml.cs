@@ -349,6 +349,12 @@ public partial class MainWindow : Window
             AppendLog("[Plugin] " + problem);
         App.ClearPluginLoadProblems();
 
+        // Then put back whatever London installed that did not load. The
+        // registry is seeded from the trust store the first time, so machines
+        // that installed plugins before it existed are covered too.
+        Core.Plugins.InstalledPluginRegistry.SeedFromTrustStoreIfMissing();
+        _ = RestoreMissingPluginsAsync();
+
         // Bind the DataGrid to the observable collection
         TrackerGrid.ItemsSource = _trackerView;
 
@@ -1043,9 +1049,18 @@ public partial class MainWindow : Window
 
         if (!plugins.Any())
         {
+            // An empty sidebar has two very different causes, and only one of
+            // them is "nothing here". When London's own registry says plugins
+            // should be present, say THAT — the other wording sent a player
+            // off to re-add a plugin the launcher was about to put back.
+            string emptyText = _missingPluginCount > 0
+                ? (_missingPluginCount == 1
+                    ? "One of your games has no working plugin.\nLondon is putting it back — see the log."
+                    : $"{_missingPluginCount} of your games have no working plugin.\nLondon is putting them back — see the log.")
+                : "Your library is empty.\nAdd a plugin to put a game here.";
             var emptyMsg = new TextBlock
             {
-                Text         = "Your library is empty.\nAdd a plugin to put a game here.",
+                Text         = emptyText,
                 FontSize     = 11,
                 Foreground   = (Brush)FindResource("BrushMuted"),
                 TextWrapping = TextWrapping.Wrap,
@@ -10837,6 +10852,7 @@ public partial class MainWindow : Window
         }
 
         LibraryStore.Remove(plugin.GameId);
+        Core.Plugins.InstalledPluginRegistry.Forget(plugin.GameId);   // uninstalled on purpose: not missing
         RebuildGameList();
         ToastService.Show("Uninstalled", plugin.DisplayName
             + (failed.Count > 0

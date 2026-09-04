@@ -49,6 +49,12 @@ public static class PluginInstallFlow
     /// screens live in the plugin, and a repair left waiting behind a modal is
     /// the state the player was already stuck in. Anybody else's is offered.
     ///
+    /// Put back a plugin London installed before and that did not load this
+    /// time. First-party only — the caller has already decided that — so no
+    /// dialog: the player approved this game once, and a start-up where it
+    /// has silently vanished is not the moment to make them do it again.
+    public static Outcome Restore(PluginCandidate candidate) => Install(candidate);
+
     public static Outcome ApplyRepair(Window? owner, LegacyPluginRepair.Candidate c)
     {
         var candidate = PluginPackage.Inspect(c.PackagePath);
@@ -113,6 +119,11 @@ public static class PluginInstallFlow
         // unload this one. Register() alone left a registration nothing could
         // remove, and every later update in the session failed on it.
         GameRegistry.RegisterLoaded(loaded);
+
+        // And written down as installed, separately from trust and from the
+        // library, so a start where this plugin fails to load can tell that
+        // it is MISSING rather than merely absent — and put it back.
+        InstalledPluginRegistry.Record(m);
 
         // The new object knows nothing until asked -- InstalledVersion is null
         // until its own version check has read the disk -- and every route
@@ -248,6 +259,7 @@ public static class PluginInstallFlow
     {
         GameRegistry.UnloadFromDisk(gameId);
         PluginTrustStore.Revoke(gameId);
+        InstalledPluginRegistry.Forget(gameId);     // the player's own decision — the one thing that clears it
         try
         {
             string dir = PluginPackage.DirectoryFor(gameId);
